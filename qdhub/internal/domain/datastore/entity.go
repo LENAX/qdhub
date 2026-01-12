@@ -216,3 +216,44 @@ const (
 func (ss SchemaStatus) String() string {
 	return string(ss)
 }
+
+// ==================== 独立实体 ====================
+
+// DataTypeMappingRule represents data type mapping rule (independent entity).
+// Belongs to: DataStore domain
+// Responsibilities:
+//   - Manage mapping rules from data source field types to target database types
+type DataTypeMappingRule struct {
+	ID             shared.ID
+	DataSourceType string
+	SourceType     string
+	TargetDBType   string
+	TargetType     string
+	FieldPattern   *string
+	Priority       int
+	IsDefault      bool
+	CreatedAt      shared.Timestamp
+	UpdatedAt      shared.Timestamp
+}
+
+// NewDataTypeMappingRule creates a new DataTypeMappingRule.
+func NewDataTypeMappingRule(dataSourceType, sourceType, targetDBType, targetType string, priority int, isDefault bool) *DataTypeMappingRule {
+	now := shared.Now()
+	return &DataTypeMappingRule{
+		ID:             shared.NewID(),
+		DataSourceType: dataSourceType,
+		SourceType:     sourceType,
+		TargetDBType:   targetDBType,
+		TargetType:     targetType,
+		Priority:       priority,
+		IsDefault:      isDefault,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+}
+
+// SetFieldPattern sets the field pattern for the mapping rule.
+func (rule *DataTypeMappingRule) SetFieldPattern(pattern string) {
+	rule.FieldPattern = &pattern
+	rule.UpdatedAt = shared.Now()
+}

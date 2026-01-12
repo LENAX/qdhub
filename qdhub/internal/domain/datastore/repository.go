@@ -21,3 +21,31 @@ type TableSchemaRepository interface {
 	Update(schema *TableSchema) error
 	Delete(id shared.ID) error
 }
+
+// DataTypeMappingRuleRepository defines the repository interface for DataTypeMappingRule.
+type DataTypeMappingRuleRepository interface {
+	// Create creates a new mapping rule.
+	Create(rule *DataTypeMappingRule) error
+
+	// Get retrieves a mapping rule by ID.
+	Get(id shared.ID) (*DataTypeMappingRule, error)
+
+	// GetBySourceAndTarget retrieves rules by source and target types.
+	// Returns rules ordered by priority (descending).
+	GetBySourceAndTarget(dataSourceType, targetDBType string) ([]*DataTypeMappingRule, error)
+
+	// SaveBatch saves multiple rules in a batch.
+	SaveBatch(rules []*DataTypeMappingRule) error
+
+	// InitDefaultRules initializes default mapping rules.
+	InitDefaultRules() error
+
+	// List retrieves all rules.
+	List() ([]*DataTypeMappingRule, error)
+
+	// Update updates an existing rule.
+	Update(rule *DataTypeMappingRule) error
+
+	// Delete deletes a rule by ID.
+	Delete(id shared.ID) error
+}

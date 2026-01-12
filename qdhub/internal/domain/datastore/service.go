@@ -1,6 +1,8 @@
 // Package datastore contains the datastore domain services.
 package datastore
 
+import "regexp"
+
 // ==================== 领域服务接口（纯业务逻辑）====================
 
 // SchemaValidator defines domain service for schema validation.
@@ -29,45 +31,27 @@ type SchemaGenerator interface {
 	ValidateDDL(ddl string) error
 }
 
-// ==================== 外部依赖接口（领域定义，基础设施实现）====================
+// TypeMappingService defines domain service for type mapping.
+// Implementation: datastore/service_impl.go
+type TypeMappingService interface {
+	// FindBestMatchingRule finds the best matching type mapping rule.
+	// Priority: 1. Field pattern match 2. Source type match
+	FindBestMatchingRule(rules []*DataTypeMappingRule, fieldName, sourceType string) *DataTypeMappingRule
 
-// QuantDBAdapter defines the interface for quantitative database operations.
-// Implementation: infrastructure/quantdb/duckdb/, infrastructure/quantdb/clickhouse/
-type QuantDBAdapter interface {
-	// Connect establishes a connection to the database.
-	Connect(dsn string) error
-
-	// Close closes the database connection.
-	Close() error
-
-	// CreateTable creates a table based on schema definition.
-	CreateTable(schema *TableSchema) error
-
-	// DropTable drops a table.
-	DropTable(tableName string) error
-
-	// TableExists checks if a table exists.
-	TableExists(tableName string) (bool, error)
-
-	// GetTableInfo retrieves table information.
-	GetTableInfo(tableName string) (*TableSchema, error)
-
-	// Execute executes a SQL statement.
-	Execute(sql string) error
-
-	// Query executes a query and returns results.
-	Query(sql string) ([]map[string]interface{}, error)
-
-	// GetType returns the database type.
-	GetType() DataStoreType
+	// ValidateMappingRule validates a mapping rule.
+	ValidateMappingRule(rule *DataTypeMappingRule) error
 }
 
-// QuantDBAdapterFactory defines the interface for creating QuantDB adapters.
-// Implementation: infrastructure/quantdb/
-type QuantDBAdapterFactory interface {
-	// GetAdapter returns an adapter for the given data store type.
-	GetAdapter(storeType DataStoreType) (QuantDBAdapter, error)
+// ==================== 内部工具函数 ====================
 
-	// RegisterAdapter registers an adapter.
-	RegisterAdapter(storeType DataStoreType, adapter QuantDBAdapter)
+// matchFieldPattern checks if field name matches the pattern.
+func matchFieldPattern(pattern, fieldName string) bool {
+	if pattern == "" {
+		return false
+	}
+	matched, err := regexp.MatchString(pattern, fieldName)
+	if err != nil {
+		return false
+	}
+	return matched
 }
