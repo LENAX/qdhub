@@ -182,12 +182,12 @@ qdhub/
 
 | 领域 | 聚合根 | 聚合内实体 | 值对象 | 独立实体 |
 |------|--------|-----------|--------|----------|
-| **Metadata** | `DataSource` | APICategory, APIMetadata, Token | ParamMeta, FieldMeta, RateLimit | - |
-| **QuantDataStore** | `QuantDataStore` | TableSchema | ColumnDef, IndexDef | DataTypeMappingRule |
+| **Metadata** | `DataSource` | APICategory, APIMetadata, Token | ParamMeta, FieldMeta, RateLimit | DataTypeMappingRule |
+| **QuantDataStore** | `QuantDataStore` | TableSchema | ColumnDef, IndexDef | - |
 | **Sync** | `SyncJob` | SyncExecution | ParamRule | - |
 | **Workflow** | `WorkflowDefinition` | WorkflowInstance, TaskInstance | - | - |
 
-> **独立实体**：不属于任何聚合根，有独立的生命周期和仓储，但归属于特定领域管理。
+> **独立实体**：不属于任何聚合根，有独立的生命周期和仓储，但归属于特定领域管理。`DataTypeMappingRule` 归属 Metadata 领域，因为它描述的是数据源字段类型的映射规则。
 
 > **聚合根职责**：聚合根是聚合的入口点，外部只能通过聚合根访问聚合内的实体。聚合根负责维护聚合内的一致性。
 
@@ -322,6 +322,46 @@ type DocumentParserFactory interface {
     
     // RegisterParser 注册解析器
     RegisterParser(parser DocumentParser)
+}
+
+// ==================== 独立实体 ====================
+
+// DataTypeMappingRule 数据类型映射规则（独立实体）
+// 归属：Metadata 领域（描述数据源字段类型的映射规则）
+// 说明：不属于任何聚合根，有独立的生命周期
+// 职责：管理数据源字段类型到目标数据库类型的映射规则
+// 使用场景：
+//   - 根据 API 元数据生成 TableSchema 时，查询匹配的映射规则
+//   - 支持按字段名模式（正则）进行精确类型映射
+//   - 优先级高的规则优先匹配
+type DataTypeMappingRule struct {
+    ID             string        `db:"id"`
+    DataSourceType string        `db:"data_source_type"` // tushare, akshare 等
+    SourceType     string        `db:"source_type"`      // 源数据类型：str, float, int, date...
+    TargetDBType   DataStoreType `db:"target_db_type"`   // 目标数据库类型
+    TargetType     string        `db:"target_type"`      // 目标数据类型：VARCHAR, DOUBLE...
+    FieldPattern   *string       `db:"field_pattern"`    // 可选，字段名正则模式
+    Priority       int           `db:"priority"`         // 优先级，越高越优先匹配
+    IsDefault      bool          `db:"is_default"`       // 是否系统默认规则
+    CreatedAt      time.Time     `db:"created_at"`
+    UpdatedAt      time.Time     `db:"updated_at"`
+}
+
+// DataTypeMappingRuleRepository 类型映射规则仓储接口
+type DataTypeMappingRuleRepository interface {
+    // GetBySourceAndTarget 根据数据源类型和目标数据库类型获取规则列表
+    // 返回按优先级降序排列的规则
+    GetBySourceAndTarget(ctx context.Context, dataSourceType string, targetDB DataStoreType) ([]DataTypeMappingRule, error)
+    
+    // GetMatchingRule 获取匹配的规则
+    // 参数：数据源类型、源字段类型、目标数据库类型、字段名
+    GetMatchingRule(ctx context.Context, dataSourceType, sourceType string, targetDB DataStoreType, fieldName string) (*DataTypeMappingRule, error)
+    
+    // SaveBatch 批量保存规则
+    SaveBatch(ctx context.Context, rules []DataTypeMappingRule) error
+    
+    // InitDefaultRules 初始化默认规则
+    InitDefaultRules(ctx context.Context) error
 }
 ```
 
@@ -1042,9 +1082,540 @@ type InstanceProgress struct {
 
 ---
 
-## 5. 数据访问层设计
+## 5. 应用服务层设计
 
-### 5.1 通用 Repository 接口
+> **应用层职责**：协调领域对象完成用例，管理事务边界，不包含业务逻辑。  
+> **与领域层关系**：应用服务调用领域服务，领域服务包含核心业务逻辑。
+
+### 5.1 应用服务概览
+
+| 应用服务 | 职责 | 依赖的领域服务 |
+|---------|------|---------------|
+| `MetadataAppService` | 元数据管理用例编排 | MetadataService |
+| `DataStoreAppService` | 数据存储管理用例编排 | QuantDataStoreService |
+| `SyncAppService` | 同步任务管理用例编排 | SyncService, WorkflowService |
+| `WorkflowAppService` | 工作流管理用例编排 | WorkflowService |
+
+### 5.2 元数据应用服务 (MetadataAppService)
+
+```go
+// MetadataAppService 元数据应用服务
+// 职责：编排元数据管理相关用例，管理事务边界
+type MetadataAppService interface {
+    // ==================== 数据源管理用例 ====================
+    
+    // CreateDataSource 创建数据源
+    // 用例流程：
+    //   1. 验证输入参数
+    //   2. 调用领域服务注册数据源
+    //   3. 返回创建结果
+    CreateDataSource(ctx context.Context, cmd CreateDataSourceCmd) (*DataSourceDTO, error)
+    
+    // GetDataSource 获取数据源详情
+    GetDataSource(ctx context.Context, id string) (*DataSourceDTO, error)
+    
+    // ListDataSources 列出所有数据源
+    ListDataSources(ctx context.Context) ([]DataSourceDTO, error)
+    
+    // DeleteDataSource 删除数据源
+    // 用例流程：
+    //   1. 检查是否有关联的同步任务
+    //   2. 事务内删除数据源及其关联数据
+    DeleteDataSource(ctx context.Context, id string) error
+    
+    // ==================== 元数据刷新用例 ====================
+    
+    // RefreshMetadata 刷新数据源元数据
+    // 用例流程：
+    //   1. 验证数据源存在且 Token 有效
+    //   2. 调用领域服务触发刷新工作流
+    //   3. 返回工作流实例 ID
+    RefreshMetadata(ctx context.Context, dataSourceID string) (*RefreshResultDTO, error)
+    
+    // GetRefreshProgress 获取刷新进度
+    GetRefreshProgress(ctx context.Context, workflowInstID string) (*RefreshProgressDTO, error)
+    
+    // ==================== API 查询用例 ====================
+    
+    // GetAPIDetail 获取 API 详情
+    GetAPIDetail(ctx context.Context, apiID string) (*APIMetadataDTO, error)
+    
+    // ListAPIs 列出 API（支持分页、筛选）
+    ListAPIs(ctx context.Context, query ListAPIsQuery) (*PagedResult[APIMetadataDTO], error)
+    
+    // SearchAPIs 搜索 API
+    SearchAPIs(ctx context.Context, keyword string) ([]APIMetadataDTO, error)
+    
+    // ==================== Token 管理用例 ====================
+    
+    // SetToken 设置数据源 Token
+    // 用例流程：
+    //   1. 加密 Token
+    //   2. 调用领域服务保存
+    //   3. 可选：验证 Token 有效性
+    SetToken(ctx context.Context, dataSourceID string, token string, validate bool) error
+    
+    // GetTokenStatus 获取 Token 状态
+    GetTokenStatus(ctx context.Context, dataSourceID string) (*TokenStatusDTO, error)
+}
+
+// ==================== 命令与查询对象 ====================
+
+// CreateDataSourceCmd 创建数据源命令
+type CreateDataSourceCmd struct {
+    Name        string `json:"name" validate:"required"`
+    Description string `json:"description"`
+    BaseURL     string `json:"base_url" validate:"required,url"`
+    DocURL      string `json:"doc_url" validate:"required,url"`
+}
+
+// ListAPIsQuery API 列表查询
+type ListAPIsQuery struct {
+    DataSourceID *string `json:"data_source_id"`
+    CategoryID   *string `json:"category_id"`
+    Keyword      *string `json:"keyword"`
+    Status       *string `json:"status"`
+    Page         int     `json:"page" validate:"min=1"`
+    PageSize     int     `json:"page_size" validate:"min=1,max=100"`
+}
+```
+
+### 5.3 数据存储应用服务 (DataStoreAppService)
+
+```go
+// DataStoreAppService 数据存储应用服务
+// 职责：编排数据存储管理相关用例
+type DataStoreAppService interface {
+    // ==================== 数据存储配置用例 ====================
+    
+    // CreateDataStore 创建数据存储配置
+    // 用例流程：
+    //   1. 验证输入参数
+    //   2. 测试连接有效性
+    //   3. 加密 DSN
+    //   4. 创建配置记录
+    CreateDataStore(ctx context.Context, cmd CreateDataStoreCmd) (*DataStoreDTO, error)
+    
+    // GetDataStore 获取数据存储详情
+    GetDataStore(ctx context.Context, id string) (*DataStoreDTO, error)
+    
+    // ListDataStores 列出所有数据存储
+    ListDataStores(ctx context.Context) ([]DataStoreDTO, error)
+    
+    // TestConnection 测试数据存储连接
+    TestConnection(ctx context.Context, id string) (*ConnectionTestResult, error)
+    
+    // DeleteDataStore 删除数据存储
+    // 用例流程：
+    //   1. 检查是否有关联的同步任务
+    //   2. 删除配置及关联的表结构定义
+    DeleteDataStore(ctx context.Context, id string) error
+    
+    // ==================== 表结构生成用例 ====================
+    
+    // GenerateSchema 生成单个 API 的表结构
+    // 用例流程：
+    //   1. 获取 API 元数据
+    //   2. 获取类型映射规则
+    //   3. 调用领域服务生成表结构
+    GenerateSchema(ctx context.Context, cmd GenerateSchemaCmd) (*TableSchemaDTO, error)
+    
+    // GenerateSchemaBatch 批量生成表结构
+    // 用例流程：
+    //   1. 获取数据源下所有 API
+    //   2. 批量生成表结构
+    //   3. 返回生成结果
+    GenerateSchemaBatch(ctx context.Context, cmd GenerateSchemaBatchCmd) (*BatchResultDTO, error)
+    
+    // GetSchema 获取表结构详情
+    GetSchema(ctx context.Context, schemaID string) (*TableSchemaDTO, error)
+    
+    // ListSchemas 列出数据存储的所有表结构
+    ListSchemas(ctx context.Context, dataStoreID string) ([]TableSchemaDTO, error)
+    
+    // ==================== 建表用例 ====================
+    
+    // CreateTable 执行建表
+    // 用例流程：
+    //   1. 获取表结构定义
+    //   2. 获取数据存储连接
+    //   3. 执行 DDL
+    //   4. 更新表结构状态
+    CreateTable(ctx context.Context, schemaID string) error
+    
+    // CreateTableBatch 批量建表
+    CreateTableBatch(ctx context.Context, schemaIDs []string) (*BatchResultDTO, error)
+    
+    // DropTable 删除表
+    DropTable(ctx context.Context, schemaID string) error
+    
+    // ==================== 类型映射规则用例 ====================
+    
+    // ListMappingRules 列出类型映射规则
+    ListMappingRules(ctx context.Context, query MappingRuleQuery) ([]DataTypeMappingRuleDTO, error)
+    
+    // CreateMappingRule 创建自定义映射规则
+    CreateMappingRule(ctx context.Context, cmd CreateMappingRuleCmd) (*DataTypeMappingRuleDTO, error)
+    
+    // DeleteMappingRule 删除映射规则
+    DeleteMappingRule(ctx context.Context, ruleID string) error
+}
+
+// ==================== 命令与查询对象 ====================
+
+// CreateDataStoreCmd 创建数据存储命令
+type CreateDataStoreCmd struct {
+    Name        string `json:"name" validate:"required"`
+    Type        string `json:"type" validate:"required,oneof=duckdb clickhouse postgres"`
+    DSN         string `json:"dsn"`
+    StoragePath string `json:"storage_path"`
+}
+
+// GenerateSchemaCmd 生成表结构命令
+type GenerateSchemaCmd struct {
+    APIMetaID   string `json:"api_meta_id" validate:"required"`
+    DataStoreID string `json:"data_store_id" validate:"required"`
+}
+
+// GenerateSchemaBatchCmd 批量生成表结构命令
+type GenerateSchemaBatchCmd struct {
+    DataSourceID string `json:"data_source_id" validate:"required"`
+    DataStoreID  string `json:"data_store_id" validate:"required"`
+}
+
+// MappingRuleQuery 映射规则查询
+type MappingRuleQuery struct {
+    DataSourceType *string `json:"data_source_type"`
+    TargetDBType   *string `json:"target_db_type"`
+}
+
+// CreateMappingRuleCmd 创建映射规则命令
+type CreateMappingRuleCmd struct {
+    DataSourceType string  `json:"data_source_type" validate:"required"`
+    SourceType     string  `json:"source_type" validate:"required"`
+    TargetDBType   string  `json:"target_db_type" validate:"required"`
+    TargetType     string  `json:"target_type" validate:"required"`
+    FieldPattern   *string `json:"field_pattern"`
+    Priority       int     `json:"priority"`
+}
+```
+
+### 5.4 同步任务应用服务 (SyncAppService)
+
+```go
+// SyncAppService 同步任务应用服务
+// 职责：编排同步任务管理相关用例
+type SyncAppService interface {
+    // ==================== 同步任务管理用例 ====================
+    
+    // CreateSyncJob 创建同步任务
+    // 用例流程：
+    //   1. 验证 API 和数据存储存在
+    //   2. 验证表结构已创建
+    //   3. 创建或关联工作流定义
+    //   4. 创建同步任务
+    //   5. 如有 Cron 表达式，注册调度器
+    CreateSyncJob(ctx context.Context, cmd CreateSyncJobCmd) (*SyncJobDTO, error)
+    
+    // GetSyncJob 获取同步任务详情
+    GetSyncJob(ctx context.Context, id string) (*SyncJobDTO, error)
+    
+    // ListSyncJobs 列出同步任务
+    ListSyncJobs(ctx context.Context, query ListSyncJobsQuery) (*PagedResult[SyncJobDTO], error)
+    
+    // UpdateSyncJob 更新同步任务
+    // 用例流程：
+    //   1. 更新任务配置
+    //   2. 如 Cron 表达式变更，更新调度器
+    UpdateSyncJob(ctx context.Context, id string, cmd UpdateSyncJobCmd) (*SyncJobDTO, error)
+    
+    // DeleteSyncJob 删除同步任务
+    // 用例流程：
+    //   1. 取消调度器注册
+    //   2. 删除任务（保留历史记录）
+    DeleteSyncJob(ctx context.Context, id string) error
+    
+    // ==================== 任务控制用例 ====================
+    
+    // EnableSyncJob 启用同步任务
+    // 用例流程：
+    //   1. 更新任务状态
+    //   2. 注册 Cron 调度（如有）
+    EnableSyncJob(ctx context.Context, id string) error
+    
+    // DisableSyncJob 禁用同步任务
+    // 用例流程：
+    //   1. 更新任务状态
+    //   2. 取消 Cron 调度
+    DisableSyncJob(ctx context.Context, id string) error
+    
+    // ==================== 同步执行用例 ====================
+    
+    // TriggerSync 手动触发同步
+    // 用例流程：
+    //   1. 创建执行记录
+    //   2. 构建工作流实例
+    //   3. 提交到 Task Engine
+    //   4. 返回执行信息
+    TriggerSync(ctx context.Context, jobID string) (*SyncExecutionDTO, error)
+    
+    // TriggerSyncWithParams 使用自定义参数触发同步
+    TriggerSyncWithParams(ctx context.Context, jobID string, params map[string]any) (*SyncExecutionDTO, error)
+    
+    // GetExecutionProgress 获取执行进度
+    GetExecutionProgress(ctx context.Context, execID string) (*ExecutionProgressDTO, error)
+    
+    // ListExecutions 列出执行历史
+    ListExecutions(ctx context.Context, jobID string, limit int) ([]SyncExecutionDTO, error)
+    
+    // CancelExecution 取消执行
+    CancelExecution(ctx context.Context, execID string) error
+    
+    // ==================== 参数预览用例 ====================
+    
+    // PreviewParams 预览参数组合
+    // 根据参数规则生成将要执行的参数列表
+    PreviewParams(ctx context.Context, jobID string) ([]map[string]any, error)
+}
+
+// ==================== 命令与查询对象 ====================
+
+// CreateSyncJobCmd 创建同步任务命令
+type CreateSyncJobCmd struct {
+    Name           string         `json:"name" validate:"required"`
+    Description    string         `json:"description"`
+    APIMetaID      string         `json:"api_meta_id" validate:"required"`
+    DataStoreID    string         `json:"data_store_id" validate:"required"`
+    Mode           string         `json:"mode" validate:"required,oneof=batch realtime"`
+    CronExpression *string        `json:"cron_expression"`
+    Params         map[string]any `json:"params"`
+    ParamRules     []ParamRule    `json:"param_rules"`
+}
+
+// UpdateSyncJobCmd 更新同步任务命令
+type UpdateSyncJobCmd struct {
+    Name           *string        `json:"name"`
+    Description    *string        `json:"description"`
+    CronExpression *string        `json:"cron_expression"`
+    Params         map[string]any `json:"params"`
+    ParamRules     []ParamRule    `json:"param_rules"`
+}
+
+// ListSyncJobsQuery 同步任务列表查询
+type ListSyncJobsQuery struct {
+    APIMetaID   *string `json:"api_meta_id"`
+    DataStoreID *string `json:"data_store_id"`
+    Mode        *string `json:"mode"`
+    Status      *string `json:"status"`
+    Page        int     `json:"page" validate:"min=1"`
+    PageSize    int     `json:"page_size" validate:"min=1,max=100"`
+}
+```
+
+### 5.5 工作流应用服务 (WorkflowAppService)
+
+```go
+// WorkflowAppService 工作流应用服务
+// 职责：编排工作流管理相关用例
+type WorkflowAppService interface {
+    // ==================== 工作流定义用例 ====================
+    
+    // CreateWorkflowDefinition 创建工作流定义
+    CreateWorkflowDefinition(ctx context.Context, cmd CreateWorkflowDefCmd) (*WorkflowDefDTO, error)
+    
+    // GetWorkflowDefinition 获取工作流定义
+    GetWorkflowDefinition(ctx context.Context, id string) (*WorkflowDefDTO, error)
+    
+    // ListWorkflowDefinitions 列出工作流定义
+    ListWorkflowDefinitions(ctx context.Context, category *string) ([]WorkflowDefDTO, error)
+    
+    // UpdateWorkflowDefinition 更新工作流定义
+    UpdateWorkflowDefinition(ctx context.Context, id string, cmd UpdateWorkflowDefCmd) (*WorkflowDefDTO, error)
+    
+    // DeleteWorkflowDefinition 删除工作流定义
+    DeleteWorkflowDefinition(ctx context.Context, id string) error
+    
+    // EnableWorkflowDefinition 启用工作流定义
+    EnableWorkflowDefinition(ctx context.Context, id string) error
+    
+    // DisableWorkflowDefinition 禁用工作流定义
+    DisableWorkflowDefinition(ctx context.Context, id string) error
+    
+    // ==================== 工作流执行用例 ====================
+    
+    // ExecuteWorkflow 执行工作流
+    // 用例流程：
+    //   1. 获取工作流定义
+    //   2. 验证参数
+    //   3. 创建工作流实例
+    //   4. 提交到 Task Engine
+    ExecuteWorkflow(ctx context.Context, defID string, params map[string]any) (*WorkflowInstanceDTO, error)
+    
+    // GetInstance 获取工作流实例
+    GetInstance(ctx context.Context, instID string) (*WorkflowInstanceDTO, error)
+    
+    // GetInstanceWithTasks 获取实例及任务列表
+    GetInstanceWithTasks(ctx context.Context, instID string) (*WorkflowInstanceDetailDTO, error)
+    
+    // ListInstances 列出工作流实例
+    ListInstances(ctx context.Context, query ListInstancesQuery) (*PagedResult[WorkflowInstanceDTO], error)
+    
+    // GetInstanceProgress 获取实例进度
+    GetInstanceProgress(ctx context.Context, instID string) (*InstanceProgressDTO, error)
+    
+    // ==================== 实例控制用例 ====================
+    
+    // PauseInstance 暂停实例
+    PauseInstance(ctx context.Context, instID string) error
+    
+    // ResumeInstance 恢复实例
+    ResumeInstance(ctx context.Context, instID string) error
+    
+    // CancelInstance 取消实例
+    CancelInstance(ctx context.Context, instID string) error
+    
+    // RetryInstance 重试失败的实例
+    RetryInstance(ctx context.Context, instID string) error
+}
+
+// ==================== 命令与查询对象 ====================
+
+// CreateWorkflowDefCmd 创建工作流定义命令
+type CreateWorkflowDefCmd struct {
+    Name           string `json:"name" validate:"required"`
+    Description    string `json:"description"`
+    Category       string `json:"category" validate:"required,oneof=metadata sync custom"`
+    DefinitionYAML string `json:"definition_yaml" validate:"required"`
+}
+
+// UpdateWorkflowDefCmd 更新工作流定义命令
+type UpdateWorkflowDefCmd struct {
+    Description    *string `json:"description"`
+    DefinitionYAML *string `json:"definition_yaml"`
+}
+
+// ListInstancesQuery 实例列表查询
+type ListInstancesQuery struct {
+    WorkflowDefID *string    `json:"workflow_def_id"`
+    Status        *string    `json:"status"`
+    TriggerType   *string    `json:"trigger_type"`
+    StartTimeFrom *time.Time `json:"start_time_from"`
+    StartTimeTo   *time.Time `json:"start_time_to"`
+    Page          int        `json:"page" validate:"min=1"`
+    PageSize      int        `json:"page_size" validate:"min=1,max=100"`
+}
+```
+
+### 5.6 通用 DTO 定义
+
+```go
+// ==================== 通用类型 ====================
+
+// PagedResult 分页结果
+type PagedResult[T any] struct {
+    Items      []T   `json:"items"`
+    Total      int64 `json:"total"`
+    Page       int   `json:"page"`
+    PageSize   int   `json:"page_size"`
+    TotalPages int   `json:"total_pages"`
+}
+
+// BatchResultDTO 批量操作结果
+type BatchResultDTO struct {
+    Total     int            `json:"total"`
+    Success   int            `json:"success"`
+    Failed    int            `json:"failed"`
+    Details   []BatchItemDTO `json:"details"`
+}
+
+// BatchItemDTO 批量操作项结果
+type BatchItemDTO struct {
+    ID      string  `json:"id"`
+    Success bool    `json:"success"`
+    Error   *string `json:"error,omitempty"`
+}
+
+// ConnectionTestResult 连接测试结果
+type ConnectionTestResult struct {
+    Success      bool    `json:"success"`
+    Message      string  `json:"message"`
+    LatencyMs    int64   `json:"latency_ms"`
+    ErrorMessage *string `json:"error_message,omitempty"`
+}
+```
+
+### 5.7 应用服务实现模式
+
+```go
+// 应用服务实现示例
+type syncAppServiceImpl struct {
+    syncService     SyncService           // 领域服务
+    workflowService WorkflowService       // 领域服务
+    syncRepo        SyncRepository        // 仓储
+    metadataRepo    MetadataRepository    // 仓储
+    dataStoreRepo   QuantDataStoreRepository // 仓储
+    txManager       TransactionManager    // 事务管理器
+}
+
+// CreateSyncJob 创建同步任务（示例实现）
+func (s *syncAppServiceImpl) CreateSyncJob(ctx context.Context, cmd CreateSyncJobCmd) (*SyncJobDTO, error) {
+    // 1. 验证 API 存在
+    api, err := s.metadataRepo.GetByID(ctx, cmd.APIMetaID)
+    if err != nil {
+        return nil, fmt.Errorf("api not found: %w", err)
+    }
+    
+    // 2. 验证数据存储存在
+    store, err := s.dataStoreRepo.GetByID(ctx, cmd.DataStoreID)
+    if err != nil {
+        return nil, fmt.Errorf("data store not found: %w", err)
+    }
+    
+    // 3. 事务内创建
+    var result *SyncJobDTO
+    err = s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+        // 3.1 获取或创建工作流定义
+        workflowDef, err := s.getOrCreateSyncWorkflow(txCtx, cmd.Mode)
+        if err != nil {
+            return err
+        }
+        
+        // 3.2 创建同步任务
+        job := &SyncJob{
+            Name:           cmd.Name,
+            Description:    cmd.Description,
+            APIMetaID:      cmd.APIMetaID,
+            DataStoreID:    cmd.DataStoreID,
+            WorkflowDefID:  workflowDef.ID,
+            Mode:           SyncMode(cmd.Mode),
+            CronExpression: cmd.CronExpression,
+            Params:         cmd.Params,
+            ParamRules:     cmd.ParamRules,
+            Status:         JobStatusDisabled,
+        }
+        
+        if err := s.syncService.CreateSyncJob(txCtx, job); err != nil {
+            return err
+        }
+        
+        result = toSyncJobDTO(job)
+        return nil
+    })
+    
+    return result, err
+}
+
+// TransactionManager 事务管理器接口
+type TransactionManager interface {
+    WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+```
+
+---
+
+## 6. 数据访问层设计
+
+### 6.1 通用 Repository 接口
 
 ```go
 // ==================== 通用 Repository ====================
@@ -1081,7 +1652,7 @@ type Repository[T Entity] interface {
 }
 ```
 
-### 5.2 DAO 层设计
+### 6.2 DAO 层设计
 
 ```go
 // ==================== 通用 DAO ====================
@@ -1185,7 +1756,7 @@ func (d *APIMetadataDAO) Search(ctx context.Context, keyword string) ([]APIMetad
 }
 ```
 
-### 5.3 Repository 实现（聚合根级别）
+### 6.3 Repository 实现（聚合根级别）
 
 ```go
 // ==================== 元数据 Repository ====================
@@ -1327,9 +1898,9 @@ type WorkflowRepository interface {
 
 ---
 
-## 6. 数据类型映射
+## 7. 数据类型映射
 
-### 6.1 数据源类型映射表
+### 7.1 数据源类型映射表
 
 从数据源 API 返回的字段类型，映射到目标数据库类型。
 
@@ -1354,7 +1925,7 @@ type WorkflowRepository interface {
 | `pct_*`, `*_pct`, `*_rate` | `DECIMAL(10,4)` | 百分比/比率 |
 | `*_price`, `open`, `high`, `low`, `close` | `DECIMAL(10,2)` | 价格类型 |
 
-### 6.2 类型映射实现
+### 7.2 类型映射实现
 
 ```go
 // ==================== 类型映射器 ====================
@@ -1486,7 +2057,7 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 }
 ```
 
-### 6.3 Go 与数据库类型映射
+### 7.3 Go 与数据库类型映射
 
 | Go 类型 | DuckDB 类型 | ClickHouse 类型 | PostgreSQL 类型 | SQLite 类型 |
 |---------|-------------|-----------------|-----------------|-------------|
@@ -1501,9 +2072,9 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 
 ---
 
-## 7. API 设计
+## 8. API 设计
 
-### 7.1 RESTful API 概览
+### 8.1 RESTful API 概览
 
 #### 元数据管理
 
@@ -1564,9 +2135,9 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 
 ---
 
-## 8. 工作流设计
+## 9. 工作流设计
 
-### 8.1 元数据刷新工作流
+### 9.1 元数据刷新工作流
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -1579,7 +2150,7 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 └──────────────┘     └──────────────┘     └──────────────┘
 ```
 
-### 8.2 批量数据同步工作流
+### 9.2 批量数据同步工作流
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
@@ -1592,7 +2163,7 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
                      └──────────────┘     └──────────────┘
 ```
 
-### 8.3 系统内置工作流
+### 9.3 系统内置工作流
 
 | 工作流名称 | 分类 | 说明 |
 |-----------|------|------|
@@ -1604,9 +2175,9 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 
 ---
 
-## 9. 数据库设计
+## 10. 数据库设计
 
-### 9.1 系统数据库表（SQLite/PostgreSQL）
+### 10.1 系统数据库表（SQLite/PostgreSQL）
 
 ```sql
 -- 数据源表
@@ -1783,7 +2354,7 @@ CREATE INDEX idx_task_instances_wf_inst_id ON task_instances(workflow_inst_id);
 
 ---
 
-## 10. 开发路线图
+## 11. 开发路线图
 
 ### Phase 1: MVP 核心功能（2-3 周）
 

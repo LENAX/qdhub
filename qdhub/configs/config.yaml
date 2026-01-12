@@ -1,0 +1,20 @@
+# QDHub Configuration
+# Environment: development
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  driver: "sqlite"  # sqlite | postgres
+  dsn: "./data/qdhub.db"
+
+task_engine:
+  worker_count: 10
+  task_timeout: 60  # seconds
+
+datasources:
+  tushare:
+    enabled: true
+    base_url: "http://api.tushare.pro"
+    doc_url: "https://tushare.pro/document/2"

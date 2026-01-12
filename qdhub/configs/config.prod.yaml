@@ -1,0 +1,20 @@
+# QDHub Configuration
+# Environment: production
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  driver: "postgres"
+  dsn: "${DATABASE_URL}"
+
+task_engine:
+  worker_count: 20
+  task_timeout: 120  # seconds
+
+datasources:
+  tushare:
+    enabled: true
+    base_url: "http://api.tushare.pro"
+    doc_url: "https://tushare.pro/document/2"
