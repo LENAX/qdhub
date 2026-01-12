@@ -164,6 +164,7 @@ type WorkflowInstanceRow struct {
 	StartedAt        time.Time      `db:"started_at"`
 	FinishedAt       sql.NullTime   `db:"finished_at"`
 	ErrorMessage     sql.NullString `db:"error_message"`
+	CreatedAt        sql.NullTime   `db:"created_at"`
 }
 
 // TaskInstanceRow represents task_instances table row.
@@ -176,4 +177,5 @@ type TaskInstanceRow struct {
 	FinishedAt     sql.NullTime   `db:"finished_at"`
 	RetryCount     int            `db:"retry_count"`
 	ErrorMessage   sql.NullString `db:"error_message"`
+	CreatedAt      sql.NullTime   `db:"created_at"`
 }

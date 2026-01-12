@@ -7,7 +7,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/workflow"
+	qdhubworkflow "qdhub/internal/domain/workflow"
 )
 
 // TaskInstanceDAO provides data access operations for TaskInstance.
@@ -23,7 +23,7 @@ func NewTaskInstanceDAO(db *sqlx.DB) *TaskInstanceDAO {
 }
 
 // Create inserts a new task instance record.
-func (d *TaskInstanceDAO) Create(tx *sqlx.Tx, entity *workflow.TaskInstance) error {
+func (d *TaskInstanceDAO) Create(tx *sqlx.Tx, entity *qdhubworkflow.TaskInstance) error {
 	query := `INSERT INTO task_instances (id, workflow_inst_id, task_name, status, started_at, finished_at, retry_count, error_message)
 		VALUES (:id, :workflow_inst_id, :task_name, :status, :started_at, :finished_at, :retry_count, :error_message)`
 
@@ -42,7 +42,7 @@ func (d *TaskInstanceDAO) Create(tx *sqlx.Tx, entity *workflow.TaskInstance) err
 }
 
 // GetByID retrieves a task instance by ID.
-func (d *TaskInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.TaskInstance, error) {
+func (d *TaskInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*qdhubworkflow.TaskInstance, error) {
 	row, err := d.Get(tx, id.String())
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (d *TaskInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.TaskInst
 }
 
 // Update updates an existing task instance record.
-func (d *TaskInstanceDAO) Update(tx *sqlx.Tx, entity *workflow.TaskInstance) error {
+func (d *TaskInstanceDAO) Update(tx *sqlx.Tx, entity *qdhubworkflow.TaskInstance) error {
 	query := `UPDATE task_instances SET
 		status = :status, started_at = :started_at, finished_at = :finished_at,
 		retry_count = :retry_count, error_message = :error_message
@@ -80,7 +80,7 @@ func (d *TaskInstanceDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 }
 
 // GetByWorkflowInstance retrieves all task instances for a workflow instance.
-func (d *TaskInstanceDAO) GetByWorkflowInstance(tx *sqlx.Tx, workflowInstID shared.ID) ([]*workflow.TaskInstance, error) {
+func (d *TaskInstanceDAO) GetByWorkflowInstance(tx *sqlx.Tx, workflowInstID shared.ID) ([]*qdhubworkflow.TaskInstance, error) {
 	query := `SELECT * FROM task_instances WHERE workflow_inst_id = ?`
 	var rows []*TaskInstanceRow
 
@@ -95,7 +95,7 @@ func (d *TaskInstanceDAO) GetByWorkflowInstance(tx *sqlx.Tx, workflowInstID shar
 		return nil, fmt.Errorf("failed to get task instances: %w", err)
 	}
 
-	entities := make([]*workflow.TaskInstance, 0, len(rows))
+	entities := make([]*qdhubworkflow.TaskInstance, 0, len(rows))
 	for _, row := range rows {
 		entities = append(entities, d.toEntity(row))
 	}
@@ -118,50 +118,52 @@ func (d *TaskInstanceDAO) DeleteByWorkflowInstance(tx *sqlx.Tx, workflowInstID s
 }
 
 // toRow converts domain entity to database row.
-func (d *TaskInstanceDAO) toRow(entity *workflow.TaskInstance) *TaskInstanceRow {
+// Note: TaskInstance now uses Task Engine's TaskInstance type directly.
+func (d *TaskInstanceDAO) toRow(entity *qdhubworkflow.TaskInstance) *TaskInstanceRow {
 	row := &TaskInstanceRow{
-		ID:             entity.ID.String(),
-		WorkflowInstID: entity.WorkflowInstID.String(),
-		TaskName:       entity.TaskName,
-		Status:         entity.Status.String(),
+		ID:             entity.ID,
+		WorkflowInstID: entity.WorkflowInstanceID,
+		TaskName:       entity.Name,
+		Status:         entity.Status,
 		RetryCount:     entity.RetryCount,
 	}
 
-	if entity.StartedAt != nil {
-		row.StartedAt = sql.NullTime{Time: *entity.StartedAt, Valid: true}
+	if entity.StartTime != nil {
+		row.StartedAt = sql.NullTime{Time: *entity.StartTime, Valid: true}
 	}
 
-	if entity.FinishedAt != nil {
-		row.FinishedAt = sql.NullTime{Time: *entity.FinishedAt, Valid: true}
+	if entity.EndTime != nil {
+		row.FinishedAt = sql.NullTime{Time: *entity.EndTime, Valid: true}
 	}
 
-	if entity.ErrorMessage != nil {
-		row.ErrorMessage = sql.NullString{String: *entity.ErrorMessage, Valid: true}
+	if entity.ErrorMessage != "" {
+		row.ErrorMessage = sql.NullString{String: entity.ErrorMessage, Valid: true}
 	}
 
 	return row
 }
 
 // toEntity converts database row to domain entity.
-func (d *TaskInstanceDAO) toEntity(row *TaskInstanceRow) *workflow.TaskInstance {
-	entity := &workflow.TaskInstance{
-		ID:             shared.ID(row.ID),
-		WorkflowInstID: shared.ID(row.WorkflowInstID),
-		TaskName:       row.TaskName,
-		Status:         workflow.TaskStatus(row.Status),
-		RetryCount:     row.RetryCount,
+// Note: TaskInstance now uses Task Engine's TaskInstance type directly.
+func (d *TaskInstanceDAO) toEntity(row *TaskInstanceRow) *qdhubworkflow.TaskInstance {
+	entity := &qdhubworkflow.TaskInstance{
+		ID:                 row.ID,
+		WorkflowInstanceID: row.WorkflowInstID,
+		Name:               row.TaskName,
+		Status:             row.Status,
+		RetryCount:         row.RetryCount,
 	}
 
 	if row.StartedAt.Valid {
-		entity.StartedAt = &row.StartedAt.Time
+		entity.StartTime = &row.StartedAt.Time
 	}
 
 	if row.FinishedAt.Valid {
-		entity.FinishedAt = &row.FinishedAt.Time
+		entity.EndTime = &row.FinishedAt.Time
 	}
 
 	if row.ErrorMessage.Valid {
-		entity.ErrorMessage = &row.ErrorMessage.String
+		entity.ErrorMessage = row.ErrorMessage.String
 	}
 
 	return entity

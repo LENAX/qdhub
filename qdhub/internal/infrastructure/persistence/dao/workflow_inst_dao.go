@@ -7,7 +7,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/workflow"
+	qdhubworkflow "qdhub/internal/domain/workflow"
 )
 
 // WorkflowInstanceDAO provides data access operations for WorkflowInstance.
@@ -23,7 +23,7 @@ func NewWorkflowInstanceDAO(db *sqlx.DB) *WorkflowInstanceDAO {
 }
 
 // Create inserts a new workflow instance record.
-func (d *WorkflowInstanceDAO) Create(tx *sqlx.Tx, entity *workflow.WorkflowInstance) error {
+func (d *WorkflowInstanceDAO) Create(tx *sqlx.Tx, entity *qdhubworkflow.WorkflowInstance) error {
 	query := `INSERT INTO workflow_instances (id, workflow_def_id, engine_instance_id, trigger_type, trigger_params, status, progress, started_at, finished_at, error_message)
 		VALUES (:id, :workflow_def_id, :engine_instance_id, :trigger_type, :trigger_params, :status, :progress, :started_at, :finished_at, :error_message)`
 
@@ -45,7 +45,7 @@ func (d *WorkflowInstanceDAO) Create(tx *sqlx.Tx, entity *workflow.WorkflowInsta
 }
 
 // GetByID retrieves a workflow instance by ID.
-func (d *WorkflowInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.WorkflowInstance, error) {
+func (d *WorkflowInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*qdhubworkflow.WorkflowInstance, error) {
 	row, err := d.Get(tx, id.String())
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (d *WorkflowInstanceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.Work
 }
 
 // Update updates an existing workflow instance record.
-func (d *WorkflowInstanceDAO) Update(tx *sqlx.Tx, entity *workflow.WorkflowInstance) error {
+func (d *WorkflowInstanceDAO) Update(tx *sqlx.Tx, entity *qdhubworkflow.WorkflowInstance) error {
 	query := `UPDATE workflow_instances SET
 		status = :status, progress = :progress, finished_at = :finished_at, error_message = :error_message
 		WHERE id = :id`
@@ -85,7 +85,7 @@ func (d *WorkflowInstanceDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 }
 
 // GetByWorkflowDef retrieves all workflow instances for a workflow definition.
-func (d *WorkflowInstanceDAO) GetByWorkflowDef(tx *sqlx.Tx, workflowDefID shared.ID) ([]*workflow.WorkflowInstance, error) {
+func (d *WorkflowInstanceDAO) GetByWorkflowDef(tx *sqlx.Tx, workflowDefID shared.ID) ([]*qdhubworkflow.WorkflowInstance, error) {
 	query := `SELECT * FROM workflow_instances WHERE workflow_def_id = ? ORDER BY started_at DESC`
 	var rows []*WorkflowInstanceRow
 
@@ -100,7 +100,7 @@ func (d *WorkflowInstanceDAO) GetByWorkflowDef(tx *sqlx.Tx, workflowDefID shared
 		return nil, fmt.Errorf("failed to get workflow instances: %w", err)
 	}
 
-	entities := make([]*workflow.WorkflowInstance, 0, len(rows))
+	entities := make([]*qdhubworkflow.WorkflowInstance, 0, len(rows))
 	for _, row := range rows {
 		entity, err := d.toEntity(row)
 		if err != nil {
@@ -127,61 +127,52 @@ func (d *WorkflowInstanceDAO) DeleteByWorkflowDef(tx *sqlx.Tx, workflowDefID sha
 }
 
 // toRow converts domain entity to database row.
-func (d *WorkflowInstanceDAO) toRow(entity *workflow.WorkflowInstance) (*WorkflowInstanceRow, error) {
-	triggerParams, err := entity.MarshalTriggerParamsJSON()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal trigger params: %w", err)
+// Note: WorkflowInstance now uses Task Engine's WorkflowInstance type directly.
+func (d *WorkflowInstanceDAO) toRow(entity *qdhubworkflow.WorkflowInstance) (*WorkflowInstanceRow, error) {
+	if entity == nil {
+		return nil, nil
 	}
-
+	
+	// Task Engine WorkflowInstance doesn't have TriggerParams, TriggerType, EngineInstanceID, Progress
+	// These fields are qdhub-specific and may need to be stored separately
 	row := &WorkflowInstanceRow{
-		ID:               entity.ID.String(),
-		WorkflowDefID:    entity.WorkflowDefID.String(),
-		EngineInstanceID: entity.EngineInstanceID,
-		TriggerType:      entity.TriggerType.String(),
-		TriggerParams:    triggerParams,
-		Status:           entity.Status.String(),
-		Progress:         entity.Progress,
-		StartedAt:        entity.StartedAt.ToTime(),
+		ID:               entity.ID,
+		WorkflowDefID:    entity.WorkflowID,
+		EngineInstanceID: entity.ID, // Use instance ID as engine instance ID
+		TriggerType:      "manual",  // Default
+		TriggerParams:    "{}",      // Empty JSON
+		Status:           entity.Status,
+		Progress:         0.0,       // Task Engine doesn't store progress in instance
+		StartedAt:        entity.StartTime,
 	}
 
-	if entity.FinishedAt != nil {
-		row.FinishedAt = sql.NullTime{Time: entity.FinishedAt.ToTime(), Valid: true}
+	if entity.EndTime != nil {
+		row.FinishedAt = sql.NullTime{Time: *entity.EndTime, Valid: true}
 	}
 
-	if entity.ErrorMessage != nil {
-		row.ErrorMessage = sql.NullString{String: *entity.ErrorMessage, Valid: true}
+	if entity.ErrorMessage != "" {
+		row.ErrorMessage = sql.NullString{String: entity.ErrorMessage, Valid: true}
 	}
 
 	return row, nil
 }
 
 // toEntity converts database row to domain entity.
-func (d *WorkflowInstanceDAO) toEntity(row *WorkflowInstanceRow) (*workflow.WorkflowInstance, error) {
-	entity := &workflow.WorkflowInstance{
-		ID:               shared.ID(row.ID),
-		WorkflowDefID:    shared.ID(row.WorkflowDefID),
-		EngineInstanceID: row.EngineInstanceID,
-		TriggerType:      workflow.TriggerType(row.TriggerType),
-		Status:           workflow.WfInstStatus(row.Status),
-		Progress:         row.Progress,
-		StartedAt:        shared.Timestamp(row.StartedAt),
+// Note: WorkflowInstance now uses Task Engine's WorkflowInstance type directly.
+func (d *WorkflowInstanceDAO) toEntity(row *WorkflowInstanceRow) (*qdhubworkflow.WorkflowInstance, error) {
+	entity := &qdhubworkflow.WorkflowInstance{
+		ID:         row.ID,
+		WorkflowID: row.WorkflowDefID,
+		Status:     row.Status,
+		StartTime:  row.StartedAt,
 	}
 
 	if row.FinishedAt.Valid {
-		ts := shared.Timestamp(row.FinishedAt.Time)
-		entity.FinishedAt = &ts
+		entity.EndTime = &row.FinishedAt.Time
 	}
 
 	if row.ErrorMessage.Valid {
-		entity.ErrorMessage = &row.ErrorMessage.String
-	}
-
-	if row.TriggerParams != "" {
-		if err := entity.UnmarshalTriggerParamsJSON(row.TriggerParams); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal trigger params: %w", err)
-		}
-	} else {
-		entity.TriggerParams = make(map[string]interface{})
+		entity.ErrorMessage = row.ErrorMessage.String
 	}
 
 	return entity, nil

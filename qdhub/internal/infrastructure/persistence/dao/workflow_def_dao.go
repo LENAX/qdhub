@@ -3,10 +3,11 @@ package dao
 import (
 	"fmt"
 
+	"github.com/LENAX/task-engine/pkg/core/workflow"
 	"github.com/jmoiron/sqlx"
 
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/workflow"
+	qdhubworkflow "qdhub/internal/domain/workflow"
 )
 
 // WorkflowDefinitionDAO provides data access operations for WorkflowDefinition.
@@ -22,7 +23,7 @@ func NewWorkflowDefinitionDAO(db *sqlx.DB) *WorkflowDefinitionDAO {
 }
 
 // Create inserts a new workflow definition record.
-func (d *WorkflowDefinitionDAO) Create(tx *sqlx.Tx, entity *workflow.WorkflowDefinition) error {
+func (d *WorkflowDefinitionDAO) Create(tx *sqlx.Tx, entity *qdhubworkflow.WorkflowDefinition) error {
 	query := `INSERT INTO workflow_definitions (id, name, description, category, definition_yaml, version, status, is_system, created_at, updated_at)
 		VALUES (:id, :name, :description, :category, :definition_yaml, :version, :status, :is_system, :created_at, :updated_at)`
 
@@ -41,7 +42,7 @@ func (d *WorkflowDefinitionDAO) Create(tx *sqlx.Tx, entity *workflow.WorkflowDef
 }
 
 // GetByID retrieves a workflow definition by ID.
-func (d *WorkflowDefinitionDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.WorkflowDefinition, error) {
+func (d *WorkflowDefinitionDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*qdhubworkflow.WorkflowDefinition, error) {
 	row, err := d.Get(tx, id.String())
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func (d *WorkflowDefinitionDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*workflow.Wo
 }
 
 // Update updates an existing workflow definition record.
-func (d *WorkflowDefinitionDAO) Update(tx *sqlx.Tx, entity *workflow.WorkflowDefinition) error {
+func (d *WorkflowDefinitionDAO) Update(tx *sqlx.Tx, entity *qdhubworkflow.WorkflowDefinition) error {
 	query := `UPDATE workflow_definitions SET
 		name = :name, description = :description, category = :category, definition_yaml = :definition_yaml,
 		version = :version, status = :status, is_system = :is_system, updated_at = :updated_at
@@ -79,13 +80,13 @@ func (d *WorkflowDefinitionDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 }
 
 // ListAll retrieves all workflow definitions.
-func (d *WorkflowDefinitionDAO) ListAll(tx *sqlx.Tx) ([]*workflow.WorkflowDefinition, error) {
+func (d *WorkflowDefinitionDAO) ListAll(tx *sqlx.Tx) ([]*qdhubworkflow.WorkflowDefinition, error) {
 	rows, err := d.List(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	entities := make([]*workflow.WorkflowDefinition, 0, len(rows))
+	entities := make([]*qdhubworkflow.WorkflowDefinition, 0, len(rows))
 	for _, row := range rows {
 		entities = append(entities, d.toEntity(row))
 	}
@@ -93,33 +94,45 @@ func (d *WorkflowDefinitionDAO) ListAll(tx *sqlx.Tx) ([]*workflow.WorkflowDefini
 }
 
 // toRow converts domain entity to database row.
-func (d *WorkflowDefinitionDAO) toRow(entity *workflow.WorkflowDefinition) *WorkflowDefinitionRow {
+// Note: WorkflowDefinition now embeds Task Engine's Workflow type.
+func (d *WorkflowDefinitionDAO) toRow(entity *qdhubworkflow.WorkflowDefinition) *WorkflowDefinitionRow {
+	if entity == nil || entity.Workflow == nil {
+		return nil
+	}
+
 	return &WorkflowDefinitionRow{
-		ID:             entity.ID.String(),
-		Name:           entity.Name,
-		Description:    entity.Description,
+		ID:             entity.ID(),
+		Name:           entity.Workflow.Name,
+		Description:    entity.Workflow.Description,
 		Category:       entity.Category.String(),
 		DefinitionYAML: entity.DefinitionYAML,
 		Version:        entity.Version,
-		Status:         entity.Status.String(),
+		Status:         entity.Status().String(),
 		IsSystem:       entity.IsSystem,
-		CreatedAt:      entity.CreatedAt.ToTime(),
+		CreatedAt:      entity.Workflow.CreateTime,
 		UpdatedAt:      entity.UpdatedAt.ToTime(),
 	}
 }
 
 // toEntity converts database row to domain entity.
-func (d *WorkflowDefinitionDAO) toEntity(row *WorkflowDefinitionRow) *workflow.WorkflowDefinition {
-	return &workflow.WorkflowDefinition{
-		ID:             shared.ID(row.ID),
-		Name:           row.Name,
-		Description:    row.Description,
-		Category:       workflow.WfCategory(row.Category),
+// Note: This method is deprecated as we now use Task Engine storage directly.
+func (d *WorkflowDefinitionDAO) toEntity(row *WorkflowDefinitionRow) *qdhubworkflow.WorkflowDefinition {
+	// Create Task Engine Workflow
+	teWorkflow := workflow.NewWorkflow(row.Name, row.Description)
+	teWorkflow.ID = row.ID
+	if row.Status == "enabled" {
+		teWorkflow.SetStatus("ENABLED")
+	} else {
+		teWorkflow.SetStatus("DISABLED")
+	}
+
+	// Wrap in WorkflowDefinition
+	return &qdhubworkflow.WorkflowDefinition{
+		Workflow:       teWorkflow,
+		Category:       qdhubworkflow.WfCategory(row.Category),
 		DefinitionYAML: row.DefinitionYAML,
 		Version:        row.Version,
-		Status:         workflow.WfDefStatus(row.Status),
 		IsSystem:       row.IsSystem,
-		CreatedAt:      shared.Timestamp(row.CreatedAt),
 		UpdatedAt:      shared.Timestamp(row.UpdatedAt),
 	}
 }

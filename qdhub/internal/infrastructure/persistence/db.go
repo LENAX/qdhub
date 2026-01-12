@@ -11,6 +11,7 @@ import (
 // DB wraps sqlx.DB and provides database connection management.
 type DB struct {
 	*sqlx.DB
+	dsn string // Store DSN for Task Engine integration
 }
 
 // NewDB creates a new database connection.
@@ -29,7 +30,7 @@ func NewDB(dsn string) (*DB, error) {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 
-	return &DB{DB: db}, nil
+	return &DB{DB: db, dsn: dsn}, nil
 }
 
 // Close closes the database connection.
@@ -62,6 +63,11 @@ func (db *DB) ExecInTx(fn func(*sqlx.Tx) error) error {
 	}
 
 	return tx.Commit()
+}
+
+// DSN returns the database connection string.
+func (db *DB) DSN() string {
+	return db.dsn
 }
 
 // Querier is an interface for database query operations.

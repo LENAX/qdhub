@@ -3,212 +3,101 @@ package repository
 import (
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
-
-	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
-	"qdhub/internal/infrastructure/persistence/dao"
 )
 
-// WorkflowDefinitionRepositoryImpl implements workflow.WorkflowDefinitionRepository.
+// WorkflowDefinitionRepositoryImpl implements workflow.WorkflowDefinitionRepository using Task Engine storage.
+// This is a wrapper around the Task Engine implementation to maintain compatibility with the existing interface.
 type WorkflowDefinitionRepositoryImpl struct {
-	db                  *persistence.DB
-	workflowDefDAO      *dao.WorkflowDefinitionDAO
-	workflowInstDAO     *dao.WorkflowInstanceDAO
-	taskInstDAO         *dao.TaskInstanceDAO
+	taskEngineRepo *WorkflowDefinitionRepositoryTaskEngineImpl
 }
 
-// NewWorkflowDefinitionRepository creates a new WorkflowDefinitionRepositoryImpl.
-func NewWorkflowDefinitionRepository(db *persistence.DB) *WorkflowDefinitionRepositoryImpl {
-	return &WorkflowDefinitionRepositoryImpl{
-		db:              db,
-		workflowDefDAO:  dao.NewWorkflowDefinitionDAO(db.DB),
-		workflowInstDAO: dao.NewWorkflowInstanceDAO(db.DB),
-		taskInstDAO:     dao.NewTaskInstanceDAO(db.DB),
+// NewWorkflowDefinitionRepository creates a new WorkflowDefinitionRepositoryImpl using Task Engine storage.
+func NewWorkflowDefinitionRepository(db *persistence.DB) (*WorkflowDefinitionRepositoryImpl, error) {
+	dsn := extractDSNFromDB(db)
+	
+	taskEngineRepo, err := NewWorkflowDefinitionRepositoryTaskEngine(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task engine repository: %w", err)
 	}
+
+	return &WorkflowDefinitionRepositoryImpl{
+		taskEngineRepo: taskEngineRepo,
+	}, nil
+}
+
+// extractDSNFromDB extracts DSN from the DB connection.
+func extractDSNFromDB(db *persistence.DB) string {
+	// DSN is now stored in the DB struct
+	return db.DSN()
 }
 
 // Create creates a new workflow definition with its aggregated entities.
 func (r *WorkflowDefinitionRepositoryImpl) Create(def *workflow.WorkflowDefinition) error {
-	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create workflow definition
-		if err := r.workflowDefDAO.Create(tx, def); err != nil {
-			return err
-		}
-
-		// Create instances
-		for _, inst := range def.Instances {
-			if err := r.workflowInstDAO.Create(tx, &inst); err != nil {
-				return err
-			}
-
-			// Create task instances for each workflow instance
-			for _, task := range inst.TaskInstances {
-				if err := r.taskInstDAO.Create(tx, &task); err != nil {
-					return err
-				}
-			}
-		}
-
-		return nil
-	})
+	return r.taskEngineRepo.Create(def)
 }
 
 // Get retrieves a workflow definition by ID with its aggregated entities.
-func (r *WorkflowDefinitionRepositoryImpl) Get(id shared.ID) (*workflow.WorkflowDefinition, error) {
-	def, err := r.workflowDefDAO.GetByID(nil, id)
-	if err != nil {
-		return nil, err
-	}
-	if def == nil {
-		return nil, nil
-	}
-
-	// Load instances
-	instances, err := r.workflowInstDAO.GetByWorkflowDef(nil, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load workflow instances: %w", err)
-	}
-
-	def.Instances = make([]workflow.WorkflowInstance, len(instances))
-	for i, inst := range instances {
-		// Load task instances for each workflow instance
-		tasks, err := r.taskInstDAO.GetByWorkflowInstance(nil, inst.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load task instances: %w", err)
-		}
-		inst.TaskInstances = make([]workflow.TaskInstance, len(tasks))
-		for j, task := range tasks {
-			inst.TaskInstances[j] = *task
-		}
-		def.Instances[i] = *inst
-	}
-
-	return def, nil
+func (r *WorkflowDefinitionRepositoryImpl) Get(id string) (*workflow.WorkflowDefinition, error) {
+	return r.taskEngineRepo.Get(id)
 }
 
 // Update updates a workflow definition.
 func (r *WorkflowDefinitionRepositoryImpl) Update(def *workflow.WorkflowDefinition) error {
-	return r.workflowDefDAO.Update(nil, def)
+	return r.taskEngineRepo.Update(def)
 }
 
 // Delete deletes a workflow definition and its aggregated entities.
-func (r *WorkflowDefinitionRepositoryImpl) Delete(id shared.ID) error {
-	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Get all workflow instances first
-		instances, err := r.workflowInstDAO.GetByWorkflowDef(tx, id)
-		if err != nil {
-			return err
-		}
-
-		// Delete task instances for each workflow instance
-		for _, inst := range instances {
-			if err := r.taskInstDAO.DeleteByWorkflowInstance(tx, inst.ID); err != nil {
-				return err
-			}
-		}
-
-		// Delete workflow instances
-		if err := r.workflowInstDAO.DeleteByWorkflowDef(tx, id); err != nil {
-			return err
-		}
-
-		// Delete workflow definition
-		if err := r.workflowDefDAO.DeleteByID(tx, id); err != nil {
-			return err
-		}
-
-		return nil
-	})
+func (r *WorkflowDefinitionRepositoryImpl) Delete(id string) error {
+	return r.taskEngineRepo.Delete(id)
 }
 
 // List retrieves all workflow definitions (without aggregated entities for performance).
 func (r *WorkflowDefinitionRepositoryImpl) List() ([]*workflow.WorkflowDefinition, error) {
-	return r.workflowDefDAO.ListAll(nil)
+	return r.taskEngineRepo.List()
 }
 
-// WorkflowInstanceRepositoryImpl implements workflow.WorkflowInstanceRepository.
+// WorkflowInstanceRepositoryImpl implements workflow.WorkflowInstanceRepository using Task Engine storage.
 type WorkflowInstanceRepositoryImpl struct {
-	db              *persistence.DB
-	workflowInstDAO *dao.WorkflowInstanceDAO
-	taskInstDAO     *dao.TaskInstanceDAO
+	taskEngineRepo *WorkflowInstanceRepositoryTaskEngineImpl
 }
 
-// NewWorkflowInstanceRepository creates a new WorkflowInstanceRepositoryImpl.
-func NewWorkflowInstanceRepository(db *persistence.DB) *WorkflowInstanceRepositoryImpl {
-	return &WorkflowInstanceRepositoryImpl{
-		db:              db,
-		workflowInstDAO: dao.NewWorkflowInstanceDAO(db.DB),
-		taskInstDAO:     dao.NewTaskInstanceDAO(db.DB),
+// NewWorkflowInstanceRepository creates a new WorkflowInstanceRepositoryImpl using Task Engine storage.
+func NewWorkflowInstanceRepository(db *persistence.DB) (*WorkflowInstanceRepositoryImpl, error) {
+	dsn := extractDSNFromDB(db)
+	
+	taskEngineRepo, err := NewWorkflowInstanceRepositoryTaskEngine(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task engine repository: %w", err)
 	}
+
+	return &WorkflowInstanceRepositoryImpl{
+		taskEngineRepo: taskEngineRepo,
+	}, nil
 }
 
 // Create creates a new workflow instance with its task instances.
 func (r *WorkflowInstanceRepositoryImpl) Create(inst *workflow.WorkflowInstance) error {
-	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create workflow instance
-		if err := r.workflowInstDAO.Create(tx, inst); err != nil {
-			return err
-		}
-
-		// Create task instances
-		for _, task := range inst.TaskInstances {
-			if err := r.taskInstDAO.Create(tx, &task); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	return r.taskEngineRepo.Create(inst)
 }
 
 // Get retrieves a workflow instance by ID with its task instances.
-func (r *WorkflowInstanceRepositoryImpl) Get(id shared.ID) (*workflow.WorkflowInstance, error) {
-	inst, err := r.workflowInstDAO.GetByID(nil, id)
-	if err != nil {
-		return nil, err
-	}
-	if inst == nil {
-		return nil, nil
-	}
-
-	// Load task instances
-	tasks, err := r.taskInstDAO.GetByWorkflowInstance(nil, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load task instances: %w", err)
-	}
-	inst.TaskInstances = make([]workflow.TaskInstance, len(tasks))
-	for i, task := range tasks {
-		inst.TaskInstances[i] = *task
-	}
-
-	return inst, nil
+func (r *WorkflowInstanceRepositoryImpl) Get(id string) (*workflow.WorkflowInstance, error) {
+	return r.taskEngineRepo.Get(id)
 }
 
 // GetByWorkflowDef retrieves all workflow instances for a workflow definition.
-func (r *WorkflowInstanceRepositoryImpl) GetByWorkflowDef(workflowDefID shared.ID) ([]*workflow.WorkflowInstance, error) {
-	return r.workflowInstDAO.GetByWorkflowDef(nil, workflowDefID)
+func (r *WorkflowInstanceRepositoryImpl) GetByWorkflowDef(workflowDefID string) ([]*workflow.WorkflowInstance, error) {
+	return r.taskEngineRepo.GetByWorkflowDef(workflowDefID)
 }
 
 // Update updates a workflow instance.
 func (r *WorkflowInstanceRepositoryImpl) Update(inst *workflow.WorkflowInstance) error {
-	return r.workflowInstDAO.Update(nil, inst)
+	return r.taskEngineRepo.Update(inst)
 }
 
 // Delete deletes a workflow instance and its task instances.
-func (r *WorkflowInstanceRepositoryImpl) Delete(id shared.ID) error {
-	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Delete task instances first
-		if err := r.taskInstDAO.DeleteByWorkflowInstance(tx, id); err != nil {
-			return err
-		}
-
-		// Delete workflow instance
-		if err := r.workflowInstDAO.DeleteByID(tx, id); err != nil {
-			return err
-		}
-
-		return nil
-	})
+func (r *WorkflowInstanceRepositoryImpl) Delete(id string) error {
+	return r.taskEngineRepo.Delete(id)
 }
