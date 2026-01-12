@@ -1,62 +1,82 @@
 // Package workflow contains the workflow domain entities.
+// This package uses Task Engine types directly to avoid duplication.
 package workflow
 
 import (
-	"encoding/json"
-	"time"
-
 	"qdhub/internal/domain/shared"
+
+	"github.com/LENAX/task-engine/pkg/core/workflow"
+	taskenginestorage "github.com/LENAX/task-engine/pkg/storage"
 )
 
-// ==================== 聚合根 ====================
+// ==================== 类型别名：直接使用 Task Engine 的类型 ====================
 
-// WorkflowDefinition represents a workflow definition aggregate root.
-// Responsibilities:
-//   - Manage workflow definition
-//   - Manage workflow instances
-//   - Manage task instances
+// Workflow 直接使用 Task Engine 的 Workflow 类型
+type Workflow = workflow.Workflow
+
+// WorkflowInstance 直接使用 Task Engine 的 WorkflowInstance 类型
+type WorkflowInstance = workflow.WorkflowInstance
+
+// TaskInstance 直接使用 Task Engine 的 TaskInstance 类型
+type TaskInstance = taskenginestorage.TaskInstance
+
+// ==================== 扩展类型（qdhub 特定的业务字段）====================
+
+// WorkflowDefinition 扩展 Task Engine 的 Workflow，添加 qdhub 特定的业务字段
 type WorkflowDefinition struct {
-	ID             shared.ID
-	Name           string
-	Description    string
+	*workflow.Workflow // 嵌入 Task Engine 的 Workflow
+
+	// qdhub 特定的业务字段
 	Category       WfCategory
 	DefinitionYAML string
 	Version        int
-	Status         WfDefStatus
 	IsSystem       bool
-	CreatedAt      shared.Timestamp
 	UpdatedAt      shared.Timestamp
+}
 
-	// Aggregated entities (lazy loaded)
-	Instances []WorkflowInstance
+// ID returns the workflow ID (from embedded Workflow).
+func (wf *WorkflowDefinition) ID() string {
+	if wf.Workflow == nil {
+		return ""
+	}
+	return wf.Workflow.GetID()
+}
+
+// Status returns the workflow status as WfDefStatus.
+func (wf *WorkflowDefinition) Status() WfDefStatus {
+	if wf.Workflow == nil {
+		return WfDefStatusDisabled
+	}
+	status := wf.Workflow.GetStatus()
+	if status == "ENABLED" {
+		return WfDefStatusEnabled
+	}
+	return WfDefStatusDisabled
 }
 
 // NewWorkflowDefinition creates a new WorkflowDefinition aggregate.
 func NewWorkflowDefinition(name, description string, category WfCategory, definitionYAML string, isSystem bool) *WorkflowDefinition {
+	teWorkflow := workflow.NewWorkflow(name, description)
 	now := shared.Now()
 	return &WorkflowDefinition{
-		ID:             shared.NewID(),
-		Name:           name,
-		Description:    description,
+		Workflow:       teWorkflow,
 		Category:       category,
 		DefinitionYAML: definitionYAML,
 		Version:        1,
-		Status:         WfDefStatusEnabled,
 		IsSystem:       isSystem,
-		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 }
 
 // Enable enables the workflow definition.
 func (wf *WorkflowDefinition) Enable() {
-	wf.Status = WfDefStatusEnabled
+	wf.Workflow.SetStatus("ENABLED")
 	wf.UpdatedAt = shared.Now()
 }
 
 // Disable disables the workflow definition.
 func (wf *WorkflowDefinition) Disable() {
-	wf.Status = WfDefStatusDisabled
+	wf.Workflow.SetStatus("DISABLED")
 	wf.UpdatedAt = shared.Now()
 }
 
@@ -69,7 +89,7 @@ func (wf *WorkflowDefinition) UpdateDefinition(definitionYAML string) {
 
 // IsEnabled checks if the workflow definition is enabled.
 func (wf *WorkflowDefinition) IsEnabled() bool {
-	return wf.Status == WfDefStatusEnabled
+	return wf.Workflow.GetStatus() == "ENABLED"
 }
 
 // CanCreateInstance checks if a new instance can be created.
@@ -80,152 +100,16 @@ func (wf *WorkflowDefinition) CanCreateInstance() error {
 	return nil
 }
 
-// ==================== 聚合内实体 ====================
+// ==================== 辅助方法（使用 Task Engine 类型的方法）====================
 
-// WorkflowInstance represents a workflow instance entity.
-// Belongs to: WorkflowDefinition aggregate
-type WorkflowInstance struct {
-	ID               shared.ID
-	WorkflowDefID    shared.ID
-	EngineInstanceID string
-	TriggerType      TriggerType
-	TriggerParams    map[string]interface{}
-	Status           WfInstStatus
-	Progress         float64
-	StartedAt        shared.Timestamp
-	FinishedAt       *shared.Timestamp
-	ErrorMessage     *string
-
-	// Aggregated entities
-	TaskInstances []TaskInstance
+// NewWorkflowInstance creates a new WorkflowInstance using Task Engine.
+func NewWorkflowInstance(workflowID string) *WorkflowInstance {
+	return workflow.NewWorkflowInstance(workflowID)
 }
 
-// NewWorkflowInstance creates a new WorkflowInstance.
-func NewWorkflowInstance(workflowDefID shared.ID, engineInstanceID string, triggerType TriggerType, triggerParams map[string]interface{}) *WorkflowInstance {
-	return &WorkflowInstance{
-		ID:               shared.NewID(),
-		WorkflowDefID:    workflowDefID,
-		EngineInstanceID: engineInstanceID,
-		TriggerType:      triggerType,
-		TriggerParams:    triggerParams,
-		Status:           WfInstStatusPending,
-		Progress:         0.0,
-		StartedAt:        shared.Now(),
-		TaskInstances:    []TaskInstance{},
-	}
-}
+// ==================== qdhub 特定的枚举类型 ====================
 
-// MarkRunning marks the instance as running.
-func (wi *WorkflowInstance) MarkRunning() {
-	wi.Status = WfInstStatusRunning
-}
-
-// MarkPaused marks the instance as paused.
-func (wi *WorkflowInstance) MarkPaused() {
-	wi.Status = WfInstStatusPaused
-}
-
-// MarkSuccess marks the instance as successful.
-func (wi *WorkflowInstance) MarkSuccess() {
-	now := shared.Now()
-	wi.Status = WfInstStatusSuccess
-	wi.Progress = 100.0
-	wi.FinishedAt = &now
-}
-
-// MarkFailed marks the instance as failed.
-func (wi *WorkflowInstance) MarkFailed(errorMsg string) {
-	now := shared.Now()
-	wi.Status = WfInstStatusFailed
-	wi.FinishedAt = &now
-	wi.ErrorMessage = &errorMsg
-}
-
-// MarkCancelled marks the instance as cancelled.
-func (wi *WorkflowInstance) MarkCancelled() {
-	now := shared.Now()
-	wi.Status = WfInstStatusCancelled
-	wi.FinishedAt = &now
-}
-
-// UpdateProgress updates the progress.
-func (wi *WorkflowInstance) UpdateProgress(progress float64) {
-	wi.Progress = progress
-}
-
-// MarshalTriggerParamsJSON marshals trigger params to JSON string.
-func (wi *WorkflowInstance) MarshalTriggerParamsJSON() (string, error) {
-	data, err := json.Marshal(wi.TriggerParams)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-// UnmarshalTriggerParamsJSON unmarshals trigger params from JSON string.
-func (wi *WorkflowInstance) UnmarshalTriggerParamsJSON(jsonStr string) error {
-	return json.Unmarshal([]byte(jsonStr), &wi.TriggerParams)
-}
-
-// TaskInstance represents a task instance entity.
-// Belongs to: WorkflowDefinition aggregate (via WorkflowInstance)
-type TaskInstance struct {
-	ID             shared.ID
-	WorkflowInstID shared.ID
-	TaskName       string
-	Status         TaskStatus
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
-	RetryCount     int
-	ErrorMessage   *string
-}
-
-// NewTaskInstance creates a new TaskInstance.
-func NewTaskInstance(workflowInstID shared.ID, taskName string) *TaskInstance {
-	return &TaskInstance{
-		ID:             shared.NewID(),
-		WorkflowInstID: workflowInstID,
-		TaskName:       taskName,
-		Status:         TaskStatusPending,
-		RetryCount:     0,
-	}
-}
-
-// MarkRunning marks the task as running.
-func (ti *TaskInstance) MarkRunning() {
-	now := time.Now()
-	ti.Status = TaskStatusRunning
-	ti.StartedAt = &now
-}
-
-// MarkSuccess marks the task as successful.
-func (ti *TaskInstance) MarkSuccess() {
-	now := time.Now()
-	ti.Status = TaskStatusSuccess
-	ti.FinishedAt = &now
-}
-
-// MarkFailed marks the task as failed.
-func (ti *TaskInstance) MarkFailed(errorMsg string) {
-	now := time.Now()
-	ti.Status = TaskStatusFailed
-	ti.FinishedAt = &now
-	ti.ErrorMessage = &errorMsg
-}
-
-// MarkSkipped marks the task as skipped.
-func (ti *TaskInstance) MarkSkipped() {
-	ti.Status = TaskStatusSkipped
-}
-
-// IncrementRetryCount increments the retry count.
-func (ti *TaskInstance) IncrementRetryCount() {
-	ti.RetryCount++
-}
-
-// ==================== 枚举类型 ====================
-
-// WfCategory represents workflow category.
+// WfCategory represents workflow category (qdhub specific).
 type WfCategory string
 
 const (
@@ -239,20 +123,7 @@ func (wc WfCategory) String() string {
 	return string(wc)
 }
 
-// WfDefStatus represents workflow definition status.
-type WfDefStatus string
-
-const (
-	WfDefStatusEnabled  WfDefStatus = "enabled"
-	WfDefStatusDisabled WfDefStatus = "disabled"
-)
-
-// String returns the string representation of the workflow definition status.
-func (wds WfDefStatus) String() string {
-	return string(wds)
-}
-
-// TriggerType represents trigger type.
+// TriggerType represents trigger type (qdhub specific, for compatibility).
 type TriggerType string
 
 const (
@@ -266,16 +137,17 @@ func (tt TriggerType) String() string {
 	return string(tt)
 }
 
-// WfInstStatus represents workflow instance status.
+// WfInstStatus represents workflow instance status (qdhub specific, for compatibility).
+// Maps to Task Engine status: Ready->Pending, Running->Running, Paused->Paused, Success->Success, Failed->Failed, Terminated->Cancelled
 type WfInstStatus string
 
 const (
-	WfInstStatusPending   WfInstStatus = "pending"
-	WfInstStatusRunning   WfInstStatus = "running"
-	WfInstStatusPaused    WfInstStatus = "paused"
-	WfInstStatusSuccess   WfInstStatus = "success"
-	WfInstStatusFailed    WfInstStatus = "failed"
-	WfInstStatusCancelled WfInstStatus = "cancelled"
+	WfInstStatusPending   WfInstStatus = "pending"   // Maps to "Ready"
+	WfInstStatusRunning   WfInstStatus = "running"   // Maps to "Running"
+	WfInstStatusPaused    WfInstStatus = "paused"    // Maps to "Paused"
+	WfInstStatusSuccess   WfInstStatus = "success"   // Maps to "Success"
+	WfInstStatusFailed    WfInstStatus = "failed"    // Maps to "Failed"
+	WfInstStatusCancelled WfInstStatus = "cancelled" // Maps to "Terminated"
 )
 
 // String returns the string representation of the workflow instance status.
@@ -283,7 +155,20 @@ func (wis WfInstStatus) String() string {
 	return string(wis)
 }
 
-// TaskStatus represents task status.
+// WfDefStatus represents workflow definition status (qdhub specific, for compatibility).
+type WfDefStatus string
+
+const (
+	WfDefStatusEnabled  WfDefStatus = "enabled"  // Maps to "ENABLED"
+	WfDefStatusDisabled WfDefStatus = "disabled" // Maps to "DISABLED"
+)
+
+// String returns the string representation of the workflow definition status.
+func (wds WfDefStatus) String() string {
+	return string(wds)
+}
+
+// TaskStatus represents task status (qdhub specific, for compatibility).
 type TaskStatus string
 
 const (

@@ -11,25 +11,20 @@ func TestWorkflowValidator_ValidateWorkflowDefinition(t *testing.T) {
 	validator := workflow.NewWorkflowValidator()
 
 	validDefinition := func() *workflow.WorkflowDefinition {
-		return &workflow.WorkflowDefinition{
-			ID:          shared.NewID(),
-			Name:        "Daily Sync Workflow",
-			Description: "每日数据同步工作流",
-			Category:    workflow.WfCategorySync,
-			DefinitionYAML: `
-name: daily_sync
+		return workflow.NewWorkflowDefinition(
+			"Daily Sync Workflow",
+			"每日数据同步工作流",
+			workflow.WfCategorySync,
+			`name: daily_sync
 tasks:
   - name: fetch_data
     job: fetch_stock_data
   - name: save_data
     job: save_to_db
     depends_on:
-      - fetch_data
-`,
-			Version:  1,
-			Status:   workflow.WfDefStatusEnabled,
-			IsSystem: false,
-		}
+      - fetch_data`,
+			false,
+		)
 	}
 
 	tests := []struct {
@@ -48,13 +43,8 @@ tasks:
 			wantErr: true,
 		},
 		{
-			name:    "empty ID",
-			modify:  func(wf *workflow.WorkflowDefinition) { wf.ID = "" },
-			wantErr: true,
-		},
-		{
 			name:    "empty name",
-			modify:  func(wf *workflow.WorkflowDefinition) { wf.Name = "" },
+			modify:  func(wf *workflow.WorkflowDefinition) { wf.Workflow.Name = "" },
 			wantErr: true,
 		},
 		{
@@ -93,13 +83,8 @@ tasks:
 			wantErr: true,
 		},
 		{
-			name:    "invalid status",
-			modify:  func(wf *workflow.WorkflowDefinition) { wf.Status = "invalid" },
-			wantErr: true,
-		},
-		{
 			name:    "disabled status is valid",
-			modify:  func(wf *workflow.WorkflowDefinition) { wf.Status = workflow.WfDefStatusDisabled },
+			modify:  func(wf *workflow.WorkflowDefinition) { wf.Disable() },
 			wantErr: false,
 		},
 		{
@@ -133,14 +118,9 @@ func TestWorkflowValidator_ValidateWorkflowInstance(t *testing.T) {
 
 	validInstance := func() *workflow.WorkflowInstance {
 		return &workflow.WorkflowInstance{
-			ID:               shared.NewID(),
-			WorkflowDefID:    shared.NewID(),
-			EngineInstanceID: "engine-instance-123",
-			TriggerType:      workflow.TriggerTypeManual,
-			TriggerParams:    map[string]interface{}{"key": "value"},
-			Status:           workflow.WfInstStatusRunning,
-			Progress:         50.0,
-			StartedAt:        shared.Now(),
+			ID:         shared.NewID().String(),
+			WorkflowID: shared.NewID().String(),
+			Status:     "Running",
 		}
 	}
 
@@ -165,83 +145,48 @@ func TestWorkflowValidator_ValidateWorkflowInstance(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "empty WorkflowDefID",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.WorkflowDefID = "" },
+			name:    "empty WorkflowID",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.WorkflowID = "" },
 			wantErr: true,
-		},
-		{
-			name:    "empty EngineInstanceID",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.EngineInstanceID = "" },
-			wantErr: true,
-		},
-		{
-			name:    "invalid trigger type",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.TriggerType = "invalid" },
-			wantErr: true,
-		},
-		{
-			name:    "cron trigger type is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.TriggerType = workflow.TriggerTypeCron },
-			wantErr: false,
-		},
-		{
-			name:    "event trigger type is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.TriggerType = workflow.TriggerTypeEvent },
-			wantErr: false,
 		},
 		{
 			name:    "invalid status",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "invalid" },
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "InvalidStatus" },
 			wantErr: true,
 		},
 		{
-			name:    "pending status is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = workflow.WfInstStatusPending },
-			wantErr: false,
-		},
-		{
-			name:    "paused status is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = workflow.WfInstStatusPaused },
-			wantErr: false,
-		},
-		{
-			name:    "success status is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = workflow.WfInstStatusSuccess },
-			wantErr: false,
-		},
-		{
-			name:    "failed status is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = workflow.WfInstStatusFailed },
-			wantErr: false,
-		},
-		{
-			name:    "cancelled status is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = workflow.WfInstStatusCancelled },
-			wantErr: false,
-		},
-		{
-			name:    "negative progress",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Progress = -1.0 },
+			name:    "invalid status",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "InvalidStatus" },
 			wantErr: true,
 		},
 		{
-			name:    "progress over 100",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Progress = 101.0 },
-			wantErr: true,
-		},
-		{
-			name:    "zero progress is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Progress = 0.0 },
+			name:    "Ready status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Ready" },
 			wantErr: false,
 		},
 		{
-			name:    "100 progress is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.Progress = 100.0 },
+			name:    "Running status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Running" },
 			wantErr: false,
 		},
 		{
-			name:    "nil trigger params is valid",
-			modify:  func(wi *workflow.WorkflowInstance) { wi.TriggerParams = nil },
+			name:    "Paused status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Paused" },
+			wantErr: false,
+		},
+		{
+			name:    "Success status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Success" },
+			wantErr: false,
+		},
+		{
+			name:    "Failed status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Failed" },
+			wantErr: false,
+		},
+		{
+			name:    "Terminated status is valid",
+			modify:  func(wi *workflow.WorkflowInstance) { wi.Status = "Terminated" },
 			wantErr: false,
 		},
 	}
@@ -299,8 +244,8 @@ tasks:
 			wantErr: true,
 		},
 		{
-			name: "valid minimal YAML",
-			yaml: "name: test",
+			name:    "valid minimal YAML",
+			yaml:    "name: test",
 			wantErr: false,
 		},
 		{

@@ -1,6 +1,17 @@
--- QDHub Initial Schema Migration
+-- QDHub Initial Schema Migration (Merged with Task Engine)
 -- Version: 001
--- Description: Create core tables for QDHub
+-- Description: Create core tables for QDHub, using Task Engine table structure with QDHub-specific extensions
+--
+-- IMPORTANT NOTES:
+-- 1. This migration creates tables that are SHARED between Task Engine and QDHub
+-- 2. Task Engine tables use singular names (workflow_definition, workflow_instance, task_instance)
+-- 3. QDHub-specific fields are added to Task Engine tables:
+--    - workflow_definition: category, definition_yaml, version, is_system, updated_at
+--    - workflow_instance: engine_instance_id, trigger_type, trigger_params, progress
+-- 4. Task Engine's initSchema() uses CREATE TABLE IF NOT EXISTS, so it won't conflict with this migration
+-- 5. Ensure this migration runs BEFORE Task Engine initializes its schema for best compatibility
+
+-- ==================== QDHub Specific Tables ====================
 
 -- Data Sources table
 CREATE TABLE IF NOT EXISTS data_sources (
@@ -65,6 +76,7 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE TABLE IF NOT EXISTS quant_data_stores (
     id           VARCHAR(64) PRIMARY KEY,
     name         VARCHAR(128) NOT NULL,
+    description  TEXT,
     type         VARCHAR(32) NOT NULL,
     dsn          TEXT,
     storage_path VARCHAR(512),
@@ -85,6 +97,7 @@ CREATE TABLE IF NOT EXISTS table_schemas (
     status         VARCHAR(32) DEFAULT 'pending',
     error_message  TEXT,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(data_store_id, table_name)
 );
 
@@ -108,20 +121,6 @@ CREATE TABLE IF NOT EXISTS data_type_mapping_rules (
 
 CREATE INDEX IF NOT EXISTS idx_mapping_rules_lookup ON data_type_mapping_rules(data_source_type, target_db_type, priority DESC);
 
--- Workflow Definitions table
-CREATE TABLE IF NOT EXISTS workflow_definitions (
-    id              VARCHAR(64) PRIMARY KEY,
-    name            VARCHAR(128) NOT NULL UNIQUE,
-    description     TEXT,
-    category        VARCHAR(32) NOT NULL,
-    definition_yaml TEXT NOT NULL,
-    version         INTEGER DEFAULT 1,
-    status          VARCHAR(32) DEFAULT 'enabled',
-    is_system       INTEGER DEFAULT 0,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Sync Jobs table
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id              VARCHAR(64) PRIMARY KEY,
@@ -129,7 +128,7 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
     description     TEXT,
     api_meta_id     VARCHAR(64) NOT NULL REFERENCES api_metadata(id),
     data_store_id   VARCHAR(64) NOT NULL REFERENCES quant_data_stores(id),
-    workflow_def_id VARCHAR(64) REFERENCES workflow_definitions(id),
+    workflow_def_id VARCHAR(64) REFERENCES workflow_definition(id),
     mode            VARCHAR(32) NOT NULL,
     cron_expression VARCHAR(128),
     params          TEXT,  -- JSON
@@ -145,28 +144,11 @@ CREATE INDEX IF NOT EXISTS idx_sync_jobs_api_meta ON sync_jobs(api_meta_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_data_store ON sync_jobs(data_store_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON sync_jobs(status);
 
--- Workflow Instances table
-CREATE TABLE IF NOT EXISTS workflow_instances (
-    id                  VARCHAR(64) PRIMARY KEY,
-    workflow_def_id     VARCHAR(64) NOT NULL REFERENCES workflow_definitions(id),
-    engine_instance_id  VARCHAR(64),
-    trigger_type        VARCHAR(32) NOT NULL,
-    trigger_params      TEXT,  -- JSON
-    status              VARCHAR(32) NOT NULL,
-    progress            REAL DEFAULT 0,
-    started_at          TIMESTAMP NOT NULL,
-    finished_at         TIMESTAMP,
-    error_message       TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_workflow_instances_def ON workflow_instances(workflow_def_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_instances_status ON workflow_instances(status);
-
 -- Sync Executions table
 CREATE TABLE IF NOT EXISTS sync_executions (
     id               VARCHAR(64) PRIMARY KEY,
     sync_job_id      VARCHAR(64) NOT NULL REFERENCES sync_jobs(id),
-    workflow_inst_id VARCHAR(64) REFERENCES workflow_instances(id),
+    workflow_inst_id VARCHAR(64) REFERENCES workflow_instance(id),
     status           VARCHAR(32) NOT NULL,
     started_at       TIMESTAMP NOT NULL,
     finished_at      TIMESTAMP,
@@ -177,16 +159,127 @@ CREATE TABLE IF NOT EXISTS sync_executions (
 CREATE INDEX IF NOT EXISTS idx_sync_executions_job ON sync_executions(sync_job_id);
 CREATE INDEX IF NOT EXISTS idx_sync_executions_status ON sync_executions(status);
 
--- Task Instances table
-CREATE TABLE IF NOT EXISTS task_instances (
-    id                VARCHAR(64) PRIMARY KEY,
-    workflow_inst_id  VARCHAR(64) NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
-    task_name         VARCHAR(128) NOT NULL,
-    status            VARCHAR(32) NOT NULL,
-    started_at        TIMESTAMP,
-    finished_at       TIMESTAMP,
-    retry_count       INTEGER DEFAULT 0,
-    error_message     TEXT
+-- ==================== Task Engine Tables (with QDHub extensions) ====================
+
+-- Workflow定义表 (Task Engine structure + QDHub extensions)
+-- This table is shared between Task Engine and QDHub
+-- Task Engine's initSchema uses CREATE TABLE IF NOT EXISTS, so it won't conflict
+CREATE TABLE IF NOT EXISTS workflow_definition (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    params TEXT,  -- JSON格式存储参数
+    dependencies TEXT,  -- JSON格式存储依赖关系
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'ENABLED',
+    sub_task_error_tolerance REAL NOT NULL DEFAULT 0.0,
+    transactional INTEGER NOT NULL DEFAULT 0,
+    transaction_mode TEXT DEFAULT '',
+    max_concurrent_task INTEGER NOT NULL DEFAULT 10,
+    cron_expr TEXT DEFAULT '',
+    cron_enabled INTEGER NOT NULL DEFAULT 0,
+    -- QDHub specific fields (added to base Task Engine structure)
+    category TEXT,  -- QDHub workflow category (metadata/sync/custom)
+    definition_yaml TEXT,  -- QDHub workflow definition YAML
+    version INTEGER DEFAULT 1,  -- QDHub workflow version
+    is_system INTEGER DEFAULT 0,  -- QDHub system workflow flag
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP  -- QDHub update timestamp
 );
 
-CREATE INDEX IF NOT EXISTS idx_task_instances_wf ON task_instances(workflow_inst_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_definition_name ON workflow_definition(name);
+CREATE INDEX IF NOT EXISTS idx_workflow_definition_status ON workflow_definition(status);
+
+-- Task定义表（存储Workflow中的Task定义，与task_instance运行时实例区分）
+CREATE TABLE IF NOT EXISTS task_definition (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    job_func_id TEXT,
+    job_func_name TEXT,
+    compensation_func_id TEXT,
+    compensation_func_name TEXT,
+    params TEXT,  -- JSON格式存储参数
+    timeout_seconds INTEGER DEFAULT 30,
+    retry_count INTEGER DEFAULT 0,
+    dependencies TEXT,  -- JSON数组，存储依赖的Task名称
+    required_params TEXT,  -- JSON数组，必需参数列表
+    result_mapping TEXT,  -- JSON对象，结果映射规则
+    status_handlers TEXT,  -- JSON对象，状态处理器映射
+    is_template INTEGER DEFAULT 0,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflow_definition(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_definition_workflow_id ON task_definition(workflow_id);
+
+-- WorkflowInstance表 (Task Engine structure + QDHub extensions)
+-- This table is shared between Task Engine and QDHub
+-- Task Engine's initSchema uses CREATE TABLE IF NOT EXISTS, so it won't conflict
+CREATE TABLE IF NOT EXISTS workflow_instance (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL,  -- Ready/Running/Paused/Terminated/Success/Failed
+    start_time DATETIME,
+    end_time DATETIME,
+    breakpoint TEXT,  -- JSON格式存储断点数据
+    error_message TEXT,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- QDHub specific fields (added to base Task Engine structure)
+    engine_instance_id TEXT,  -- QDHub: Task Engine instance ID (same as id for compatibility)
+    trigger_type TEXT,  -- QDHub: trigger type (manual/cron/event)
+    trigger_params TEXT,  -- QDHub: trigger parameters (JSON)
+    progress REAL DEFAULT 0,  -- QDHub: workflow progress (0-100)
+    FOREIGN KEY (workflow_id) REFERENCES workflow_definition(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_workflow_id ON workflow_instance(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_status ON workflow_instance(status);
+
+-- Task实例表 (Task Engine structure)
+CREATE TABLE IF NOT EXISTS task_instance (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    workflow_instance_id TEXT NOT NULL,
+    job_func_id TEXT,
+    job_func_name TEXT,
+    compensation_func_id TEXT,
+    compensation_func_name TEXT,
+    params TEXT,  -- JSON格式存储参数
+    status TEXT NOT NULL,  -- Pending/Running/Success/Failed/TimeoutFailed
+    timeout_seconds INTEGER DEFAULT 30,
+    retry_count INTEGER DEFAULT 0,
+    start_time DATETIME,
+    end_time DATETIME,
+    error_msg TEXT,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_instance_id) REFERENCES workflow_instance(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_instance_workflow_instance_id ON task_instance(workflow_instance_id);
+CREATE INDEX IF NOT EXISTS idx_task_instance_status ON task_instance(status);
+
+-- Job函数元数据表 (Task Engine)
+CREATE TABLE IF NOT EXISTS job_function_meta (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    code_path TEXT,  -- 函数加载路径
+    hash TEXT,  -- 函数二进制哈希
+    param_types TEXT,  -- JSON格式存储参数类型列表
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_function_meta_name ON job_function_meta(name);
+
+-- Task Handler元数据表 (Task Engine)
+CREATE TABLE IF NOT EXISTS task_handler_meta (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_handler_meta_name ON task_handler_meta(name);

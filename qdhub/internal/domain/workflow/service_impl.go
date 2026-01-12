@@ -4,7 +4,6 @@ package workflow
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -26,7 +25,7 @@ func (v *workflowValidatorImpl) ValidateWorkflowDefinition(definition *WorkflowD
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow definition cannot be nil", nil)
 	}
 
-	if definition.ID.IsEmpty() {
+	if definition.ID() == "" {
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow definition ID cannot be empty", nil)
 	}
 
@@ -58,49 +57,31 @@ func (v *workflowValidatorImpl) ValidateWorkflowDefinition(definition *WorkflowD
 	}
 
 	// Validate status
-	if definition.Status != WfDefStatusEnabled && definition.Status != WfDefStatusDisabled {
-		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid workflow status: %s", definition.Status), nil)
+	status := definition.Status()
+	if status != WfDefStatusEnabled && status != WfDefStatusDisabled {
+		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid workflow status: %s", status), nil)
 	}
 
 	return nil
 }
 
 // ValidateWorkflowInstance validates workflow instance.
+// Note: Task Engine WorkflowInstance has a simpler structure than qdhub's original design.
 func (v *workflowValidatorImpl) ValidateWorkflowInstance(instance *WorkflowInstance) error {
 	if instance == nil {
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow instance cannot be nil", nil)
 	}
 
-	if instance.ID.IsEmpty() {
+	if instance.ID == "" {
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow instance ID cannot be empty", nil)
 	}
 
-	if instance.WorkflowDefID.IsEmpty() {
+	if instance.WorkflowID == "" {
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow definition ID cannot be empty", nil)
 	}
 
-	if strings.TrimSpace(instance.EngineInstanceID) == "" {
-		return shared.NewDomainError(shared.ErrCodeValidation, "engine instance ID cannot be empty", nil)
-	}
-
-	// Validate trigger type
-	validTriggerTypes := []TriggerType{TriggerTypeManual, TriggerTypeCron, TriggerTypeEvent}
-	isValidTrigger := false
-	for _, tt := range validTriggerTypes {
-		if instance.TriggerType == tt {
-			isValidTrigger = true
-			break
-		}
-	}
-	if !isValidTrigger {
-		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid trigger type: %s", instance.TriggerType), nil)
-	}
-
-	// Validate status
-	validStatuses := []WfInstStatus{
-		WfInstStatusPending, WfInstStatusRunning, WfInstStatusPaused,
-		WfInstStatusSuccess, WfInstStatusFailed, WfInstStatusCancelled,
-	}
+	// Validate status (Task Engine uses string status)
+	validStatuses := []string{"Ready", "Running", "Paused", "Success", "Failed", "Terminated"}
 	isValidStatus := false
 	for _, status := range validStatuses {
 		if instance.Status == status {
@@ -110,11 +91,6 @@ func (v *workflowValidatorImpl) ValidateWorkflowInstance(instance *WorkflowInsta
 	}
 	if !isValidStatus {
 		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid instance status: %s", instance.Status), nil)
-	}
-
-	// Validate progress range
-	if instance.Progress < 0 || instance.Progress > 100 {
-		return shared.NewDomainError(shared.ErrCodeValidation, "progress must be between 0 and 100", nil)
 	}
 
 	return nil
@@ -190,7 +166,8 @@ func (p *progressCalculatorImpl) CalculateProgress(tasks []TaskInstance) float64
 
 	completedTasks := 0
 	for _, task := range tasks {
-		if task.Status == TaskStatusSuccess || task.Status == TaskStatusSkipped {
+		// Task Engine uses string status
+		if task.Status == "Success" || task.Status == "Skipped" {
 			completedTasks++
 		}
 	}
@@ -206,30 +183,16 @@ func (p *progressCalculatorImpl) EstimateRemainingTime(instance *WorkflowInstanc
 	}
 
 	// If workflow is completed or cancelled, no remaining time
-	if instance.Status == WfInstStatusSuccess ||
-		instance.Status == WfInstStatusFailed ||
-		instance.Status == WfInstStatusCancelled {
+	// Task Engine uses string status
+	if instance.Status == "Success" ||
+		instance.Status == "Failed" ||
+		instance.Status == "Terminated" {
 		zero := int64(0)
 		return &zero
 	}
 
-	// If progress is 0, cannot estimate
-	if instance.Progress == 0 {
-		return nil
-	}
-
-	// Calculate elapsed time
-	elapsed := time.Since(instance.StartedAt.ToTime())
-	elapsedSeconds := int64(elapsed.Seconds())
-
-	// Estimate total time based on current progress
-	estimatedTotal := float64(elapsedSeconds) / (instance.Progress / 100.0)
-	remaining := int64(estimatedTotal) - elapsedSeconds
-
-	if remaining < 0 {
-		zero := int64(0)
-		return &zero
-	}
-
-	return &remaining
+	// Task Engine WorkflowInstance doesn't have Progress field
+	// Progress needs to be calculated from task instances
+	// For now, return nil (cannot estimate without task instances and progress)
+	return nil
 }

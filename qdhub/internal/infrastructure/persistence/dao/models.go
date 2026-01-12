@@ -1,0 +1,181 @@
+// Package dao provides data access object implementations.
+package dao
+
+import (
+	"database/sql"
+	"time"
+)
+
+// ==================== Metadata Domain Models ====================
+
+// DataSourceRow represents data_sources table row.
+type DataSourceRow struct {
+	ID          string       `db:"id"`
+	Name        string       `db:"name"`
+	Description string       `db:"description"`
+	BaseURL     string       `db:"base_url"`
+	DocURL      string       `db:"doc_url"`
+	Status      string       `db:"status"`
+	CreatedAt   time.Time    `db:"created_at"`
+	UpdatedAt   time.Time    `db:"updated_at"`
+}
+
+// APICategoryRow represents api_categories table row.
+type APICategoryRow struct {
+	ID           string         `db:"id"`
+	DataSourceID string         `db:"data_source_id"`
+	Name         string         `db:"name"`
+	Description  string         `db:"description"`
+	ParentID     sql.NullString `db:"parent_id"`
+	SortOrder    int            `db:"sort_order"`
+	DocPath      string         `db:"doc_path"`
+	CreatedAt    time.Time      `db:"created_at"`
+}
+
+// APIMetadataRow represents api_metadata table row.
+type APIMetadataRow struct {
+	ID             string         `db:"id"`
+	DataSourceID   string         `db:"data_source_id"`
+	CategoryID     sql.NullString `db:"category_id"`
+	Name           string         `db:"name"`
+	DisplayName    string         `db:"display_name"`
+	Description    string         `db:"description"`
+	Endpoint       string         `db:"endpoint"`
+	RequestParams  string         `db:"request_params"`
+	ResponseFields string         `db:"response_fields"`
+	RateLimit      string         `db:"rate_limit"`
+	Permission     string         `db:"permission"`
+	Status         string         `db:"status"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+}
+
+// TokenRow represents tokens table row.
+type TokenRow struct {
+	ID           string       `db:"id"`
+	DataSourceID string       `db:"data_source_id"`
+	TokenValue   string       `db:"token_value"`
+	ExpiresAt    sql.NullTime `db:"expires_at"`
+	CreatedAt    time.Time    `db:"created_at"`
+}
+
+// ==================== Datastore Domain Models ====================
+
+// QuantDataStoreRow represents quant_data_stores table row.
+type QuantDataStoreRow struct {
+	ID          string    `db:"id"`
+	Name        string    `db:"name"`
+	Description string    `db:"description"`
+	Type        string    `db:"type"`
+	DSN         string    `db:"dsn"`
+	StoragePath string    `db:"storage_path"`
+	Status      string    `db:"status"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
+}
+
+// TableSchemaRow represents table_schemas table row.
+type TableSchemaRow struct {
+	ID            string         `db:"id"`
+	DataStoreID   string         `db:"data_store_id"`
+	APIMetadataID string         `db:"api_meta_id"`
+	TableName     string         `db:"table_name"`
+	Columns       string         `db:"columns"`
+	PrimaryKeys   string         `db:"primary_keys"`
+	Indexes       string         `db:"indexes"`
+	Status        string         `db:"status"`
+	ErrorMessage  sql.NullString `db:"error_message"`
+	CreatedAt     time.Time      `db:"created_at"`
+	UpdatedAt     time.Time      `db:"updated_at"`
+}
+
+// DataTypeMappingRuleRow represents data_type_mapping_rules table row.
+type DataTypeMappingRuleRow struct {
+	ID             string         `db:"id"`
+	DataSourceType string         `db:"data_source_type"`
+	SourceType     string         `db:"source_type"`
+	TargetDBType   string         `db:"target_db_type"`
+	TargetType     string         `db:"target_type"`
+	FieldPattern   sql.NullString `db:"field_pattern"`
+	Priority       int            `db:"priority"`
+	IsDefault      bool           `db:"is_default"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+}
+
+// ==================== Sync Domain Models ====================
+
+// SyncJobRow represents sync_jobs table row.
+type SyncJobRow struct {
+	ID             string         `db:"id"`
+	Name           string         `db:"name"`
+	Description    string         `db:"description"`
+	APIMetadataID  string         `db:"api_meta_id"`
+	DataStoreID    string         `db:"data_store_id"`
+	WorkflowDefID  string         `db:"workflow_def_id"`
+	Mode           string         `db:"mode"`
+	CronExpression sql.NullString `db:"cron_expression"`
+	Params         string         `db:"params"`
+	ParamRules     string         `db:"param_rules"`
+	Status         string         `db:"status"`
+	LastRunAt      sql.NullTime   `db:"last_run_at"`
+	NextRunAt      sql.NullTime   `db:"next_run_at"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+}
+
+// SyncExecutionRow represents sync_executions table row.
+type SyncExecutionRow struct {
+	ID             string         `db:"id"`
+	SyncJobID      string         `db:"sync_job_id"`
+	WorkflowInstID string         `db:"workflow_inst_id"`
+	Status         string         `db:"status"`
+	StartedAt      time.Time      `db:"started_at"`
+	FinishedAt     sql.NullTime   `db:"finished_at"`
+	RecordCount    int64          `db:"record_count"`
+	ErrorMessage   sql.NullString `db:"error_message"`
+}
+
+// ==================== Workflow Domain Models ====================
+
+// WorkflowDefinitionRow represents workflow_definitions table row.
+type WorkflowDefinitionRow struct {
+	ID             string    `db:"id"`
+	Name           string    `db:"name"`
+	Description    string    `db:"description"`
+	Category       string    `db:"category"`
+	DefinitionYAML string    `db:"definition_yaml"`
+	Version        int       `db:"version"`
+	Status         string    `db:"status"`
+	IsSystem       bool      `db:"is_system"`
+	CreatedAt      time.Time `db:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at"`
+}
+
+// WorkflowInstanceRow represents workflow_instances table row.
+type WorkflowInstanceRow struct {
+	ID               string         `db:"id"`
+	WorkflowDefID    string         `db:"workflow_def_id"`
+	EngineInstanceID string         `db:"engine_instance_id"`
+	TriggerType      string         `db:"trigger_type"`
+	TriggerParams    string         `db:"trigger_params"`
+	Status           string         `db:"status"`
+	Progress         float64        `db:"progress"`
+	StartedAt        time.Time      `db:"started_at"`
+	FinishedAt       sql.NullTime   `db:"finished_at"`
+	ErrorMessage     sql.NullString `db:"error_message"`
+	CreatedAt        sql.NullTime   `db:"created_at"`
+}
+
+// TaskInstanceRow represents task_instances table row.
+type TaskInstanceRow struct {
+	ID             string         `db:"id"`
+	WorkflowInstID string         `db:"workflow_inst_id"`
+	TaskName       string         `db:"task_name"`
+	Status         string         `db:"status"`
+	StartedAt      sql.NullTime   `db:"started_at"`
+	FinishedAt     sql.NullTime   `db:"finished_at"`
+	RetryCount     int            `db:"retry_count"`
+	ErrorMessage   sql.NullString `db:"error_message"`
+	CreatedAt      sql.NullTime   `db:"created_at"`
+}
