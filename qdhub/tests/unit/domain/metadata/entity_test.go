@@ -255,40 +255,6 @@ func TestToken_IsExpired(t *testing.T) {
 	})
 }
 
-func TestNewDataTypeMappingRule(t *testing.T) {
-	rule := metadata.NewDataTypeMappingRule("tushare", "str", "duckdb", "VARCHAR", 10, false)
-
-	if rule.ID.IsEmpty() {
-		t.Error("ID should not be empty")
-	}
-	if rule.DataSourceType != "tushare" {
-		t.Errorf("DataSourceType = %s, expected tushare", rule.DataSourceType)
-	}
-	if rule.Priority != 10 {
-		t.Errorf("Priority = %d, expected 10", rule.Priority)
-	}
-	if rule.IsDefault {
-		t.Error("IsDefault should be false")
-	}
-}
-
-func TestDataTypeMappingRule_SetFieldPattern(t *testing.T) {
-	rule := metadata.NewDataTypeMappingRule("tushare", "str", "duckdb", "VARCHAR", 10, false)
-
-	if rule.FieldPattern != nil {
-		t.Error("FieldPattern should be nil initially")
-	}
-
-	rule.SetFieldPattern("^ts_")
-
-	if rule.FieldPattern == nil {
-		t.Fatal("FieldPattern should not be nil after setting")
-	}
-	if *rule.FieldPattern != "^ts_" {
-		t.Errorf("FieldPattern = %s, expected ^ts_", *rule.FieldPattern)
-	}
-}
-
 func TestValueObjects_JSON(t *testing.T) {
 	t.Run("ParamMeta", func(t *testing.T) {
 		defaultVal := "default"

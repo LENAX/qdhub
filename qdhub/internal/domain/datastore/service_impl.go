@@ -3,6 +3,7 @@ package datastore
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"qdhub/internal/domain/shared"
@@ -240,4 +241,96 @@ func isValidTableName(name string) bool {
 // isValidColumnName checks if column name is valid.
 func isValidColumnName(name string) bool {
 	return isValidTableName(name) // Same rules as table name
+}
+
+// ==================== TypeMappingService 实现 ====================
+
+type typeMappingServiceImpl struct{}
+
+// NewTypeMappingService creates a new TypeMappingService.
+func NewTypeMappingService() TypeMappingService {
+	return &typeMappingServiceImpl{}
+}
+
+// FindBestMatchingRule finds the best matching type mapping rule.
+// Priority: 1. Field pattern match with highest priority 2. Source type match with highest priority
+func (s *typeMappingServiceImpl) FindBestMatchingRule(rules []*DataTypeMappingRule, fieldName, sourceType string) *DataTypeMappingRule {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	var bestRule *DataTypeMappingRule
+	var bestPriority int = -1
+
+	// First pass: find rules with field pattern match
+	for _, rule := range rules {
+		if rule.FieldPattern != nil && *rule.FieldPattern != "" {
+			if matchFieldPattern(*rule.FieldPattern, fieldName) && rule.SourceType == sourceType {
+				if rule.Priority > bestPriority {
+					bestRule = rule
+					bestPriority = rule.Priority
+				}
+			}
+		}
+	}
+
+	// If found pattern match, return it
+	if bestRule != nil {
+		return bestRule
+	}
+
+	// Second pass: find rules by source type only
+	bestPriority = -1
+	for _, rule := range rules {
+		if rule.FieldPattern == nil || *rule.FieldPattern == "" {
+			if rule.SourceType == sourceType {
+				if rule.Priority > bestPriority {
+					bestRule = rule
+					bestPriority = rule.Priority
+				}
+			}
+		}
+	}
+
+	return bestRule
+}
+
+// ValidateMappingRule validates a mapping rule.
+func (s *typeMappingServiceImpl) ValidateMappingRule(rule *DataTypeMappingRule) error {
+	if rule == nil {
+		return shared.NewDomainError(shared.ErrCodeValidation, "mapping rule cannot be nil", nil)
+	}
+
+	if rule.ID.IsEmpty() {
+		return shared.NewDomainError(shared.ErrCodeValidation, "mapping rule ID cannot be empty", nil)
+	}
+
+	if strings.TrimSpace(rule.DataSourceType) == "" {
+		return shared.NewDomainError(shared.ErrCodeValidation, "data source type cannot be empty", nil)
+	}
+
+	if strings.TrimSpace(rule.SourceType) == "" {
+		return shared.NewDomainError(shared.ErrCodeValidation, "source type cannot be empty", nil)
+	}
+
+	if strings.TrimSpace(rule.TargetDBType) == "" {
+		return shared.NewDomainError(shared.ErrCodeValidation, "target database type cannot be empty", nil)
+	}
+
+	if strings.TrimSpace(rule.TargetType) == "" {
+		return shared.NewDomainError(shared.ErrCodeValidation, "target type cannot be empty", nil)
+	}
+
+	if rule.Priority < 0 {
+		return shared.NewDomainError(shared.ErrCodeValidation, "priority cannot be negative", nil)
+	}
+
+	// Validate field pattern regex if set
+	if rule.FieldPattern != nil && *rule.FieldPattern != "" {
+		if _, err := regexp.Compile(*rule.FieldPattern); err != nil {
+			return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid field pattern regex: %v", err), err)
+		}
+	}
+
+	return nil
 }

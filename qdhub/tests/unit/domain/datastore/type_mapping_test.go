@@ -1,18 +1,18 @@
-package metadata_test
+package datastore_test
 
 import (
 	"testing"
 
-	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/shared"
 )
 
 func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
-	service := metadata.NewTypeMappingService()
+	service := datastore.NewTypeMappingService()
 
 	// Helper to create rules
-	createRule := func(sourceType, fieldPattern string, priority int) *metadata.DataTypeMappingRule {
-		rule := &metadata.DataTypeMappingRule{
+	createRule := func(sourceType, fieldPattern string, priority int) *datastore.DataTypeMappingRule {
+		rule := &datastore.DataTypeMappingRule{
 			ID:             shared.NewID(),
 			DataSourceType: "tushare",
 			SourceType:     sourceType,
@@ -28,7 +28,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		rules      []*metadata.DataTypeMappingRule
+		rules      []*datastore.DataTypeMappingRule
 		fieldName  string
 		sourceType string
 		wantNil    bool
@@ -36,14 +36,14 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 	}{
 		{
 			name:       "empty rules",
-			rules:      []*metadata.DataTypeMappingRule{},
+			rules:      []*datastore.DataTypeMappingRule{},
 			fieldName:  "ts_code",
 			sourceType: "str",
 			wantNil:    true,
 		},
 		{
 			name: "match by source type only",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("str", "", 10),
 				createRule("int", "", 10),
 			},
@@ -54,7 +54,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "prefer higher priority",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("str", "", 10),
 				createRule("str", "", 20),
 			},
@@ -65,7 +65,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "prefer field pattern match over source type match",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("str", "", 20),               // Higher priority but no pattern
 				createRule("str", "^ts_", 10),           // Lower priority but matches pattern
 			},
@@ -76,7 +76,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "field pattern must match source type too",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("int", "^ts_", 20),  // Pattern matches but source type doesn't
 				createRule("str", "", 10),      // Source type matches
 			},
@@ -87,7 +87,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "multiple pattern rules choose highest priority",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("str", "^ts_", 10),
 				createRule("str", "^ts_code$", 30),
 				createRule("str", "code$", 20),
@@ -99,7 +99,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "no match returns nil",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("int", "", 10),
 				createRule("float", "", 10),
 			},
@@ -109,7 +109,7 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		},
 		{
 			name: "regex pattern match",
-			rules: []*metadata.DataTypeMappingRule{
+			rules: []*datastore.DataTypeMappingRule{
 				createRule("str", ".*_date$", 20),
 			},
 			fieldName:  "trade_date",
@@ -142,11 +142,11 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 }
 
 func TestTypeMappingService_ValidateMappingRule(t *testing.T) {
-	service := metadata.NewTypeMappingService()
+	service := datastore.NewTypeMappingService()
 
-	validRule := func() *metadata.DataTypeMappingRule {
+	validRule := func() *datastore.DataTypeMappingRule {
 		pattern := "^ts_"
-		return &metadata.DataTypeMappingRule{
+		return &datastore.DataTypeMappingRule{
 			ID:             shared.NewID(),
 			DataSourceType: "tushare",
 			SourceType:     "str",
@@ -159,57 +159,57 @@ func TestTypeMappingService_ValidateMappingRule(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		modify  func(*metadata.DataTypeMappingRule)
+		modify  func(*datastore.DataTypeMappingRule)
 		wantErr bool
 	}{
 		{
 			name:    "valid rule",
-			modify:  func(r *metadata.DataTypeMappingRule) {},
+			modify:  func(r *datastore.DataTypeMappingRule) {},
 			wantErr: false,
 		},
 		{
 			name:    "nil rule",
-			modify:  func(r *metadata.DataTypeMappingRule) {},
+			modify:  func(r *datastore.DataTypeMappingRule) {},
 			wantErr: true,
 		},
 		{
 			name:    "empty ID",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.ID = "" },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.ID = "" },
 			wantErr: true,
 		},
 		{
 			name:    "empty data source type",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.DataSourceType = "" },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.DataSourceType = "" },
 			wantErr: true,
 		},
 		{
 			name:    "empty source type",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.SourceType = "" },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.SourceType = "" },
 			wantErr: true,
 		},
 		{
 			name:    "empty target DB type",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.TargetDBType = "" },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.TargetDBType = "" },
 			wantErr: true,
 		},
 		{
 			name:    "empty target type",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.TargetType = "" },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.TargetType = "" },
 			wantErr: true,
 		},
 		{
 			name:    "negative priority",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.Priority = -1 },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.Priority = -1 },
 			wantErr: true,
 		},
 		{
 			name:    "zero priority is valid",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.Priority = 0 },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.Priority = 0 },
 			wantErr: false,
 		},
 		{
 			name: "invalid regex pattern",
-			modify: func(r *metadata.DataTypeMappingRule) {
+			modify: func(r *datastore.DataTypeMappingRule) {
 				invalid := "[invalid"
 				r.FieldPattern = &invalid
 			},
@@ -217,12 +217,12 @@ func TestTypeMappingService_ValidateMappingRule(t *testing.T) {
 		},
 		{
 			name:    "nil field pattern is valid",
-			modify:  func(r *metadata.DataTypeMappingRule) { r.FieldPattern = nil },
+			modify:  func(r *datastore.DataTypeMappingRule) { r.FieldPattern = nil },
 			wantErr: false,
 		},
 		{
 			name: "empty field pattern is valid",
-			modify: func(r *metadata.DataTypeMappingRule) {
+			modify: func(r *datastore.DataTypeMappingRule) {
 				empty := ""
 				r.FieldPattern = &empty
 			},
@@ -232,7 +232,7 @@ func TestTypeMappingService_ValidateMappingRule(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var rule *metadata.DataTypeMappingRule
+			var rule *datastore.DataTypeMappingRule
 			if tt.name == "nil rule" {
 				rule = nil
 			} else {

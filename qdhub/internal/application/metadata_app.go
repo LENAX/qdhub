@@ -4,6 +4,7 @@ package application
 import (
 	"context"
 
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 )
@@ -74,10 +75,10 @@ type MetadataApplicationService interface {
 	// ==================== Type Mapping Management ====================
 
 	// CreateMappingRule creates a new type mapping rule.
-	CreateMappingRule(ctx context.Context, req CreateMappingRuleRequest) (*metadata.DataTypeMappingRule, error)
+	CreateMappingRule(ctx context.Context, req CreateMappingRuleRequest) (*datastore.DataTypeMappingRule, error)
 
 	// GetMappingRules retrieves mapping rules for data source and target DB.
-	GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*metadata.DataTypeMappingRule, error)
+	GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error)
 
 	// InitDefaultMappingRules initializes default type mapping rules.
 	InitDefaultMappingRules(ctx context.Context) error
