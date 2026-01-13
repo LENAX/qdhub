@@ -2,6 +2,7 @@ package dao_test
 
 import (
 	"testing"
+	"time"
 
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
@@ -226,6 +227,7 @@ func TestWorkflowDefinitionDAO_ListAll(t *testing.T) {
 		t.Errorf("ListAll() returned %d workflows, want at least 2", len(list))
 	}
 }
+
 
 func TestWorkflowInstanceDAO_Create(t *testing.T) {
 	db, cleanup := setupDAOTestDB(t)
@@ -452,6 +454,116 @@ func TestWorkflowInstanceDAO_DeleteByID(t *testing.T) {
 
 	if got != nil {
 		t.Error("DeleteByID() should remove the workflow instance")
+	}
+}
+
+func TestWorkflowInstanceDAO_DeleteByWorkflowDef(t *testing.T) {
+	db, cleanup := setupDAOTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS workflow_instances (
+			id TEXT PRIMARY KEY,
+			workflow_def_id TEXT NOT NULL,
+			engine_instance_id TEXT,
+			trigger_type TEXT,
+			trigger_params TEXT,
+			status TEXT NOT NULL,
+			progress REAL DEFAULT 0,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
+			error_message TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	dao := dao.NewWorkflowInstanceDAO(db.DB)
+
+	workflowDefID := shared.NewID().String()
+	inst1 := workflow.NewWorkflowInstance(workflowDefID)
+	inst2 := workflow.NewWorkflowInstance(workflowDefID)
+
+	err = dao.Create(nil, inst1)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	err = dao.Create(nil, inst2)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Delete all instances for the workflow definition
+	err = dao.DeleteByWorkflowDef(nil, shared.ID(workflowDefID))
+	if err != nil {
+		t.Fatalf("DeleteByWorkflowDef() error = %v", err)
+	}
+
+	// Verify all instances are deleted
+	instances, err := dao.GetByWorkflowDef(nil, shared.ID(workflowDefID))
+	if err != nil {
+		t.Fatalf("GetByWorkflowDef() error = %v", err)
+	}
+
+	if len(instances) != 0 {
+		t.Errorf("DeleteByWorkflowDef() should remove all instances, got %d remaining", len(instances))
+	}
+}
+
+func TestWorkflowInstanceDAO_toRow_WithOptionalFields(t *testing.T) {
+	db, cleanup := setupDAOTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS workflow_instances (
+			id TEXT PRIMARY KEY,
+			workflow_def_id TEXT NOT NULL,
+			engine_instance_id TEXT,
+			trigger_type TEXT,
+			trigger_params TEXT,
+			status TEXT NOT NULL,
+			progress REAL DEFAULT 0,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
+			error_message TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	dao := dao.NewWorkflowInstanceDAO(db.DB)
+
+	// Test with instance that has EndTime and ErrorMessage set
+	workflowDefID := shared.NewID().String()
+	inst := workflow.NewWorkflowInstance(workflowDefID)
+	inst.Status = "Failed"
+	
+	// Set optional fields
+	endTime := time.Now()
+	inst.EndTime = &endTime
+	inst.ErrorMessage = "Test error"
+
+	err = dao.Create(nil, inst)
+	if err != nil {
+		t.Fatalf("Create() with optional fields error = %v", err)
+	}
+
+	// Verify the optional fields were saved
+	got, err := dao.GetByID(nil, shared.ID(inst.ID))
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+
+	if got == nil {
+		t.Fatal("GetByID() returned nil")
+	}
+
+	if got.ErrorMessage != "Test error" {
+		t.Errorf("GetByID() ErrorMessage = %s, want Test error", got.ErrorMessage)
 	}
 }
 
@@ -773,5 +885,68 @@ func TestTaskInstanceDAO_DeleteByWorkflowInstance(t *testing.T) {
 
 	if len(tasks) != 0 {
 		t.Errorf("DeleteByWorkflowInstance() should remove all tasks, got %d remaining", len(tasks))
+	}
+}
+
+func TestTaskInstanceDAO_toRow_WithOptionalFields(t *testing.T) {
+	db, cleanup := setupDAOTestDB(t)
+	defer cleanup()
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS task_instances (
+			id TEXT PRIMARY KEY,
+			workflow_inst_id TEXT NOT NULL,
+			task_name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
+			retry_count INTEGER DEFAULT 0,
+			error_message TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	dao := dao.NewTaskInstanceDAO(db.DB)
+
+	workflowInstID := shared.NewID().String()
+	taskInst := &workflow.TaskInstance{
+		ID:                 shared.NewID().String(),
+		Name:               "test_task",
+		WorkflowInstanceID: workflowInstID,
+		Status:             "Failed",
+		RetryCount:         2,
+	}
+
+	// Set optional fields
+	startTime := time.Now()
+	endTime := startTime.Add(time.Minute)
+	taskInst.StartTime = &startTime
+	taskInst.EndTime = &endTime
+	taskInst.ErrorMessage = "Task failed"
+
+	err = dao.Create(nil, taskInst)
+	if err != nil {
+		t.Fatalf("Create() with optional fields error = %v", err)
+	}
+
+	// Verify the optional fields were saved
+	got, err := dao.GetByID(nil, shared.ID(taskInst.ID))
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+
+	if got == nil {
+		t.Fatal("GetByID() returned nil")
+	}
+
+	if got.ErrorMessage != "Task failed" {
+		t.Errorf("GetByID() ErrorMessage = %s, want Task failed", got.ErrorMessage)
+	}
+
+	if got.RetryCount != 2 {
+		t.Errorf("GetByID() RetryCount = %d, want 2", got.RetryCount)
 	}
 }

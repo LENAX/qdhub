@@ -3,6 +3,7 @@ package dao_test
 import (
 	"os"
 	"testing"
+	"time"
 
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
@@ -235,6 +236,22 @@ func TestDataSourceDAO_ListAll(t *testing.T) {
 
 	if len(list) < 2 {
 		t.Errorf("ListAll() returned %d data sources, want at least 2", len(list))
+	}
+}
+
+func TestDataSourceDAO_GetCreatedAt(t *testing.T) {
+	// Create a minimal DB instance for the test
+	db, cleanup := setupDAOTestDB(t)
+	defer cleanup()
+
+	dsDAO := dao.NewDataSourceDAO(db.DB)
+
+	// Test GetCreatedAt helper method
+	now := time.Now()
+	result := dsDAO.GetCreatedAt(now)
+	
+	if result.ToTime().Unix() != now.Unix() {
+		t.Errorf("GetCreatedAt() = %v, want %v", result.ToTime(), now)
 	}
 }
 
