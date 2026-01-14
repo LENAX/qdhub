@@ -11,7 +11,7 @@ func TestSQLBaseDAO_TableName(t *testing.T) {
 	defer cleanup()
 
 	baseDAO := dao.NewSQLBaseDAO[struct{}](db.DB, "test_table", "id")
-	
+
 	tableName := baseDAO.TableName()
 	if tableName != "test_table" {
 		t.Errorf("TableName() = %s, want test_table", tableName)
@@ -23,7 +23,7 @@ func TestSQLBaseDAO_DB(t *testing.T) {
 	defer cleanup()
 
 	baseDAO := dao.NewSQLBaseDAO[struct{}](db.DB, "test_table", "id")
-	
+
 	retrievedDB := baseDAO.DB()
 	if retrievedDB != db.DB {
 		t.Error("DB() should return the same database connection")

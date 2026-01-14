@@ -228,7 +228,6 @@ func TestWorkflowDefinitionDAO_ListAll(t *testing.T) {
 	}
 }
 
-
 func TestWorkflowInstanceDAO_Create(t *testing.T) {
 	db, cleanup := setupDAOTestDB(t)
 	defer cleanup()
@@ -541,7 +540,7 @@ func TestWorkflowInstanceDAO_toRow_WithOptionalFields(t *testing.T) {
 	workflowDefID := shared.NewID().String()
 	inst := workflow.NewWorkflowInstance(workflowDefID)
 	inst.Status = "Failed"
-	
+
 	// Set optional fields
 	endTime := time.Now()
 	inst.EndTime = &endTime
@@ -595,11 +594,11 @@ func TestTaskInstanceDAO_Create(t *testing.T) {
 	// TaskInstance is a type alias from Task Engine
 	// We need to create it with the correct structure
 	taskInst := &workflow.TaskInstance{
-		ID:             shared.NewID().String(),
-		Name:           "test_task",
+		ID:                 shared.NewID().String(),
+		Name:               "test_task",
 		WorkflowInstanceID: workflowInstID,
-		Status:         "Pending",
-		RetryCount:     0,
+		Status:             "Pending",
+		RetryCount:         0,
 	}
 
 	err = dao.Create(nil, taskInst)
