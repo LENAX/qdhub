@@ -47,7 +47,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/stevelan1995/task-engine.git
+git clone https://github.com/LENAX/task-engine.git
 cd task-engine/task-engine
 
 # 安装依赖
@@ -72,8 +72,8 @@ import (
     "context"
     "log"
     
-    "github.com/stevelan1995/task-engine/pkg/core/engine"
-    "github.com/stevelan1995/task-engine/pkg/core/builder"
+    "github.com/LENAX/task-engine/pkg/core/engine"
+    "github.com/LENAX/task-engine/pkg/core/builder"
 )
 
 func main() {
@@ -387,7 +387,7 @@ task-engine/
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/stevelan1995/task-engine.git
+git clone https://github.com/LENAX/task-engine.git
 cd task-engine/task-engine
 
 # 2. 安装依赖

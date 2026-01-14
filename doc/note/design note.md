@@ -31,7 +31,7 @@
 1. http api: Gin
 2. 数据库: sqlite(开发)，postgres(生产)
 3. 数据库交互: sqlx
-4. 工作流管理: github.com/stevelan1995/task-engine
+4. 工作流管理: github.com/LENAX/task-engine
 5. 数据源api接口
    1. tushare,没有go实现，参考python包复刻一个。https://tushare.pro/document/1?doc_id=130
    2. akshare, 没有go实现，以后支持

@@ -249,7 +249,7 @@ func TestDataSourceDAO_GetCreatedAt(t *testing.T) {
 	// Test GetCreatedAt helper method
 	now := time.Now()
 	result := dsDAO.GetCreatedAt(now)
-	
+
 	if result.ToTime().Unix() != now.Unix() {
 		t.Errorf("GetCreatedAt() = %v, want %v", result.ToTime(), now)
 	}
