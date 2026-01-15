@@ -1,11 +1,12 @@
-// Package application contains application service implementations.
-package application
+// Package impl contains application service implementations.
+package impl
 
 import (
 	"context"
 	"fmt"
 	"time"
 
+	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
@@ -13,28 +14,22 @@ import (
 
 // SyncApplicationServiceImpl implements SyncApplicationService.
 type SyncApplicationServiceImpl struct {
-	syncJobRepo      sync.SyncJobRepository
-	syncExecRepo     sync.SyncExecutionRepository
-	workflowDefRepo  workflow.WorkflowDefinitionRepository
-	workflowInstRepo workflow.WorkflowInstanceRepository
+	syncJobRepo       sync.SyncJobRepository
+	workflowDefRepo   workflow.WorkflowDefinitionRepository
 	taskEngineAdapter workflow.TaskEngineAdapter
-	syncValidator    sync.SyncJobValidator
-	cronCalculator   sync.CronScheduleCalculator
+	syncValidator     sync.SyncJobValidator
+	cronCalculator    sync.CronScheduleCalculator
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
 func NewSyncApplicationService(
 	syncJobRepo sync.SyncJobRepository,
-	syncExecRepo sync.SyncExecutionRepository,
 	workflowDefRepo workflow.WorkflowDefinitionRepository,
-	workflowInstRepo workflow.WorkflowInstanceRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
-) SyncApplicationService {
+) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncJobRepo:       syncJobRepo,
-		syncExecRepo:      syncExecRepo,
 		workflowDefRepo:   workflowDefRepo,
-		workflowInstRepo:  workflowInstRepo,
 		taskEngineAdapter: taskEngineAdapter,
 		syncValidator:     sync.NewSyncJobValidator(),
 		cronCalculator:    sync.NewCronScheduleCalculator(),
@@ -44,7 +39,7 @@ func NewSyncApplicationService(
 // ==================== Sync Job Management ====================
 
 // CreateSyncJob creates a new sync job.
-func (s *SyncApplicationServiceImpl) CreateSyncJob(ctx context.Context, req CreateSyncJobRequest) (*sync.SyncJob, error) {
+func (s *SyncApplicationServiceImpl) CreateSyncJob(ctx context.Context, req contracts.CreateSyncJobRequest) (*sync.SyncJob, error) {
 	// Create domain entity
 	job := sync.NewSyncJob(
 		req.Name,
@@ -101,7 +96,7 @@ func (s *SyncApplicationServiceImpl) GetSyncJob(ctx context.Context, id shared.I
 }
 
 // UpdateSyncJob updates a sync job.
-func (s *SyncApplicationServiceImpl) UpdateSyncJob(ctx context.Context, id shared.ID, req UpdateSyncJobRequest) error {
+func (s *SyncApplicationServiceImpl) UpdateSyncJob(ctx context.Context, id shared.ID, req contracts.UpdateSyncJobRequest) error {
 	job, err := s.syncJobRepo.Get(id)
 	if err != nil {
 		return fmt.Errorf("failed to get sync job: %w", err)
@@ -224,7 +219,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncJob(ctx context.Context, jobID s
 	execution := sync.NewSyncExecution(jobID, workflowInstID)
 	execution.MarkRunning()
 
-	if err := s.syncExecRepo.Create(execution); err != nil {
+	if err := s.syncJobRepo.AddExecution(execution); err != nil {
 		// Try to cancel the workflow if we failed to record execution
 		_ = s.taskEngineAdapter.CancelInstance(ctx, engineInstanceID)
 		return "", fmt.Errorf("failed to create sync execution: %w", err)
@@ -241,7 +236,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncJob(ctx context.Context, jobID s
 
 // GetSyncExecution retrieves a sync execution by ID.
 func (s *SyncApplicationServiceImpl) GetSyncExecution(ctx context.Context, id shared.ID) (*sync.SyncExecution, error) {
-	exec, err := s.syncExecRepo.Get(id)
+	exec, err := s.syncJobRepo.GetExecution(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sync execution: %w", err)
 	}
@@ -253,7 +248,7 @@ func (s *SyncApplicationServiceImpl) GetSyncExecution(ctx context.Context, id sh
 
 // ListSyncExecutions lists all executions for a sync job.
 func (s *SyncApplicationServiceImpl) ListSyncExecutions(ctx context.Context, jobID shared.ID) ([]*sync.SyncExecution, error) {
-	execs, err := s.syncExecRepo.GetBySyncJob(jobID)
+	execs, err := s.syncJobRepo.GetExecutionsByJob(jobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sync executions: %w", err)
 	}
@@ -262,7 +257,7 @@ func (s *SyncApplicationServiceImpl) ListSyncExecutions(ctx context.Context, job
 
 // CancelExecution cancels a running sync execution.
 func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, executionID shared.ID) error {
-	exec, err := s.syncExecRepo.Get(executionID)
+	exec, err := s.syncJobRepo.GetExecution(executionID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync execution: %w", err)
 	}
@@ -282,7 +277,7 @@ func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, execut
 
 	// Update execution status
 	exec.MarkCancelled()
-	if err := s.syncExecRepo.Update(exec); err != nil {
+	if err := s.syncJobRepo.UpdateExecution(exec); err != nil {
 		return fmt.Errorf("failed to update execution status: %w", err)
 	}
 
@@ -390,8 +385,8 @@ func (s *SyncApplicationServiceImpl) UpdateSchedule(ctx context.Context, jobID s
 // ==================== Callback Handlers ====================
 
 // HandleExecutionCallback handles execution result callback from workflow.
-func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error {
-	exec, err := s.syncExecRepo.Get(req.ExecutionID)
+func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
+	exec, err := s.syncJobRepo.GetExecution(req.ExecutionID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync execution: %w", err)
 	}
@@ -410,7 +405,7 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 		exec.MarkFailed(errorMsg)
 	}
 
-	if err := s.syncExecRepo.Update(exec); err != nil {
+	if err := s.syncJobRepo.UpdateExecution(exec); err != nil {
 		return fmt.Errorf("failed to update execution: %w", err)
 	}
 

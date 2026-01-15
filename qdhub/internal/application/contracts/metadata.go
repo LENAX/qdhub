@@ -1,10 +1,9 @@
-// Package application contains application services that orchestrate use cases.
-package application
+// Package contracts defines application service interfaces and DTOs.
+package contracts
 
 import (
 	"context"
 
-	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 )
@@ -71,17 +70,6 @@ type MetadataApplicationService interface {
 
 	// DeleteToken deletes a token.
 	DeleteToken(ctx context.Context, dataSourceID shared.ID) error
-
-	// ==================== Type Mapping Management ====================
-
-	// CreateMappingRule creates a new type mapping rule.
-	CreateMappingRule(ctx context.Context, req CreateMappingRuleRequest) (*datastore.DataTypeMappingRule, error)
-
-	// GetMappingRules retrieves mapping rules for data source and target DB.
-	GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error)
-
-	// InitDefaultMappingRules initializes default type mapping rules.
-	InitDefaultMappingRules(ctx context.Context) error
 }
 
 // ==================== Request/Response DTOs ====================
@@ -146,14 +134,4 @@ type SaveTokenRequest struct {
 	DataSourceID shared.ID
 	TokenValue   string
 	ExpiresAt    *string // RFC3339 format
-}
-
-// CreateMappingRuleRequest represents a request to create a mapping rule.
-type CreateMappingRuleRequest struct {
-	DataSourceType string
-	SourceType     string
-	TargetDBType   string
-	TargetType     string
-	FieldPattern   *string
-	Priority       int
 }

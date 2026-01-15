@@ -4,31 +4,41 @@ package datastore
 import "qdhub/internal/domain/shared"
 
 // QuantDataStoreRepository defines the repository interface for QuantDataStore aggregate.
+// Following DDD principles, this repository handles both the aggregate root (QuantDataStore)
+// and its child entities (TableSchema) to maintain aggregate boundaries.
+//
+// Embeds shared.Repository[QuantDataStore] to inherit common CRUD operations.
 type QuantDataStoreRepository interface {
-	Create(ds *QuantDataStore) error
-	Get(id shared.ID) (*QuantDataStore, error)
-	Update(ds *QuantDataStore) error
-	Delete(id shared.ID) error
-	List() ([]*QuantDataStore, error)
-}
+	// Embed base repository for common CRUD operations
+	shared.Repository[QuantDataStore]
 
-// TableSchemaRepository defines the repository interface for TableSchema.
-type TableSchemaRepository interface {
-	Create(schema *TableSchema) error
-	Get(id shared.ID) (*TableSchema, error)
-	GetByDataStore(dataStoreID shared.ID) ([]*TableSchema, error)
-	GetByAPIMetadata(apiMetadataID shared.ID) (*TableSchema, error)
-	Update(schema *TableSchema) error
-	Delete(id shared.ID) error
+	// ==================== Child Entity Operations (TableSchema) ====================
+
+	// AddSchema adds a new TableSchema to a QuantDataStore.
+	AddSchema(schema *TableSchema) error
+
+	// GetSchema retrieves a TableSchema by ID.
+	GetSchema(id shared.ID) (*TableSchema, error)
+
+	// GetSchemaByAPIMetadata retrieves a TableSchema by API metadata ID.
+	GetSchemaByAPIMetadata(apiMetadataID shared.ID) (*TableSchema, error)
+
+	// GetSchemasByDataStore retrieves all TableSchemas for a QuantDataStore.
+	GetSchemasByDataStore(dataStoreID shared.ID) ([]*TableSchema, error)
+
+	// UpdateSchema updates a TableSchema.
+	UpdateSchema(schema *TableSchema) error
+
+	// DeleteSchema deletes a TableSchema by ID.
+	DeleteSchema(id shared.ID) error
 }
 
 // DataTypeMappingRuleRepository defines the repository interface for DataTypeMappingRule.
+//
+// Embeds shared.Repository[DataTypeMappingRule] to inherit common CRUD operations.
 type DataTypeMappingRuleRepository interface {
-	// Create creates a new mapping rule.
-	Create(rule *DataTypeMappingRule) error
-
-	// Get retrieves a mapping rule by ID.
-	Get(id shared.ID) (*DataTypeMappingRule, error)
+	// Embed base repository for common CRUD operations
+	shared.Repository[DataTypeMappingRule]
 
 	// GetBySourceAndTarget retrieves rules by source and target types.
 	// Returns rules ordered by priority (descending).
@@ -39,13 +49,4 @@ type DataTypeMappingRuleRepository interface {
 
 	// InitDefaultRules initializes default mapping rules.
 	InitDefaultRules() error
-
-	// List retrieves all rules.
-	List() ([]*DataTypeMappingRule, error)
-
-	// Update updates an existing rule.
-	Update(rule *DataTypeMappingRule) error
-
-	// Delete deletes a rule by ID.
-	Delete(id shared.ID) error
 }

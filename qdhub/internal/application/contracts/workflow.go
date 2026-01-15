@@ -1,5 +1,5 @@
-// Package application contains application services that orchestrate use cases.
-package application
+// Package contracts defines application service interfaces and DTOs.
+package contracts
 
 import (
 	"context"

@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"qdhub/internal/application"
+	"qdhub/internal/application/contracts"
+	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 )
@@ -20,9 +21,9 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
-		req := application.CreateWorkflowDefinitionRequest{
+		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
 			Category:       workflow.WfCategorySync,
@@ -47,9 +48,9 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
-		req := application.CreateWorkflowDefinitionRequest{
+		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
 			Category:       workflow.WfCategorySync,
@@ -75,7 +76,7 @@ func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		result, err := svc.GetWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -91,7 +92,7 @@ func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
 		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		_, err := svc.GetWorkflowDefinition(ctx, shared.NewID())
 		if err == nil {
@@ -111,10 +112,10 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		newName := "Updated Name"
-		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), application.UpdateWorkflowDefinitionRequest{
+		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), contracts.UpdateWorkflowDefinitionRequest{
 			Name: &newName,
 		})
 		if err != nil {
@@ -140,10 +141,10 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		newName := "Updated Name"
-		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), application.UpdateWorkflowDefinitionRequest{
+		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), contracts.UpdateWorkflowDefinitionRequest{
 			Name: &newName,
 		})
 		if err == nil {
@@ -163,7 +164,7 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.DeleteWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -189,7 +190,7 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.DeleteWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err == nil {
@@ -212,7 +213,7 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 			wfDefRepo.Create(def)
 		}
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		defs, err := svc.ListWorkflowDefinitions(ctx, nil)
 		if err != nil {
@@ -235,7 +236,7 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 		metaDef := workflow.NewWorkflowDefinition("Meta", "Desc", workflow.WfCategoryMetadata, "yaml: test", false)
 		wfDefRepo.Create(metaDef)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		syncCategory := workflow.WfCategorySync
 		defs, err := svc.ListWorkflowDefinitions(ctx, &syncCategory)
@@ -259,7 +260,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.EnableWorkflow(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -281,7 +282,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.DisableWorkflow(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -308,7 +309,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.DisableWorkflow(ctx, shared.ID(def.ID()))
 		if err == nil {
@@ -329,9 +330,9 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
-		instID, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		instID, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 			TriggerParams: map[string]interface{}{"key": "value"},
@@ -354,9 +355,9 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		def.Disable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
-		_, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 		})
@@ -375,9 +376,9 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
-		_, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 		})
@@ -398,7 +399,7 @@ func TestWorkflowApplicationService_GetWorkflowInstance(t *testing.T) {
 		inst := workflow.NewWorkflowInstance("wf-id")
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		result, err := svc.GetWorkflowInstance(ctx, shared.ID(inst.ID))
 		if err != nil {
@@ -414,7 +415,7 @@ func TestWorkflowApplicationService_GetWorkflowInstance(t *testing.T) {
 		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		_, err := svc.GetWorkflowInstance(ctx, shared.NewID())
 		if err == nil {
@@ -439,7 +440,7 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 			wfInstRepo.Create(inst)
 		}
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		instances, err := svc.ListWorkflowInstances(ctx, shared.ID(wfID), nil)
 		if err != nil {
@@ -466,7 +467,7 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 		successInst.Status = "Success"
 		wfInstRepo.Create(successInst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		runningStatus := workflow.WfInstStatusRunning
 		instances, err := svc.ListWorkflowInstances(ctx, shared.ID(wfID), &runningStatus)
@@ -491,7 +492,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.PauseWorkflow(ctx, shared.ID(inst.ID))
 		if err != nil {
@@ -508,7 +509,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Success"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.PauseWorkflow(ctx, shared.ID(inst.ID))
 		if err == nil {
@@ -525,7 +526,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Paused"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.ResumeWorkflow(ctx, shared.ID(inst.ID))
 		if err != nil {
@@ -542,7 +543,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.ResumeWorkflow(ctx, shared.ID(inst.ID))
 		if err == nil {
@@ -559,7 +560,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.CancelWorkflow(ctx, shared.ID(inst.ID))
 		if err != nil {
@@ -576,7 +577,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		inst.Status = "Success"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.CancelWorkflow(ctx, shared.ID(inst.ID))
 		if err == nil {
@@ -600,7 +601,7 @@ func TestWorkflowApplicationService_GetWorkflowStatus(t *testing.T) {
 		FailedTask:    0,
 	}
 
-	svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+	svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 	status, err := svc.GetWorkflowStatus(ctx, shared.ID("test-id"))
 	if err != nil {
@@ -628,7 +629,7 @@ func TestWorkflowApplicationService_SyncWithEngine(t *testing.T) {
 		inst.Status = "Running"
 		wfInstRepo.Create(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 		err := svc.SyncWithEngine(ctx, shared.ID(inst.ID))
 		if err != nil {

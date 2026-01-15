@@ -2,6 +2,7 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -147,124 +148,180 @@ func (r *DataSourceRepositoryImpl) List() ([]*metadata.DataSource, error) {
 	return r.dataSourceDAO.ListAll(nil)
 }
 
-// APICategoryRepositoryImpl implements metadata.APICategoryRepository.
-type APICategoryRepositoryImpl struct {
-	db          *persistence.DB
-	categoryDAO *dao.APICategoryDAO
-}
+// ==================== Child Entity Operations (APICategory) ====================
 
-// NewAPICategoryRepository creates a new APICategoryRepositoryImpl.
-func NewAPICategoryRepository(db *persistence.DB) *APICategoryRepositoryImpl {
-	return &APICategoryRepositoryImpl{
-		db:          db,
-		categoryDAO: dao.NewAPICategoryDAO(db.DB),
-	}
-}
-
-// Create creates a new API category.
-func (r *APICategoryRepositoryImpl) Create(cat *metadata.APICategory) error {
+// AddCategory adds a new APICategory to a DataSource.
+func (r *DataSourceRepositoryImpl) AddCategory(cat *metadata.APICategory) error {
 	return r.categoryDAO.Create(nil, cat)
 }
 
-// Get retrieves an API category by ID.
-func (r *APICategoryRepositoryImpl) Get(id shared.ID) (*metadata.APICategory, error) {
+// GetCategory retrieves an APICategory by ID.
+func (r *DataSourceRepositoryImpl) GetCategory(id shared.ID) (*metadata.APICategory, error) {
 	return r.categoryDAO.GetByID(nil, id)
 }
 
-// Update updates an API category.
-func (r *APICategoryRepositoryImpl) Update(cat *metadata.APICategory) error {
-	return r.categoryDAO.Update(nil, cat)
-}
-
-// Delete deletes an API category.
-func (r *APICategoryRepositoryImpl) Delete(id shared.ID) error {
-	return r.categoryDAO.DeleteByID(nil, id)
-}
-
-// ListByDataSource retrieves all API categories for a data source.
-func (r *APICategoryRepositoryImpl) ListByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
+// ListCategoriesByDataSource retrieves all APICategories for a DataSource.
+func (r *DataSourceRepositoryImpl) ListCategoriesByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
 	return r.categoryDAO.ListByDataSource(nil, dataSourceID)
 }
 
-// APIMetadataRepositoryImpl implements metadata.APIMetadataRepository.
-type APIMetadataRepositoryImpl struct {
-	db             *persistence.DB
-	apiMetadataDAO *dao.APIMetadataDAO
+// UpdateCategory updates an APICategory.
+func (r *DataSourceRepositoryImpl) UpdateCategory(cat *metadata.APICategory) error {
+	return r.categoryDAO.Update(nil, cat)
 }
 
-// NewAPIMetadataRepository creates a new APIMetadataRepositoryImpl.
-func NewAPIMetadataRepository(db *persistence.DB) *APIMetadataRepositoryImpl {
-	return &APIMetadataRepositoryImpl{
-		db:             db,
-		apiMetadataDAO: dao.NewAPIMetadataDAO(db.DB),
-	}
+// DeleteCategory deletes an APICategory by ID.
+func (r *DataSourceRepositoryImpl) DeleteCategory(id shared.ID) error {
+	return r.categoryDAO.DeleteByID(nil, id)
 }
 
-// Create creates a new API metadata.
-func (r *APIMetadataRepositoryImpl) Create(meta *metadata.APIMetadata) error {
+// ==================== Child Entity Operations (APIMetadata) ====================
+
+// AddAPIMetadata adds a new APIMetadata to a DataSource.
+func (r *DataSourceRepositoryImpl) AddAPIMetadata(meta *metadata.APIMetadata) error {
 	return r.apiMetadataDAO.Create(nil, meta)
 }
 
-// Get retrieves an API metadata by ID.
-func (r *APIMetadataRepositoryImpl) Get(id shared.ID) (*metadata.APIMetadata, error) {
+// GetAPIMetadata retrieves an APIMetadata by ID.
+func (r *DataSourceRepositoryImpl) GetAPIMetadata(id shared.ID) (*metadata.APIMetadata, error) {
 	return r.apiMetadataDAO.GetByID(nil, id)
 }
 
-// Update updates an API metadata.
-func (r *APIMetadataRepositoryImpl) Update(meta *metadata.APIMetadata) error {
-	return r.apiMetadataDAO.Update(nil, meta)
-}
-
-// Delete deletes an API metadata.
-func (r *APIMetadataRepositoryImpl) Delete(id shared.ID) error {
-	return r.apiMetadataDAO.DeleteByID(nil, id)
-}
-
-// ListByDataSource retrieves all API metadata for a data source.
-func (r *APIMetadataRepositoryImpl) ListByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
+// ListAPIMetadataByDataSource retrieves all APIMetadata for a DataSource.
+func (r *DataSourceRepositoryImpl) ListAPIMetadataByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
 	return r.apiMetadataDAO.ListByDataSource(nil, dataSourceID)
 }
 
-// ListByCategory retrieves all API metadata for a category.
-func (r *APIMetadataRepositoryImpl) ListByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
+// ListAPIMetadataByCategory retrieves all APIMetadata for a category.
+func (r *DataSourceRepositoryImpl) ListAPIMetadataByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
 	return r.apiMetadataDAO.ListByCategory(nil, categoryID)
 }
 
-// TokenRepositoryImpl implements metadata.TokenRepository.
-type TokenRepositoryImpl struct {
-	db       *persistence.DB
-	tokenDAO *dao.TokenDAO
+// UpdateAPIMetadata updates an APIMetadata.
+func (r *DataSourceRepositoryImpl) UpdateAPIMetadata(meta *metadata.APIMetadata) error {
+	return r.apiMetadataDAO.Update(nil, meta)
 }
 
-// NewTokenRepository creates a new TokenRepositoryImpl.
-func NewTokenRepository(db *persistence.DB) *TokenRepositoryImpl {
-	return &TokenRepositoryImpl{
-		db:       db,
-		tokenDAO: dao.NewTokenDAO(db.DB),
+// DeleteAPIMetadata deletes an APIMetadata by ID.
+func (r *DataSourceRepositoryImpl) DeleteAPIMetadata(id shared.ID) error {
+	return r.apiMetadataDAO.DeleteByID(nil, id)
+}
+
+// ==================== Child Entity Operations (Token) ====================
+
+// SetToken sets the token for a DataSource (creates or updates).
+func (r *DataSourceRepositoryImpl) SetToken(token *metadata.Token) error {
+	// Check if token already exists for this data source
+	existing, err := r.tokenDAO.GetByDataSource(nil, token.DataSourceID)
+	if err != nil {
+		return err
 	}
-}
-
-// Create creates a new token.
-func (r *TokenRepositoryImpl) Create(token *metadata.Token) error {
+	if existing != nil {
+		// Update existing token
+		token.ID = existing.ID
+		return r.tokenDAO.Update(nil, token)
+	}
+	// Create new token
 	return r.tokenDAO.Create(nil, token)
 }
 
-// Get retrieves a token by ID.
-func (r *TokenRepositoryImpl) Get(id shared.ID) (*metadata.Token, error) {
+// GetToken retrieves a Token by ID.
+func (r *DataSourceRepositoryImpl) GetToken(id shared.ID) (*metadata.Token, error) {
 	return r.tokenDAO.GetByID(nil, id)
 }
 
-// GetByDataSource retrieves a token by data source ID.
-func (r *TokenRepositoryImpl) GetByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
+// GetTokenByDataSource retrieves the Token for a DataSource.
+func (r *DataSourceRepositoryImpl) GetTokenByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
 	return r.tokenDAO.GetByDataSource(nil, dataSourceID)
 }
 
-// Update updates a token.
-func (r *TokenRepositoryImpl) Update(token *metadata.Token) error {
-	return r.tokenDAO.Update(nil, token)
+// DeleteToken deletes a Token by ID.
+func (r *DataSourceRepositoryImpl) DeleteToken(id shared.ID) error {
+	return r.tokenDAO.DeleteByID(nil, id)
 }
 
-// Delete deletes a token.
-func (r *TokenRepositoryImpl) Delete(id shared.ID) error {
-	return r.tokenDAO.DeleteByID(nil, id)
+// ==================== Extended Query Operations ====================
+
+// FindBy retrieves entities matching the given conditions.
+func (r *DataSourceRepositoryImpl) FindBy(conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return r.findByInternal(nil, nil, conditions...)
+}
+
+// FindByWithOrder retrieves entities matching conditions with ordering.
+func (r *DataSourceRepositoryImpl) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return r.findByInternal(orderBy, nil, conditions...)
+}
+
+// ListWithPagination retrieves entities with pagination.
+func (r *DataSourceRepositoryImpl) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[metadata.DataSource], error) {
+	return r.FindByWithPagination(pagination)
+}
+
+// FindByWithPagination retrieves entities matching conditions with pagination.
+func (r *DataSourceRepositoryImpl) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[metadata.DataSource], error) {
+	total, err := r.Count(conditions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count entities: %w", err)
+	}
+
+	items, err := r.findByInternal(nil, &pagination, conditions...)
+	if err != nil {
+		return nil, err
+	}
+
+	return shared.NewPageResult(items, total, pagination), nil
+}
+
+// Count returns the total count of entities matching conditions.
+func (r *DataSourceRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM data_sources%s", whereClause)
+
+	var count int64
+	err := r.db.DB.Get(&count, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count data_sources: %w", err)
+	}
+	return count, nil
+}
+
+// Exists checks if any entity matching conditions exists.
+func (r *DataSourceRepositoryImpl) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	count, err := r.Count(conditions...)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *DataSourceRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagination *shared.Pagination, conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	orderClause := buildOrderClause(orderBy)
+	limitClause := buildLimitClause(pagination)
+
+	query := fmt.Sprintf("SELECT * FROM data_sources%s%s%s", whereClause, orderClause, limitClause)
+
+	var rows []dao.DataSourceRow
+	err := r.db.DB.Select(&rows, query, args...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []*metadata.DataSource{}, nil
+		}
+		return nil, fmt.Errorf("failed to find data_sources: %w", err)
+	}
+
+	entities := make([]*metadata.DataSource, len(rows))
+	for i, row := range rows {
+		entities[i] = &metadata.DataSource{
+			ID:          shared.ID(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			BaseURL:     row.BaseURL,
+			DocURL:      row.DocURL,
+			Status:      shared.Status(row.Status),
+			CreatedAt:   shared.Timestamp(row.CreatedAt),
+			UpdatedAt:   shared.Timestamp(row.UpdatedAt),
+		}
+	}
+	return entities, nil
 }

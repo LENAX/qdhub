@@ -4,19 +4,25 @@ package sync
 import "qdhub/internal/domain/shared"
 
 // SyncJobRepository defines the repository interface for SyncJob aggregate.
+// Following DDD principles, this repository handles both the aggregate root (SyncJob)
+// and its child entities (SyncExecution) to maintain aggregate boundaries.
+//
+// Embeds shared.Repository[SyncJob] to inherit common CRUD operations.
 type SyncJobRepository interface {
-	Create(job *SyncJob) error
-	Get(id shared.ID) (*SyncJob, error)
-	Update(job *SyncJob) error
-	Delete(id shared.ID) error
-	List() ([]*SyncJob, error)
-}
+	// Embed base repository for common CRUD operations
+	shared.Repository[SyncJob]
 
-// SyncExecutionRepository defines the repository interface for SyncExecution.
-type SyncExecutionRepository interface {
-	Create(exec *SyncExecution) error
-	Get(id shared.ID) (*SyncExecution, error)
-	GetBySyncJob(syncJobID shared.ID) ([]*SyncExecution, error)
-	Update(exec *SyncExecution) error
-	Delete(id shared.ID) error
+	// ==================== Child Entity Operations (SyncExecution) ====================
+
+	// AddExecution adds a new SyncExecution to a SyncJob.
+	AddExecution(exec *SyncExecution) error
+
+	// GetExecution retrieves a SyncExecution by ID.
+	GetExecution(id shared.ID) (*SyncExecution, error)
+
+	// GetExecutionsByJob retrieves all SyncExecutions for a SyncJob.
+	GetExecutionsByJob(jobID shared.ID) ([]*SyncExecution, error)
+
+	// UpdateExecution updates a SyncExecution.
+	UpdateExecution(exec *SyncExecution) error
 }

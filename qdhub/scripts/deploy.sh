@@ -62,11 +62,28 @@ fi
 
 echo -e "${YELLOW}Using config: $CONFIG_FILE${NC}"
 
-# Run database migrations (if available)
-if [[ -f "scripts/migrate.sh" ]]; then
+# Run database migrations
+run_migrations() {
+    local config_file=$1
+    
+    if [[ ! -f "scripts/migrate.sh" ]]; then
+        echo -e "${YELLOW}Warning: migrate.sh not found, skipping migrations.${NC}"
+        return 0
+    fi
+    
     echo -e "${YELLOW}Running database migrations...${NC}"
-    ./scripts/migrate.sh up || true
-fi
+    chmod +x scripts/migrate.sh
+    
+    if ./scripts/migrate.sh up "$config_file"; then
+        echo -e "${GREEN}Migrations completed successfully.${NC}"
+    else
+        echo -e "${RED}Warning: Some migrations may have failed.${NC}"
+        return 1
+    fi
+}
+
+# Run migrations with the selected config file
+run_migrations "$CONFIG_FILE" || true
 
 # For local development, just run the binary
 if [[ "$ENV" == "dev" ]]; then

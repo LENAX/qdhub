@@ -8,40 +8,64 @@ import (
 )
 
 // DataSourceRepository defines the repository interface for DataSource aggregate.
+// Following DDD principles, this repository handles both the aggregate root (DataSource)
+// and its child entities (APICategory, APIMetadata, Token) to maintain aggregate boundaries.
+//
+// Embeds shared.Repository[DataSource] to inherit common CRUD operations.
 type DataSourceRepository interface {
-	Create(ds *DataSource) error
-	Get(id shared.ID) (*DataSource, error)
-	Update(ds *DataSource) error
-	Delete(id shared.ID) error
-	List() ([]*DataSource, error)
-}
+	// Embed base repository for common CRUD operations
+	shared.Repository[DataSource]
 
-// APICategoryRepository defines the repository interface for APICategory.
-type APICategoryRepository interface {
-	Create(cat *APICategory) error
-	Get(id shared.ID) (*APICategory, error)
-	Update(cat *APICategory) error
-	Delete(id shared.ID) error
-	ListByDataSource(dataSourceID shared.ID) ([]*APICategory, error)
-}
+	// ==================== Child Entity Operations (APICategory) ====================
 
-// APIMetadataRepository defines the repository interface for APIMetadata.
-type APIMetadataRepository interface {
-	Create(meta *APIMetadata) error
-	Get(id shared.ID) (*APIMetadata, error)
-	Update(meta *APIMetadata) error
-	Delete(id shared.ID) error
-	ListByDataSource(dataSourceID shared.ID) ([]*APIMetadata, error)
-	ListByCategory(categoryID shared.ID) ([]*APIMetadata, error)
-}
+	// AddCategory adds a new APICategory to a DataSource.
+	AddCategory(cat *APICategory) error
 
-// TokenRepository defines the repository interface for Token.
-type TokenRepository interface {
-	Create(token *Token) error
-	Get(id shared.ID) (*Token, error)
-	GetByDataSource(dataSourceID shared.ID) (*Token, error)
-	Update(token *Token) error
-	Delete(id shared.ID) error
+	// GetCategory retrieves an APICategory by ID.
+	GetCategory(id shared.ID) (*APICategory, error)
+
+	// ListCategoriesByDataSource retrieves all APICategories for a DataSource.
+	ListCategoriesByDataSource(dataSourceID shared.ID) ([]*APICategory, error)
+
+	// UpdateCategory updates an APICategory.
+	UpdateCategory(cat *APICategory) error
+
+	// DeleteCategory deletes an APICategory by ID.
+	DeleteCategory(id shared.ID) error
+
+	// ==================== Child Entity Operations (APIMetadata) ====================
+
+	// AddAPIMetadata adds a new APIMetadata to a DataSource.
+	AddAPIMetadata(meta *APIMetadata) error
+
+	// GetAPIMetadata retrieves an APIMetadata by ID.
+	GetAPIMetadata(id shared.ID) (*APIMetadata, error)
+
+	// ListAPIMetadataByDataSource retrieves all APIMetadata for a DataSource.
+	ListAPIMetadataByDataSource(dataSourceID shared.ID) ([]*APIMetadata, error)
+
+	// ListAPIMetadataByCategory retrieves all APIMetadata for a category.
+	ListAPIMetadataByCategory(categoryID shared.ID) ([]*APIMetadata, error)
+
+	// UpdateAPIMetadata updates an APIMetadata.
+	UpdateAPIMetadata(meta *APIMetadata) error
+
+	// DeleteAPIMetadata deletes an APIMetadata by ID.
+	DeleteAPIMetadata(id shared.ID) error
+
+	// ==================== Child Entity Operations (Token) ====================
+
+	// SetToken sets the token for a DataSource (creates or updates).
+	SetToken(token *Token) error
+
+	// GetToken retrieves a Token by ID.
+	GetToken(id shared.ID) (*Token, error)
+
+	// GetTokenByDataSource retrieves the Token for a DataSource.
+	GetTokenByDataSource(dataSourceID shared.ID) (*Token, error)
+
+	// DeleteToken deletes a Token by ID.
+	DeleteToken(id shared.ID) error
 }
 
 // Repository defines the aggregated repository interface for metadata domain.
