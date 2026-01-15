@@ -12,6 +12,7 @@ import (
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/taskengine/handlers"
 	"qdhub/internal/infrastructure/taskengine/jobs"
+	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
 // Dependencies holds the dependencies for task engine jobs.
@@ -52,6 +53,12 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"SyncAPIData", jobs.SyncAPIDataJob, "同步单个 API 数据"},
 		{"GenerateDataSyncSubTasks", jobs.GenerateDataSyncSubTasksJob, "生成数据同步子任务（模板任务）"},
 		{"DeleteSyncedData", jobs.DeleteSyncedDataJob, "删除同步的数据（用于回滚）"},
+
+		// ==================== 增量实时同步 Jobs ====================
+		{"GetSyncCheckpoint", jobs.GetSyncCheckpointJob, "获取同步检查点"},
+		{"FetchLatestTradingDate", jobs.FetchLatestTradingDateJob, "获取最新交易日"},
+		{"GenerateIncrementalSyncSubTasks", jobs.GenerateIncrementalSyncSubTasksJob, "生成增量同步子任务（模板任务）"},
+		{"UpdateSyncCheckpoint", jobs.UpdateSyncCheckpointJob, "更新同步检查点"},
 
 		// ==================== 建表 Jobs ====================
 		{"CreateTableFromMetadata", jobs.CreateTableFromMetadataJob, "根据 Metadata 创建数据表"},
@@ -109,6 +116,7 @@ func RegisterTaskHandlers(ctx context.Context, eng *engine.Engine) error {
 		{"CompensateSaveAPIMetadataBatch", handlers.CompensateSaveAPIMetadataBatchHandler, "回滚批量 API 元数据保存"},
 		{"CompensateCreateTable", handlers.CompensateCreateTableHandler, "回滚建表操作"},
 		{"CompensateSyncData", handlers.CompensateSyncDataHandler, "回滚数据同步"},
+		{"CompensateUpdateCheckpoint", handlers.CompensateUpdateCheckpointHandler, "回滚检查点更新"},
 		{"CompensateGeneric", handlers.CompensateGenericHandler, "通用补偿处理"},
 
 		// ==================== 通用 Handlers ====================
@@ -162,4 +170,56 @@ func Initialize(ctx context.Context, eng *engine.Engine, deps *Dependencies) err
 	SetupDependencies(eng, deps)
 
 	return nil
+}
+
+// GetWorkflowFactory creates a WorkflowFactory for creating built-in workflows.
+// Must be called after Initialize() to ensure all job functions are registered.
+func GetWorkflowFactory(eng *engine.Engine) *workflows.WorkflowFactory {
+	return workflows.NewWorkflowFactory(eng.GetRegistry())
+}
+
+// ==================== 内建工作流创建便捷方法 ====================
+
+// CreateMetadataCrawlWorkflow creates a metadata crawl workflow.
+// This workflow crawls API documentation and saves metadata with SAGA transaction support.
+func CreateMetadataCrawlWorkflow(eng *engine.Engine, params workflows.MetadataCrawlParams) (*workflows.WorkflowFactory, error) {
+	factory := GetWorkflowFactory(eng)
+	_, err := factory.CreateMetadataCrawlWorkflow(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metadata crawl workflow: %w", err)
+	}
+	return factory, nil
+}
+
+// CreateTablesWorkflow creates a table creation workflow.
+// This workflow creates data tables based on API metadata with SAGA transaction support.
+func CreateTablesWorkflow(eng *engine.Engine, params workflows.CreateTablesParams) (*workflows.WorkflowFactory, error) {
+	factory := GetWorkflowFactory(eng)
+	_, err := factory.CreateTablesWorkflow(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tables workflow: %w", err)
+	}
+	return factory, nil
+}
+
+// CreateBatchDataSyncWorkflow creates a batch data sync workflow.
+// This workflow syncs data with user-specified date range and API list, with SAGA transaction support.
+func CreateBatchDataSyncWorkflow(eng *engine.Engine, params workflows.BatchDataSyncParams) (*workflows.WorkflowFactory, error) {
+	factory := GetWorkflowFactory(eng)
+	_, err := factory.CreateBatchDataSyncWorkflow(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create batch data sync workflow: %w", err)
+	}
+	return factory, nil
+}
+
+// CreateRealtimeDataSyncWorkflow creates a realtime data sync workflow.
+// This workflow syncs data incrementally with checkpoint support, with SAGA transaction support.
+func CreateRealtimeDataSyncWorkflow(eng *engine.Engine, params workflows.RealtimeDataSyncParams) (*workflows.WorkflowFactory, error) {
+	factory := GetWorkflowFactory(eng)
+	_, err := factory.CreateRealtimeDataSyncWorkflow(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create realtime data sync workflow: %w", err)
+	}
+	return factory, nil
 }

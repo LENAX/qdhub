@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -283,7 +284,415 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 	}, nil
 }
 
+// ==================== 增量实时同步 Job Functions ====================
+
+// GetSyncCheckpointJob 获取同步检查点
+// 从检查点表中获取每个 API 的上次同步位置
+//
+// Input params:
+//   - target_db_path: string - 目标数据库路径
+//   - checkpoint_table: string - 检查点表名
+//   - api_names: []string - API 名称列表
+//
+// Output:
+//   - checkpoints: map[string]string - API 名称到最后同步日期的映射
+//   - has_checkpoint: bool - 是否存在检查点
+func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
+	targetDBPath := tc.GetParamString("target_db_path")
+	checkpointTable := tc.GetParamString("checkpoint_table")
+
+	if targetDBPath == "" || checkpointTable == "" {
+		return nil, fmt.Errorf("target_db_path and checkpoint_table are required")
+	}
+
+	// 获取 API 名称列表
+	var apiNames []string
+	if raw := tc.GetParam("api_names"); raw != nil {
+		apiNames = convertToStringSlice(raw)
+	}
+
+	log.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
+
+	db, err := sql.Open("sqlite3", targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	// 确保检查点表存在
+	createTableSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS "%s" (
+			api_name TEXT PRIMARY KEY,
+			last_sync_date TEXT NOT NULL,
+			last_sync_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+			record_count INTEGER DEFAULT 0
+		)
+	`, checkpointTable)
+	if _, err := db.Exec(createTableSQL); err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint table: %w", err)
+	}
+
+	// 查询检查点
+	checkpoints := make(map[string]string)
+	hasCheckpoint := false
+
+	for _, apiName := range apiNames {
+		var lastSyncDate string
+		query := fmt.Sprintf(`SELECT last_sync_date FROM "%s" WHERE api_name = ?`, checkpointTable)
+		err := db.QueryRow(query, apiName).Scan(&lastSyncDate)
+		if err == nil {
+			checkpoints[apiName] = lastSyncDate
+			hasCheckpoint = true
+			log.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
+		} else if err != sql.ErrNoRows {
+			log.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
+		}
+	}
+
+	return map[string]interface{}{
+		"checkpoints":    checkpoints,
+		"has_checkpoint": hasCheckpoint,
+		"api_count":      len(apiNames),
+	}, nil
+}
+
+// FetchLatestTradingDateJob 获取最新交易日
+// 调用 trade_cal API 获取最新的交易日期
+//
+// Input params:
+//   - data_source_name: string - 数据源名称
+//   - token: string - API Token
+//   - exchange: string - 交易所代码（默认 SSE）
+//
+// Output:
+//   - latest_trade_date: string - 最新交易日（格式: "20251201"）
+//   - is_trading_day: bool - 今天是否是交易日
+func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
+	dataSourceName := tc.GetParamString("data_source_name")
+	token := tc.GetParamString("token")
+	exchange := tc.GetParamString("exchange")
+
+	if dataSourceName == "" {
+		return nil, fmt.Errorf("data_source_name is required")
+	}
+	if exchange == "" {
+		exchange = "SSE"
+	}
+
+	log.Printf("📅 [FetchLatestTradingDate] 获取最新交易日: source=%s, exchange=%s", dataSourceName, exchange)
+
+	// 获取 DataSourceRegistry
+	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
+	if !ok {
+		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
+	}
+	registry := registryInterface.(*datasource.Registry)
+
+	// 获取 API Client
+	client, err := registry.GetClient(dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if token != "" {
+		client.SetToken(token)
+	}
+
+	// 调用 trade_cal API
+	ctx := context.Background()
+	result, err := client.Query(ctx, "trade_cal", map[string]interface{}{
+		"exchange":   exchange,
+		"is_open":    1,
+		"start_date": getRecentDateString(-30), // 最近30天
+		"end_date":   getTodayDateString(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query trade_cal: %w", err)
+	}
+
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("no trading days found")
+	}
+
+	// 找到最新的交易日
+	latestTradeDate := ""
+	for _, row := range result.Data {
+		if calDate, ok := row["cal_date"].(string); ok {
+			if calDate > latestTradeDate {
+				latestTradeDate = calDate
+			}
+		}
+	}
+
+	// 检查今天是否是交易日
+	today := getTodayDateString()
+	isTradingDay := latestTradeDate == today
+
+	log.Printf("✅ [FetchLatestTradingDate] 最新交易日=%s, 今天是否交易日=%v", latestTradeDate, isTradingDay)
+
+	return map[string]interface{}{
+		"latest_trade_date": latestTradeDate,
+		"is_trading_day":    isTradingDay,
+		"today":             today,
+	}, nil
+}
+
+// GenerateIncrementalSyncSubTasksJob 生成增量同步子任务（模板任务 Job Function）
+// 根据检查点信息，为每个股票生成增量同步子任务
+//
+// Input params:
+//   - data_source_name: string - 数据源名称
+//   - api_name: string - 要调用的 API 名称
+//   - param_key: string - 参数键名（如 "ts_code"）
+//   - token: string - API Token
+//   - target_db_path: string - 目标数据库路径
+//   - checkpoint_table: string - 检查点表名
+//   - max_sub_tasks: int - 最大子任务数量（0=不限制）
+//
+// Output:
+//   - status: string - 操作状态
+//   - generated: int - 生成的子任务数量
+func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
+	log.Printf("📋 [GenerateIncrementalSyncSubTasks] Job Function 执行")
+
+	// 获取参数
+	dataSourceName := tc.GetParamString("data_source_name")
+	apiName := tc.GetParamString("api_name")
+	paramKey := tc.GetParamString("param_key")
+	token := tc.GetParamString("token")
+	targetDBPath := tc.GetParamString("target_db_path")
+	checkpointTable := tc.GetParamString("checkpoint_table")
+	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
+
+	// 从上游任务获取最新交易日
+	latestTradeDate := ""
+	if cached := tc.GetParam("_cached_FetchLatestTradingDate"); cached != nil {
+		if resultMap, ok := cached.(map[string]interface{}); ok {
+			if date, ok := resultMap["latest_trade_date"].(string); ok {
+				latestTradeDate = date
+			}
+		}
+	}
+
+	// 从上游任务获取检查点信息
+	checkpoints := make(map[string]string)
+	if cached := tc.GetParam("_cached_GetSyncCheckpoint"); cached != nil {
+		if resultMap, ok := cached.(map[string]interface{}); ok {
+			if cp, ok := resultMap["checkpoints"].(map[string]interface{}); ok {
+				for k, v := range cp {
+					if s, ok := v.(string); ok {
+						checkpoints[k] = s
+					}
+				}
+			}
+		}
+	}
+
+	// 确定同步的开始日期
+	startDate := ""
+	if cp, ok := checkpoints[apiName]; ok && cp != "" {
+		startDate = cp // 从检查点开始
+	}
+
+	log.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",
+		apiName, startDate, latestTradeDate)
+
+	// 获取 Engine
+	engineInterface, ok := tc.GetDependency("Engine")
+	if !ok {
+		return nil, fmt.Errorf("Engine dependency not found")
+	}
+	eng := engineInterface.(*engine.Engine)
+	taskRegistry := eng.GetRegistry()
+
+	// 从上游任务提取股票代码列表
+	paramValues := extractParamValuesFromUpstream(tc, paramKey)
+	if len(paramValues) == 0 {
+		log.Printf("⚠️ [GenerateIncrementalSyncSubTasks] 未找到 %s 列表，尝试从 stock_basic 获取", paramKey)
+		// 可以尝试从其他来源获取
+	}
+
+	// 应用数量限制
+	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
+		log.Printf("📡 [GenerateIncrementalSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
+		paramValues = paramValues[:maxSubTasks]
+	}
+
+	parentTaskID := tc.TaskID
+	workflowInstanceID := tc.WorkflowInstanceID
+	generatedCount := 0
+
+	var subTaskInfos []map[string]interface{}
+	for _, paramValue := range paramValues {
+		subTaskName := fmt.Sprintf("IncrSync_%s_%s", apiName, paramValue)
+
+		// 构建子任务参数
+		subTaskParams := map[string]interface{}{
+			"data_source_name": dataSourceName,
+			"api_name":         apiName,
+			"token":            token,
+			"target_db_path":   targetDBPath,
+			"checkpoint_table": checkpointTable,
+			"sync_batch_id":    workflowInstanceID,
+			"params": map[string]interface{}{
+				paramKey: paramValue,
+			},
+		}
+
+		// 添加日期范围参数
+		if startDate != "" {
+			subTaskParams["params"].(map[string]interface{})["start_date"] = startDate
+		}
+		if latestTradeDate != "" {
+			subTaskParams["params"].(map[string]interface{})["end_date"] = latestTradeDate
+		}
+
+		subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("增量同步 %s: %s=%s", apiName, paramKey, paramValue), taskRegistry).
+			WithJobFunction("SyncAPIData", subTaskParams).
+			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+			WithCompensationFunction("CompensateSyncData").
+			Build()
+		if err != nil {
+			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			continue
+		}
+
+		bgCtx := context.Background()
+		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
+			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			continue
+		}
+
+		generatedCount++
+		subTaskInfos = append(subTaskInfos, map[string]interface{}{
+			"name":       subTaskName,
+			"api_name":   apiName,
+			"param_key":  paramKey,
+			paramKey:     paramValue,
+			"start_date": startDate,
+			"end_date":   latestTradeDate,
+		})
+		log.Printf("✅ [GenerateIncrementalSyncSubTasks] 子任务已添加: %s", subTaskName)
+	}
+
+	log.Printf("✅ [GenerateIncrementalSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+
+	return map[string]interface{}{
+		"status":            "success",
+		"generated":         generatedCount,
+		"api_name":          apiName,
+		"param_key":         paramKey,
+		"start_date":        startDate,
+		"end_date":          latestTradeDate,
+		"sub_tasks":         subTaskInfos,
+		"workflow_instance": workflowInstanceID,
+	}, nil
+}
+
+// UpdateSyncCheckpointJob 更新同步检查点
+// 同步完成后更新检查点表中的最后同步日期
+//
+// Input params:
+//   - target_db_path: string - 目标数据库路径
+//   - checkpoint_table: string - 检查点表名
+//   - api_names: []string - API 名称列表
+//
+// Output:
+//   - updated: int - 更新的检查点数量
+//   - checkpoints: map[string]string - 更新后的检查点
+func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
+	targetDBPath := tc.GetParamString("target_db_path")
+	checkpointTable := tc.GetParamString("checkpoint_table")
+
+	if targetDBPath == "" || checkpointTable == "" {
+		return nil, fmt.Errorf("target_db_path and checkpoint_table are required")
+	}
+
+	// 获取 API 名称列表
+	var apiNames []string
+	if raw := tc.GetParam("api_names"); raw != nil {
+		apiNames = convertToStringSlice(raw)
+	}
+
+	// 从上游任务获取最新交易日
+	latestTradeDate := ""
+	if cached := tc.GetParam("_cached_FetchLatestTradingDate"); cached != nil {
+		if resultMap, ok := cached.(map[string]interface{}); ok {
+			if date, ok := resultMap["latest_trade_date"].(string); ok {
+				latestTradeDate = date
+			}
+		}
+	}
+
+	if latestTradeDate == "" {
+		latestTradeDate = getTodayDateString()
+	}
+
+	log.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
+		checkpointTable, latestTradeDate, apiNames)
+
+	db, err := sql.Open("sqlite3", targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	// 保存旧的检查点（用于补偿）
+	oldCheckpoints := make(map[string]string)
+	for _, apiName := range apiNames {
+		var lastDate string
+		query := fmt.Sprintf(`SELECT last_sync_date FROM "%s" WHERE api_name = ?`, checkpointTable)
+		if err := db.QueryRow(query, apiName).Scan(&lastDate); err == nil {
+			oldCheckpoints[apiName] = lastDate
+		}
+	}
+
+	// 更新检查点
+	updatedCount := 0
+	newCheckpoints := make(map[string]string)
+
+	upsertSQL := fmt.Sprintf(`
+		INSERT INTO "%s" (api_name, last_sync_date, last_sync_time, record_count)
+		VALUES (?, ?, CURRENT_TIMESTAMP, 0)
+		ON CONFLICT(api_name) DO UPDATE SET
+			last_sync_date = excluded.last_sync_date,
+			last_sync_time = CURRENT_TIMESTAMP
+	`, checkpointTable)
+
+	for _, apiName := range apiNames {
+		if _, err := db.Exec(upsertSQL, apiName, latestTradeDate); err != nil {
+			log.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
+			continue
+		}
+		updatedCount++
+		newCheckpoints[apiName] = latestTradeDate
+		log.Printf("✅ [UpdateSyncCheckpoint] %s: %s -> %s",
+			apiName, oldCheckpoints[apiName], latestTradeDate)
+	}
+
+	return map[string]interface{}{
+		"updated":         updatedCount,
+		"checkpoints":     newCheckpoints,
+		"old_checkpoints": oldCheckpoints,
+		"sync_date":       latestTradeDate,
+	}, nil
+}
+
 // ==================== 辅助函数 ====================
+
+// getTodayDateString 获取今天的日期字符串（格式: "20251201"）
+func getTodayDateString() string {
+	return getRecentDateString(0)
+}
+
+// getRecentDateString 获取相对于今天的日期字符串
+// offset: 天数偏移量，正数为未来，负数为过去
+func getRecentDateString(offset int) string {
+	now := time.Now()
+	target := now.AddDate(0, 0, offset)
+	return target.Format("20060102")
+}
 
 // getParamKeys 获取参数的所有 key（调试用）
 func getParamKeys(params map[string]interface{}) []string {

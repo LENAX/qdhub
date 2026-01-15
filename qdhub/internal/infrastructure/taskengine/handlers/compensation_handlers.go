@@ -241,6 +241,63 @@ func CompensateSyncDataHandler(tc *task.TaskContext) {
 	log.Printf("[Compensate] ✅ SyncData 回滚成功 - Table: %s, 删除记录数: %d", apiName, affected)
 }
 
+// CompensateUpdateCheckpointHandler 回滚检查点更新操作
+// 当 UpdateSyncCheckpoint 任务成功但后续任务失败时，恢复旧的检查点
+func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
+	log.Printf("[Compensate] 🔄 开始回滚 UpdateSyncCheckpoint - TaskID: %s", tc.TaskID)
+
+	targetDBPath := tc.GetParamString("target_db_path")
+	checkpointTable := tc.GetParamString("checkpoint_table")
+
+	// 尝试从 _result_data 获取旧检查点
+	var oldCheckpoints map[string]interface{}
+	if result := tc.GetParam("_result_data"); result != nil {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			if old, ok := resultMap["old_checkpoints"].(map[string]interface{}); ok {
+				oldCheckpoints = old
+			}
+			if path, ok := resultMap["target_db_path"].(string); ok && targetDBPath == "" {
+				targetDBPath = path
+			}
+		}
+	}
+
+	if targetDBPath == "" || checkpointTable == "" {
+		log.Printf("[Compensate] ⚠️ target_db_path 或 checkpoint_table 未找到，无法回滚")
+		return
+	}
+
+	if len(oldCheckpoints) == 0 {
+		log.Printf("[Compensate] 📝 没有旧的检查点需要恢复")
+		return
+	}
+
+	// 打开数据库并恢复旧检查点
+	db, err := sql.Open("sqlite3", targetDBPath)
+	if err != nil {
+		log.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		return
+	}
+	defer db.Close()
+
+	// 恢复旧的检查点值
+	for apiName, oldDate := range oldCheckpoints {
+		dateStr, ok := oldDate.(string)
+		if !ok {
+			continue
+		}
+
+		updateSQL := `UPDATE "` + checkpointTable + `" SET last_sync_date = ? WHERE api_name = ?`
+		if _, err := db.Exec(updateSQL, dateStr, apiName); err != nil {
+			log.Printf("[Compensate] ⚠️ 恢复检查点失败: %s, error=%v", apiName, err)
+			continue
+		}
+		log.Printf("[Compensate] ✅ 检查点已恢复: %s -> %s", apiName, dateStr)
+	}
+
+	log.Printf("[Compensate] ✅ UpdateSyncCheckpoint 回滚完成")
+}
+
 // ==================== 通用补偿 Handlers ====================
 
 // CompensateGenericHandler 通用补偿处理器
