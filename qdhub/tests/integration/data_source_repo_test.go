@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package integration
@@ -17,14 +18,14 @@ func TestDataSourceRepository_Integration(t *testing.T) {
 
 	t.Run("Create and Get with aggregates", func(t *testing.T) {
 		ds := metadata.NewDataSource("Integration Test", "Test Description", "https://api.test.com", "https://docs.test.com")
-		
+
 		category := metadata.NewAPICategory(ds.ID, "Stock", "Stock data", "/stock", nil, 1)
 		ds.Categories = []metadata.APICategory{*category}
-		
+
 		api := metadata.NewAPIMetadata(ds.ID, "daily", "Daily Price", "Daily stock price", "/daily")
 		api.CategoryID = &category.ID
 		ds.APIs = []metadata.APIMetadata{*api}
-		
+
 		token := metadata.NewToken(ds.ID, "test-token-123", nil)
 		ds.Token = token
 
@@ -86,7 +87,7 @@ func TestDataSourceRepository_Integration(t *testing.T) {
 		ds := metadata.NewDataSource("To Delete", "Desc", "https://test.com", "https://docs.com")
 		category := metadata.NewAPICategory(ds.ID, "Stock", "Stock data", "/stock", nil, 1)
 		ds.Categories = []metadata.APICategory{*category}
-		
+
 		err := repo.Create(ds)
 		if err != nil {
 			t.Fatalf("Create() error = %v", err)

@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package integration
@@ -17,7 +18,7 @@ func TestQuantDataStoreRepository_Integration(t *testing.T) {
 
 	t.Run("Create and Get", func(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Integration Test", "Test Description", datastore.DataStoreTypeDuckDB, "duckdb://test.db", "/data/test.db")
-		
+
 		err := repo.Create(ds)
 		if err != nil {
 			t.Fatalf("Create() error = %v", err)
@@ -35,7 +36,7 @@ func TestQuantDataStoreRepository_Integration(t *testing.T) {
 		if got.ID != ds.ID {
 			t.Errorf("Get() ID = %s, want %s", got.ID, ds.ID)
 		}
-		
+
 		// Note: Schema creation requires api_metadata to exist, so we skip schema test here
 	})
 
@@ -64,7 +65,7 @@ func TestQuantDataStoreRepository_Integration(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		ds := datastore.NewQuantDataStore("To Delete", "Desc", datastore.DataStoreTypeDuckDB, "duckdb://test.db", "/data/test.db")
-		
+
 		err := repo.Create(ds)
 		if err != nil {
 			t.Fatalf("Create() error = %v", err)
