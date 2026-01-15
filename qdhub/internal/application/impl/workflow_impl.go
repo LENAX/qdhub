@@ -394,7 +394,7 @@ func (s *WorkflowApplicationServiceImpl) SyncWithEngine(ctx context.Context, ins
 	}
 
 	// Update local status
-	inst.SetStatus(status.Status)
+	inst.Status = status.Status
 	if err := s.workflowDefRepo.UpdateInstance(inst); err != nil {
 		return fmt.Errorf("failed to update workflow instance: %w", err)
 	}
