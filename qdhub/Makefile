@@ -12,13 +12,14 @@ GOBUILD := $(GO) build $(LDFLAGS)
 
 # Directories
 BIN_DIR := bin
-CMD_DIR := cmd/server
+CMD_DIR := cmd
 
 .PHONY: all build clean test lint run help
 .PHONY: build-linux build-darwin build-windows build-all
 .PHONY: test-unit test-integration test-e2e test-all
 .PHONY: deploy-dev deploy-prod
 .PHONY: deps tidy fmt vet
+.PHONY: install-swag docs
 
 # Default target
 all: deps build test-unit
@@ -38,6 +39,8 @@ help:
 	@echo "  make lint           Run linters"
 	@echo "  make clean          Clean build artifacts"
 	@echo "  make deps           Download dependencies"
+	@echo "  make install-swag   Install swag tool for API docs"
+	@echo "  make docs           Generate Swagger API documentation"
 	@echo "  make deploy-dev     Deploy to dev environment"
 	@echo "  make deploy-prod    Deploy to production"
 	@echo ""
@@ -51,18 +54,18 @@ tidy:
 
 # Build targets
 build: deps
-	$(GOBUILD) -o $(BIN_DIR)/$(APP_NAME) ./$(CMD_DIR)
+	$(GOBUILD) -o $(BIN_DIR)/$(APP_NAME) .
 
 build-linux: deps
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 ./$(CMD_DIR)
-	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-arm64 ./$(CMD_DIR)
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-arm64 .
 
 build-darwin: deps
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-amd64 ./$(CMD_DIR)
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-arm64 ./$(CMD_DIR)
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-arm64 .
 
 build-windows: deps
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-windows-amd64.exe ./$(CMD_DIR)
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-windows-amd64.exe .
 
 build-all: build-linux build-darwin build-windows
 
@@ -97,10 +100,24 @@ lint: fmt vet
 
 # Run
 run: build
-	./$(BIN_DIR)/$(APP_NAME) -config configs/config.yaml
+	./$(BIN_DIR)/$(APP_NAME) server --config configs/config.yaml
 
 run-dev:
-	$(GO) run ./$(CMD_DIR) -config configs/config.yaml
+	$(GO) run . -config configs/config.yaml
+
+# Swagger documentation
+install-swag:
+	@echo "Installing swag tool..."
+	@$(GO) install github.com/swaggo/swag/cmd/swag@latest
+	@echo "swag tool installed successfully"
+
+docs: install-swag
+	@echo "Generating Swagger documentation..."
+	@if [ -f ./$(BIN_DIR)/$(APP_NAME) ]; then \
+		./$(BIN_DIR)/$(APP_NAME) docs; \
+	else \
+		$(GO) run . docs; \
+	fi
 
 # Clean
 clean:

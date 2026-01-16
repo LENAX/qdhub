@@ -54,6 +54,16 @@ func (h *WorkflowHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // ==================== Workflow Definition Endpoints ====================
 
 // CreateWorkflow handles POST /api/v1/workflows
+// @Summary      Create a new workflow
+// @Description  Create a new workflow definition
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateWorkflowReq  true  "Workflow definition details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /workflows [post]
 func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 	var req CreateWorkflowReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -76,6 +86,15 @@ func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 }
 
 // ListWorkflows handles GET /api/v1/workflows
+// @Summary      List all workflows
+// @Description  Get a list of all workflow definitions, optionally filtered by category
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        category  query     string  false  "Filter by category"
+// @Success      200       {object}  Response
+// @Failure      500       {object}  Response
+// @Router       /workflows [get]
 func (h *WorkflowHandler) ListWorkflows(c *gin.Context) {
 	categoryStr := c.Query("category")
 
@@ -94,6 +113,16 @@ func (h *WorkflowHandler) ListWorkflows(c *gin.Context) {
 }
 
 // GetWorkflow handles GET /api/v1/workflows/:id
+// @Summary      Get a workflow
+// @Description  Get details of a specific workflow definition by ID
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow definition ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /workflows/{id} [get]
 func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -106,6 +135,18 @@ func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
 }
 
 // UpdateWorkflow handles PUT /api/v1/workflows/:id
+// @Summary      Update a workflow
+// @Description  Update details of a specific workflow definition
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string            true  "Workflow definition ID"
+// @Param        request  body      UpdateWorkflowReq true  "Updated workflow details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /workflows/{id} [put]
 func (h *WorkflowHandler) UpdateWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -128,6 +169,16 @@ func (h *WorkflowHandler) UpdateWorkflow(c *gin.Context) {
 }
 
 // DeleteWorkflow handles DELETE /api/v1/workflows/:id
+// @Summary      Delete a workflow
+// @Description  Delete a specific workflow definition
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow definition ID"
+// @Success      204  {object}  nil
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /workflows/{id} [delete]
 func (h *WorkflowHandler) DeleteWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -142,6 +193,18 @@ func (h *WorkflowHandler) DeleteWorkflow(c *gin.Context) {
 // ==================== Workflow Control Endpoints ====================
 
 // ExecuteWorkflow handles POST /api/v1/workflows/:id/execute
+// @Summary      Execute a workflow
+// @Description  Execute a workflow definition and create a new instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string            true  "Workflow definition ID"
+// @Param        request  body      ExecuteWorkflowReq false "Execution parameters (optional)"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /workflows/{id}/execute [post]
 func (h *WorkflowHandler) ExecuteWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -169,6 +232,16 @@ func (h *WorkflowHandler) ExecuteWorkflow(c *gin.Context) {
 }
 
 // EnableWorkflow handles POST /api/v1/workflows/:id/enable
+// @Summary      Enable a workflow
+// @Description  Enable a workflow definition
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow definition ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /workflows/{id}/enable [post]
 func (h *WorkflowHandler) EnableWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -181,6 +254,16 @@ func (h *WorkflowHandler) EnableWorkflow(c *gin.Context) {
 }
 
 // DisableWorkflow handles POST /api/v1/workflows/:id/disable
+// @Summary      Disable a workflow
+// @Description  Disable a workflow definition
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow definition ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /workflows/{id}/disable [post]
 func (h *WorkflowHandler) DisableWorkflow(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -195,6 +278,17 @@ func (h *WorkflowHandler) DisableWorkflow(c *gin.Context) {
 // ==================== Workflow Instance Endpoints ====================
 
 // ListInstances handles GET /api/v1/instances
+// @Summary      List workflow instances
+// @Description  Get a list of workflow instances, optionally filtered by status
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        workflow_id  query     string  true  "Workflow definition ID"
+// @Param        status       query     string  false "Filter by instance status"
+// @Success      200          {object}  Response
+// @Failure      400          {object}  Response
+// @Failure      500          {object}  Response
+// @Router       /instances [get]
 func (h *WorkflowHandler) ListInstances(c *gin.Context) {
 	workflowDefID := c.Query("workflow_id")
 	statusStr := c.Query("status")
@@ -219,6 +313,16 @@ func (h *WorkflowHandler) ListInstances(c *gin.Context) {
 }
 
 // GetInstance handles GET /api/v1/instances/:id
+// @Summary      Get workflow instance
+// @Description  Get details of a specific workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id} [get]
 func (h *WorkflowHandler) GetInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -231,6 +335,16 @@ func (h *WorkflowHandler) GetInstance(c *gin.Context) {
 }
 
 // GetTaskInstances handles GET /api/v1/instances/:id/tasks
+// @Summary      Get task instances
+// @Description  Get all task instances for a workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/tasks [get]
 func (h *WorkflowHandler) GetTaskInstances(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -243,6 +357,16 @@ func (h *WorkflowHandler) GetTaskInstances(c *gin.Context) {
 }
 
 // GetInstanceProgress handles GET /api/v1/instances/:id/progress
+// @Summary      Get instance progress
+// @Description  Get the progress status of a workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/progress [get]
 func (h *WorkflowHandler) GetInstanceProgress(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -257,6 +381,16 @@ func (h *WorkflowHandler) GetInstanceProgress(c *gin.Context) {
 // ==================== Instance Control Endpoints ====================
 
 // PauseInstance handles POST /api/v1/instances/:id/pause
+// @Summary      Pause workflow instance
+// @Description  Pause a running workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/pause [post]
 func (h *WorkflowHandler) PauseInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -269,6 +403,16 @@ func (h *WorkflowHandler) PauseInstance(c *gin.Context) {
 }
 
 // ResumeInstance handles POST /api/v1/instances/:id/resume
+// @Summary      Resume workflow instance
+// @Description  Resume a paused workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/resume [post]
 func (h *WorkflowHandler) ResumeInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -281,6 +425,16 @@ func (h *WorkflowHandler) ResumeInstance(c *gin.Context) {
 }
 
 // CancelInstance handles POST /api/v1/instances/:id/cancel
+// @Summary      Cancel workflow instance
+// @Description  Cancel a running or paused workflow instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/cancel [post]
 func (h *WorkflowHandler) CancelInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -293,6 +447,18 @@ func (h *WorkflowHandler) CancelInstance(c *gin.Context) {
 }
 
 // RetryTask handles POST /api/v1/instances/:id/retry
+// @Summary      Retry task
+// @Description  Retry a failed task instance
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string       true  "Workflow instance ID"
+// @Param        request  body      RetryTaskReq true  "Task retry details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /instances/{id}/retry [post]
 func (h *WorkflowHandler) RetryTask(c *gin.Context) {
 	var req RetryTaskReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -311,6 +477,16 @@ func (h *WorkflowHandler) RetryTask(c *gin.Context) {
 // ==================== Sync Endpoints ====================
 
 // SyncInstance handles POST /api/v1/instances/:id/sync
+// @Summary      Sync workflow instance
+// @Description  Synchronize a workflow instance with the workflow engine
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/sync [post]
 func (h *WorkflowHandler) SyncInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -323,6 +499,14 @@ func (h *WorkflowHandler) SyncInstance(c *gin.Context) {
 }
 
 // SyncAllInstances handles POST /api/v1/workflows/sync-all
+// @Summary      Sync all instances
+// @Description  Synchronize all workflow instances with the workflow engine
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /workflows/sync-all [post]
 func (h *WorkflowHandler) SyncAllInstances(c *gin.Context) {
 	err := h.workflowSvc.SyncAllInstances(c.Request.Context())
 	if err != nil {

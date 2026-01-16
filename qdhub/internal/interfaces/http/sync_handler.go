@@ -46,6 +46,16 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // ==================== Sync Job Endpoints ====================
 
 // CreateSyncJob handles POST /api/v1/sync-jobs
+// @Summary      Create a new sync job
+// @Description  Create a sync job to synchronize data from an API to a data store
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateSyncJobReq  true  "Sync job details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /sync-jobs [post]
 func (h *SyncHandler) CreateSyncJob(c *gin.Context) {
 	var req CreateSyncJobReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -72,6 +82,14 @@ func (h *SyncHandler) CreateSyncJob(c *gin.Context) {
 }
 
 // ListSyncJobs handles GET /api/v1/sync-jobs
+// @Summary      List all sync jobs
+// @Description  Get a list of all sync jobs
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs [get]
 func (h *SyncHandler) ListSyncJobs(c *gin.Context) {
 	jobs, err := h.syncSvc.ListSyncJobs(c.Request.Context())
 	if err != nil {
@@ -82,6 +100,16 @@ func (h *SyncHandler) ListSyncJobs(c *gin.Context) {
 }
 
 // GetSyncJob handles GET /api/v1/sync-jobs/:id
+// @Summary      Get a sync job
+// @Description  Get details of a specific sync job by ID
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id} [get]
 func (h *SyncHandler) GetSyncJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -94,6 +122,18 @@ func (h *SyncHandler) GetSyncJob(c *gin.Context) {
 }
 
 // UpdateSyncJob handles PUT /api/v1/sync-jobs/:id
+// @Summary      Update a sync job
+// @Description  Update details of a specific sync job
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string            true  "Sync job ID"
+// @Param        request  body      UpdateSyncJobReq  true  "Updated sync job details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /sync-jobs/{id} [put]
 func (h *SyncHandler) UpdateSyncJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -131,6 +171,16 @@ func (h *SyncHandler) UpdateSyncJob(c *gin.Context) {
 }
 
 // DeleteSyncJob handles DELETE /api/v1/sync-jobs/:id
+// @Summary      Delete a sync job
+// @Description  Delete a specific sync job
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      204  {object}  nil
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id} [delete]
 func (h *SyncHandler) DeleteSyncJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -145,6 +195,16 @@ func (h *SyncHandler) DeleteSyncJob(c *gin.Context) {
 // ==================== Job Control Endpoints ====================
 
 // TriggerSyncJob handles POST /api/v1/sync-jobs/:id/trigger
+// @Summary      Trigger a sync job
+// @Description  Manually trigger execution of a sync job
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id}/trigger [post]
 func (h *SyncHandler) TriggerSyncJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -160,6 +220,16 @@ func (h *SyncHandler) TriggerSyncJob(c *gin.Context) {
 }
 
 // EnableJob handles POST /api/v1/sync-jobs/:id/enable
+// @Summary      Enable a sync job
+// @Description  Enable a sync job for scheduled execution
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id}/enable [post]
 func (h *SyncHandler) EnableJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -172,6 +242,16 @@ func (h *SyncHandler) EnableJob(c *gin.Context) {
 }
 
 // DisableJob handles POST /api/v1/sync-jobs/:id/disable
+// @Summary      Disable a sync job
+// @Description  Disable a sync job to stop scheduled execution
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id}/disable [post]
 func (h *SyncHandler) DisableJob(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -186,6 +266,16 @@ func (h *SyncHandler) DisableJob(c *gin.Context) {
 // ==================== Execution Endpoints ====================
 
 // ListExecutions handles GET /api/v1/sync-jobs/:id/executions
+// @Summary      List sync executions
+// @Description  Get a list of all executions for a sync job
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync job ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-jobs/{id}/executions [get]
 func (h *SyncHandler) ListExecutions(c *gin.Context) {
 	jobID := shared.ID(c.Param("id"))
 
@@ -198,6 +288,16 @@ func (h *SyncHandler) ListExecutions(c *gin.Context) {
 }
 
 // GetExecution handles GET /api/v1/executions/:id
+// @Summary      Get sync execution
+// @Description  Get details of a specific sync execution
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /executions/{id} [get]
 func (h *SyncHandler) GetExecution(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -210,6 +310,16 @@ func (h *SyncHandler) GetExecution(c *gin.Context) {
 }
 
 // CancelExecution handles POST /api/v1/executions/:id/cancel
+// @Summary      Cancel sync execution
+// @Description  Cancel a running sync execution
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /executions/{id}/cancel [post]
 func (h *SyncHandler) CancelExecution(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -224,6 +334,16 @@ func (h *SyncHandler) CancelExecution(c *gin.Context) {
 // ==================== Callback Endpoint ====================
 
 // HandleCallback handles POST /api/v1/sync/callback
+// @Summary      Handle execution callback
+// @Description  Handle callback from workflow engine for sync execution (internal use)
+// @Tags         SyncJobs
+// @Accept       json
+// @Produce      json
+// @Param        request  body      ExecutionCallbackReq true  "Execution callback details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /sync/callback [post]
 func (h *SyncHandler) HandleCallback(c *gin.Context) {
 	var req ExecutionCallbackReq
 	if err := c.ShouldBindJSON(&req); err != nil {

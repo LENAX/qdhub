@@ -1,0 +1,3295 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "QDHub - Quantitative Data Hub Management System API\nProvides metadata management, automatic table creation, data synchronization, and workflow orchestration.",
+        "title": "QDHub API",
+        "contact": {
+            "name": "QDHub Support",
+            "url": "https://github.com/qdhub/qdhub",
+            "email": "support@qdhub.example.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/apis": {
+            "post": {
+                "description": "Create a new API metadata entry",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "APIs"
+                ],
+                "summary": "Create API metadata",
+                "parameters": [
+                    {
+                        "description": "API metadata details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateAPIMetadataReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/apis/{id}": {
+            "get": {
+                "description": "Get details of a specific API by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "APIs"
+                ],
+                "summary": "Get API metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API metadata ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update details of a specific API metadata entry",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "APIs"
+                ],
+                "summary": "Update API metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API metadata ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated API metadata details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateAPIMetadataReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a specific API metadata entry",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "APIs"
+                ],
+                "summary": "Delete API metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "API metadata ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources": {
+            "get": {
+                "description": "Get a list of all registered data sources",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "List all data sources",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Register a new data source with its connection details",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Create a new data source",
+                "parameters": [
+                    {
+                        "description": "Data source details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateDataSourceReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}": {
+            "get": {
+                "description": "Get details of a specific data source by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Get a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update details of a specific data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Update a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated data source details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateDataSourceReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a specific data source and its associated metadata",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Delete a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/apis": {
+            "get": {
+                "description": "Get all API metadata for a specific data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "APIs"
+                ],
+                "summary": "List APIs by data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/categories": {
+            "get": {
+                "description": "Get all API categories for a data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Get API categories",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/refresh": {
+            "post": {
+                "description": "Parse and import API metadata from the data source documentation",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Refresh metadata from data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Document content to parse",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.RefreshMetadataReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/token": {
+            "get": {
+                "description": "Get token information for a data source (token value is not returned for security)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Get data source token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Set or update the authentication token for a data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Set data source token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Token details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.SetTokenReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete the authentication token for a data source",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Delete data source token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores": {
+            "get": {
+                "description": "Get a list of all configured data stores",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "List all data stores",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new quantitative data store configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Create a new data store",
+                "parameters": [
+                    {
+                        "description": "Data store details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateDataStoreReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}": {
+            "get": {
+                "description": "Get details of a specific data store by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Get a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update details of a specific data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Update a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated data store details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateDataStoreReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a specific data store configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Delete a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/schemas": {
+            "get": {
+                "description": "Get all table schemas for a data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "List table schemas",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/schemas/generate": {
+            "post": {
+                "description": "Generate a table schema from API metadata",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Generate table schema",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Schema generation details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.GenerateSchemaReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/schemas/{schemaId}": {
+            "get": {
+                "description": "Get details of a specific table schema",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Get table schema",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Schema ID",
+                        "name": "schemaId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update a table schema configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Update table schema",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Schema ID",
+                        "name": "schemaId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated schema details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateSchemaReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Drop a table from the data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Drop table",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Schema ID",
+                        "name": "schemaId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/schemas/{schemaId}/create": {
+            "post": {
+                "description": "Create a table in the data store based on the schema",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Create table",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Schema ID",
+                        "name": "schemaId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/sync-status": {
+            "post": {
+                "description": "Synchronize schema status with the data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Sync schema status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/test": {
+            "post": {
+                "description": "Test the connection to a data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Test data store connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}": {
+            "get": {
+                "description": "Get details of a specific sync execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Get sync execution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}/cancel": {
+            "post": {
+                "description": "Cancel a running sync execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Cancel sync execution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances": {
+            "get": {
+                "description": "Get a list of workflow instances, optionally filtered by status",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "List workflow instances",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "workflow_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by instance status",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}": {
+            "get": {
+                "description": "Get details of a specific workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Get workflow instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/cancel": {
+            "post": {
+                "description": "Cancel a running or paused workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Cancel workflow instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/pause": {
+            "post": {
+                "description": "Pause a running workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Pause workflow instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/progress": {
+            "get": {
+                "description": "Get the progress status of a workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Get instance progress",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/resume": {
+            "post": {
+                "description": "Resume a paused workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Resume workflow instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/retry": {
+            "post": {
+                "description": "Retry a failed task instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Retry task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Task retry details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.RetryTaskReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/sync": {
+            "post": {
+                "description": "Synchronize a workflow instance with the workflow engine",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Sync workflow instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/instances/{id}/tasks": {
+            "get": {
+                "description": "Get all task instances for a workflow instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Get task instances",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mapping-rules": {
+            "get": {
+                "description": "Get data type mapping rules",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Get mapping rules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source type",
+                        "name": "data_source_type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target database type",
+                        "name": "target_db_type",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a data type mapping rule",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Create mapping rule",
+                "parameters": [
+                    {
+                        "description": "Mapping rule details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateMappingRuleReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs": {
+            "get": {
+                "description": "Get a list of all sync jobs",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "List all sync jobs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a sync job to synchronize data from an API to a data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Create a new sync job",
+                "parameters": [
+                    {
+                        "description": "Sync job details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateSyncJobReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs/{id}": {
+            "get": {
+                "description": "Get details of a specific sync job by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Get a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update details of a specific sync job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Update a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated sync job details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateSyncJobReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a specific sync job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Delete a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs/{id}/disable": {
+            "post": {
+                "description": "Disable a sync job to stop scheduled execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Disable a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs/{id}/enable": {
+            "post": {
+                "description": "Enable a sync job for scheduled execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Enable a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs/{id}/executions": {
+            "get": {
+                "description": "Get a list of all executions for a sync job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "List sync executions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-jobs/{id}/trigger": {
+            "post": {
+                "description": "Manually trigger execution of a sync job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Trigger a sync job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync/callback": {
+            "post": {
+                "description": "Handle callback from workflow engine for sync execution (internal use)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncJobs"
+                ],
+                "summary": "Handle execution callback",
+                "parameters": [
+                    {
+                        "description": "Execution callback details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ExecutionCallbackReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows": {
+            "get": {
+                "description": "Get a list of all workflow definitions, optionally filtered by category",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "List all workflows",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by category",
+                        "name": "category",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new workflow definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Create a new workflow",
+                "parameters": [
+                    {
+                        "description": "Workflow definition details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateWorkflowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/sync-all": {
+            "post": {
+                "description": "Synchronize all workflow instances with the workflow engine",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Sync all instances",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/{id}": {
+            "get": {
+                "description": "Get details of a specific workflow definition by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Get a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update details of a specific workflow definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Update a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated workflow details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateWorkflowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a specific workflow definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Delete a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/{id}/disable": {
+            "post": {
+                "description": "Disable a workflow definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Disable a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/{id}/enable": {
+            "post": {
+                "description": "Enable a workflow definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Enable a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/workflows/{id}/execute": {
+            "post": {
+                "description": "Execute a workflow definition and create a new instance",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workflows"
+                ],
+                "summary": "Execute a workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Execution parameters (optional)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/http.ExecuteWorkflowReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "datastore.ColumnDef": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "default": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nullable": {
+                    "type": "boolean"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "datastore.IndexDef": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "unique": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "http.CreateAPIMetadataReq": {
+            "type": "object",
+            "required": [
+                "data_source_id",
+                "name"
+            ],
+            "properties": {
+                "category_id": {
+                    "type": "string"
+                },
+                "data_source_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "permission": {
+                    "type": "string"
+                },
+                "rate_limit": {
+                    "$ref": "#/definitions/metadata.RateLimit"
+                },
+                "request_params": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metadata.ParamMeta"
+                    }
+                },
+                "response_fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metadata.FieldMeta"
+                    }
+                }
+            }
+        },
+        "http.CreateDataSourceReq": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "doc_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.CreateDataStoreReq": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "dsn": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "storage_path": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "duckdb, clickhouse, postgresql",
+                    "type": "string"
+                }
+            }
+        },
+        "http.CreateMappingRuleReq": {
+            "type": "object",
+            "required": [
+                "data_source_type",
+                "source_type",
+                "target_db_type",
+                "target_type"
+            ],
+            "properties": {
+                "data_source_type": {
+                    "type": "string"
+                },
+                "field_pattern": {
+                    "type": "string"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "target_db_type": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.CreateSyncJobReq": {
+            "type": "object",
+            "required": [
+                "api_metadata_id",
+                "data_store_id",
+                "mode",
+                "name",
+                "workflow_def_id"
+            ],
+            "properties": {
+                "api_metadata_id": {
+                    "type": "string"
+                },
+                "cron_expression": {
+                    "type": "string"
+                },
+                "data_store_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "mode": {
+                    "description": "full, incremental",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "param_rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ParamRuleReq"
+                    }
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "workflow_def_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.CreateWorkflowReq": {
+            "type": "object",
+            "required": [
+                "category",
+                "definition_yaml",
+                "name"
+            ],
+            "properties": {
+                "category": {
+                    "description": "metadata, sync, datastore",
+                    "type": "string"
+                },
+                "definition_yaml": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.ExecuteWorkflowReq": {
+            "type": "object",
+            "properties": {
+                "trigger_params": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "trigger_type": {
+                    "description": "manual, scheduled, event",
+                    "type": "string"
+                }
+            }
+        },
+        "http.ExecutionCallbackReq": {
+            "type": "object",
+            "required": [
+                "execution_id"
+            ],
+            "properties": {
+                "error_message": {
+                    "type": "string"
+                },
+                "execution_id": {
+                    "type": "string"
+                },
+                "record_count": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "http.GenerateSchemaReq": {
+            "type": "object",
+            "required": [
+                "api_metadata_id",
+                "table_name"
+            ],
+            "properties": {
+                "api_metadata_id": {
+                    "type": "string"
+                },
+                "auto_create": {
+                    "type": "boolean"
+                },
+                "table_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.ParamRuleReq": {
+            "type": "object",
+            "properties": {
+                "param_name": {
+                    "type": "string"
+                },
+                "rule_config": {},
+                "rule_type": {
+                    "description": "date_range, list, fixed",
+                    "type": "string"
+                }
+            }
+        },
+        "http.RefreshMetadataReq": {
+            "type": "object",
+            "required": [
+                "doc_content",
+                "doc_type"
+            ],
+            "properties": {
+                "doc_content": {
+                    "type": "string"
+                },
+                "doc_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.Response": {
+            "description": "Standard API response wrapper",
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "data": {
+                    "type": "object"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "success"
+                }
+            }
+        },
+        "http.RetryTaskReq": {
+            "type": "object",
+            "required": [
+                "task_instance_id"
+            ],
+            "properties": {
+                "task_instance_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.SetTokenReq": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.UpdateAPIMetadataReq": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "permission": {
+                    "type": "string"
+                },
+                "rate_limit": {
+                    "$ref": "#/definitions/metadata.RateLimit"
+                },
+                "request_params": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metadata.ParamMeta"
+                    }
+                },
+                "response_fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metadata.FieldMeta"
+                    }
+                }
+            }
+        },
+        "http.UpdateDataSourceReq": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "doc_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.UpdateDataStoreReq": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "dsn": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "storage_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.UpdateSchemaReq": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/datastore.ColumnDef"
+                    }
+                },
+                "indexes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/datastore.IndexDef"
+                    }
+                },
+                "primary_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "http.UpdateSyncJobReq": {
+            "type": "object",
+            "properties": {
+                "cron_expression": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "param_rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ParamRuleReq"
+                    }
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
+        },
+        "http.UpdateWorkflowReq": {
+            "type": "object",
+            "properties": {
+                "definition_yaml": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "metadata.FieldMeta": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "is_index": {
+                    "type": "boolean"
+                },
+                "is_primary": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "metadata.ParamMeta": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "metadata.RateLimit": {
+            "type": "object",
+            "properties": {
+                "points_required": {
+                    "type": "integer"
+                },
+                "requests_per_minute": {
+                    "type": "integer"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "API Key for authentication",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

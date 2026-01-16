@@ -1,0 +1,2188 @@
+basePath: /api/v1
+definitions:
+  datastore.ColumnDef:
+    properties:
+      comment:
+        type: string
+      default:
+        type: string
+      name:
+        type: string
+      nullable:
+        type: boolean
+      source_type:
+        type: string
+      target_type:
+        type: string
+    type: object
+  datastore.IndexDef:
+    properties:
+      columns:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      unique:
+        type: boolean
+    type: object
+  http.CreateAPIMetadataReq:
+    properties:
+      category_id:
+        type: string
+      data_source_id:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      endpoint:
+        type: string
+      name:
+        type: string
+      permission:
+        type: string
+      rate_limit:
+        $ref: '#/definitions/metadata.RateLimit'
+      request_params:
+        items:
+          $ref: '#/definitions/metadata.ParamMeta'
+        type: array
+      response_fields:
+        items:
+          $ref: '#/definitions/metadata.FieldMeta'
+        type: array
+    required:
+    - data_source_id
+    - name
+    type: object
+  http.CreateDataSourceReq:
+    properties:
+      base_url:
+        type: string
+      description:
+        type: string
+      doc_url:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  http.CreateDataStoreReq:
+    properties:
+      description:
+        type: string
+      dsn:
+        type: string
+      name:
+        type: string
+      storage_path:
+        type: string
+      type:
+        description: duckdb, clickhouse, postgresql
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  http.CreateMappingRuleReq:
+    properties:
+      data_source_type:
+        type: string
+      field_pattern:
+        type: string
+      priority:
+        type: integer
+      source_type:
+        type: string
+      target_db_type:
+        type: string
+      target_type:
+        type: string
+    required:
+    - data_source_type
+    - source_type
+    - target_db_type
+    - target_type
+    type: object
+  http.CreateSyncJobReq:
+    properties:
+      api_metadata_id:
+        type: string
+      cron_expression:
+        type: string
+      data_store_id:
+        type: string
+      description:
+        type: string
+      mode:
+        description: full, incremental
+        type: string
+      name:
+        type: string
+      param_rules:
+        items:
+          $ref: '#/definitions/http.ParamRuleReq'
+        type: array
+      params:
+        additionalProperties: true
+        type: object
+      workflow_def_id:
+        type: string
+    required:
+    - api_metadata_id
+    - data_store_id
+    - mode
+    - name
+    - workflow_def_id
+    type: object
+  http.CreateWorkflowReq:
+    properties:
+      category:
+        description: metadata, sync, datastore
+        type: string
+      definition_yaml:
+        type: string
+      description:
+        type: string
+      is_system:
+        type: boolean
+      name:
+        type: string
+    required:
+    - category
+    - definition_yaml
+    - name
+    type: object
+  http.ExecuteWorkflowReq:
+    properties:
+      trigger_params:
+        additionalProperties: true
+        type: object
+      trigger_type:
+        description: manual, scheduled, event
+        type: string
+    type: object
+  http.ExecutionCallbackReq:
+    properties:
+      error_message:
+        type: string
+      execution_id:
+        type: string
+      record_count:
+        type: integer
+      success:
+        type: boolean
+    required:
+    - execution_id
+    type: object
+  http.GenerateSchemaReq:
+    properties:
+      api_metadata_id:
+        type: string
+      auto_create:
+        type: boolean
+      table_name:
+        type: string
+    required:
+    - api_metadata_id
+    - table_name
+    type: object
+  http.ParamRuleReq:
+    properties:
+      param_name:
+        type: string
+      rule_config: {}
+      rule_type:
+        description: date_range, list, fixed
+        type: string
+    type: object
+  http.RefreshMetadataReq:
+    properties:
+      doc_content:
+        type: string
+      doc_type:
+        type: string
+    required:
+    - doc_content
+    - doc_type
+    type: object
+  http.Response:
+    description: Standard API response wrapper
+    properties:
+      code:
+        example: 0
+        type: integer
+      data:
+        type: object
+      message:
+        example: success
+        type: string
+    type: object
+  http.RetryTaskReq:
+    properties:
+      task_instance_id:
+        type: string
+    required:
+    - task_instance_id
+    type: object
+  http.SetTokenReq:
+    properties:
+      expires_at:
+        type: string
+      token:
+        type: string
+    required:
+    - token
+    type: object
+  http.UpdateAPIMetadataReq:
+    properties:
+      description:
+        type: string
+      display_name:
+        type: string
+      endpoint:
+        type: string
+      permission:
+        type: string
+      rate_limit:
+        $ref: '#/definitions/metadata.RateLimit'
+      request_params:
+        items:
+          $ref: '#/definitions/metadata.ParamMeta'
+        type: array
+      response_fields:
+        items:
+          $ref: '#/definitions/metadata.FieldMeta'
+        type: array
+    type: object
+  http.UpdateDataSourceReq:
+    properties:
+      base_url:
+        type: string
+      description:
+        type: string
+      doc_url:
+        type: string
+      name:
+        type: string
+    type: object
+  http.UpdateDataStoreReq:
+    properties:
+      description:
+        type: string
+      dsn:
+        type: string
+      name:
+        type: string
+      storage_path:
+        type: string
+    type: object
+  http.UpdateSchemaReq:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/datastore.ColumnDef'
+        type: array
+      indexes:
+        items:
+          $ref: '#/definitions/datastore.IndexDef'
+        type: array
+      primary_keys:
+        items:
+          type: string
+        type: array
+    type: object
+  http.UpdateSyncJobReq:
+    properties:
+      cron_expression:
+        type: string
+      description:
+        type: string
+      mode:
+        type: string
+      name:
+        type: string
+      param_rules:
+        items:
+          $ref: '#/definitions/http.ParamRuleReq'
+        type: array
+      params:
+        additionalProperties: true
+        type: object
+    type: object
+  http.UpdateWorkflowReq:
+    properties:
+      definition_yaml:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  metadata.FieldMeta:
+    properties:
+      description:
+        type: string
+      is_index:
+        type: boolean
+      is_primary:
+        type: boolean
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  metadata.ParamMeta:
+    properties:
+      default:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      required:
+        type: boolean
+      type:
+        type: string
+    type: object
+  metadata.RateLimit:
+    properties:
+      points_required:
+        type: integer
+      requests_per_minute:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@qdhub.example.com
+    name: QDHub Support
+    url: https://github.com/qdhub/qdhub
+  description: |-
+    QDHub - Quantitative Data Hub Management System API
+    Provides metadata management, automatic table creation, data synchronization, and workflow orchestration.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: QDHub API
+  version: "1.0"
+paths:
+  /apis:
+    post:
+      consumes:
+      - application/json
+      description: Create a new API metadata entry
+      parameters:
+      - description: API metadata details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateAPIMetadataReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create API metadata
+      tags:
+      - APIs
+  /apis/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific API metadata entry
+      parameters:
+      - description: API metadata ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete API metadata
+      tags:
+      - APIs
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific API by ID
+      parameters:
+      - description: API metadata ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get API metadata
+      tags:
+      - APIs
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific API metadata entry
+      parameters:
+      - description: API metadata ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated API metadata details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateAPIMetadataReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update API metadata
+      tags:
+      - APIs
+  /datasources:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all registered data sources
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List all data sources
+      tags:
+      - DataSources
+    post:
+      consumes:
+      - application/json
+      description: Register a new data source with its connection details
+      parameters:
+      - description: Data source details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateDataSourceReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create a new data source
+      tags:
+      - DataSources
+  /datasources/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific data source and its associated metadata
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete a data source
+      tags:
+      - DataSources
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific data source by ID
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get a data source
+      tags:
+      - DataSources
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated data source details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateDataSourceReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update a data source
+      tags:
+      - DataSources
+  /datasources/{id}/apis:
+    get:
+      consumes:
+      - application/json
+      description: Get all API metadata for a specific data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List APIs by data source
+      tags:
+      - APIs
+  /datasources/{id}/categories:
+    get:
+      consumes:
+      - application/json
+      description: Get all API categories for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get API categories
+      tags:
+      - DataSources
+  /datasources/{id}/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Parse and import API metadata from the data source documentation
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Document content to parse
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.RefreshMetadataReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Refresh metadata from data source
+      tags:
+      - DataSources
+  /datasources/{id}/token:
+    delete:
+      consumes:
+      - application/json
+      description: Delete the authentication token for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete data source token
+      tags:
+      - DataSources
+    get:
+      consumes:
+      - application/json
+      description: Get token information for a data source (token value is not returned
+        for security)
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get data source token
+      tags:
+      - DataSources
+    post:
+      consumes:
+      - application/json
+      description: Set or update the authentication token for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Token details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.SetTokenReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Set data source token
+      tags:
+      - DataSources
+  /datastores:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all configured data stores
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List all data stores
+      tags:
+      - DataStores
+    post:
+      consumes:
+      - application/json
+      description: Create a new quantitative data store configuration
+      parameters:
+      - description: Data store details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateDataStoreReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create a new data store
+      tags:
+      - DataStores
+  /datastores/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific data store configuration
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete a data store
+      tags:
+      - DataStores
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific data store by ID
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get a data store
+      tags:
+      - DataStores
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific data store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated data store details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateDataStoreReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update a data store
+      tags:
+      - DataStores
+  /datastores/{id}/schemas:
+    get:
+      consumes:
+      - application/json
+      description: Get all table schemas for a data store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List table schemas
+      tags:
+      - DataStores
+  /datastores/{id}/schemas/{schemaId}:
+    delete:
+      consumes:
+      - application/json
+      description: Drop a table from the data store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Schema ID
+        in: path
+        name: schemaId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Drop table
+      tags:
+      - DataStores
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific table schema
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Schema ID
+        in: path
+        name: schemaId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get table schema
+      tags:
+      - DataStores
+    put:
+      consumes:
+      - application/json
+      description: Update a table schema configuration
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Schema ID
+        in: path
+        name: schemaId
+        required: true
+        type: string
+      - description: Updated schema details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateSchemaReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update table schema
+      tags:
+      - DataStores
+  /datastores/{id}/schemas/{schemaId}/create:
+    post:
+      consumes:
+      - application/json
+      description: Create a table in the data store based on the schema
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Schema ID
+        in: path
+        name: schemaId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create table
+      tags:
+      - DataStores
+  /datastores/{id}/schemas/generate:
+    post:
+      consumes:
+      - application/json
+      description: Generate a table schema from API metadata
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Schema generation details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.GenerateSchemaReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Generate table schema
+      tags:
+      - DataStores
+  /datastores/{id}/sync-status:
+    post:
+      consumes:
+      - application/json
+      description: Synchronize schema status with the data store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Sync schema status
+      tags:
+      - DataStores
+  /datastores/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Test the connection to a data store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Test data store connection
+      tags:
+      - DataStores
+  /executions/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get sync execution
+      tags:
+      - SyncJobs
+  /executions/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Cancel a running sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Cancel sync execution
+      tags:
+      - SyncJobs
+  /instances:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of workflow instances, optionally filtered by status
+      parameters:
+      - description: Workflow definition ID
+        in: query
+        name: workflow_id
+        required: true
+        type: string
+      - description: Filter by instance status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List workflow instances
+      tags:
+      - Workflows
+  /instances/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Cancel a running or paused workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Cancel workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/pause:
+    post:
+      consumes:
+      - application/json
+      description: Pause a running workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Pause workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/progress:
+    get:
+      consumes:
+      - application/json
+      description: Get the progress status of a workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get instance progress
+      tags:
+      - Workflows
+  /instances/{id}/resume:
+    post:
+      consumes:
+      - application/json
+      description: Resume a paused workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Resume workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/retry:
+    post:
+      consumes:
+      - application/json
+      description: Retry a failed task instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Task retry details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.RetryTaskReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Retry task
+      tags:
+      - Workflows
+  /instances/{id}/sync:
+    post:
+      consumes:
+      - application/json
+      description: Synchronize a workflow instance with the workflow engine
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Sync workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/tasks:
+    get:
+      consumes:
+      - application/json
+      description: Get all task instances for a workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get task instances
+      tags:
+      - Workflows
+  /mapping-rules:
+    get:
+      consumes:
+      - application/json
+      description: Get data type mapping rules
+      parameters:
+      - description: Data source type
+        in: query
+        name: data_source_type
+        required: true
+        type: string
+      - description: Target database type
+        in: query
+        name: target_db_type
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get mapping rules
+      tags:
+      - DataStores
+    post:
+      consumes:
+      - application/json
+      description: Create a data type mapping rule
+      parameters:
+      - description: Mapping rule details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateMappingRuleReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create mapping rule
+      tags:
+      - DataStores
+  /sync-jobs:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all sync jobs
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List all sync jobs
+      tags:
+      - SyncJobs
+    post:
+      consumes:
+      - application/json
+      description: Create a sync job to synchronize data from an API to a data store
+      parameters:
+      - description: Sync job details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateSyncJobReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create a new sync job
+      tags:
+      - SyncJobs
+  /sync-jobs/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific sync job
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete a sync job
+      tags:
+      - SyncJobs
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific sync job by ID
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get a sync job
+      tags:
+      - SyncJobs
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific sync job
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated sync job details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateSyncJobReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update a sync job
+      tags:
+      - SyncJobs
+  /sync-jobs/{id}/disable:
+    post:
+      consumes:
+      - application/json
+      description: Disable a sync job to stop scheduled execution
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Disable a sync job
+      tags:
+      - SyncJobs
+  /sync-jobs/{id}/enable:
+    post:
+      consumes:
+      - application/json
+      description: Enable a sync job for scheduled execution
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Enable a sync job
+      tags:
+      - SyncJobs
+  /sync-jobs/{id}/executions:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all executions for a sync job
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List sync executions
+      tags:
+      - SyncJobs
+  /sync-jobs/{id}/trigger:
+    post:
+      consumes:
+      - application/json
+      description: Manually trigger execution of a sync job
+      parameters:
+      - description: Sync job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Trigger a sync job
+      tags:
+      - SyncJobs
+  /sync/callback:
+    post:
+      consumes:
+      - application/json
+      description: Handle callback from workflow engine for sync execution (internal
+        use)
+      parameters:
+      - description: Execution callback details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.ExecutionCallbackReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Handle execution callback
+      tags:
+      - SyncJobs
+  /workflows:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all workflow definitions, optionally filtered by
+        category
+      parameters:
+      - description: Filter by category
+        in: query
+        name: category
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: List all workflows
+      tags:
+      - Workflows
+    post:
+      consumes:
+      - application/json
+      description: Create a new workflow definition
+      parameters:
+      - description: Workflow definition details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateWorkflowReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Create a new workflow
+      tags:
+      - Workflows
+  /workflows/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific workflow definition
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Delete a workflow
+      tags:
+      - Workflows
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workflow definition by ID
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Get a workflow
+      tags:
+      - Workflows
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific workflow definition
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated workflow details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateWorkflowReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Update a workflow
+      tags:
+      - Workflows
+  /workflows/{id}/disable:
+    post:
+      consumes:
+      - application/json
+      description: Disable a workflow definition
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Disable a workflow
+      tags:
+      - Workflows
+  /workflows/{id}/enable:
+    post:
+      consumes:
+      - application/json
+      description: Enable a workflow definition
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Enable a workflow
+      tags:
+      - Workflows
+  /workflows/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      description: Execute a workflow definition and create a new instance
+      parameters:
+      - description: Workflow definition ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Execution parameters (optional)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/http.ExecuteWorkflowReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Execute a workflow
+      tags:
+      - Workflows
+  /workflows/sync-all:
+    post:
+      consumes:
+      - application/json
+      description: Synchronize all workflow instances with the workflow engine
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Sync all instances
+      tags:
+      - Workflows
+securityDefinitions:
+  ApiKeyAuth:
+    description: API Key for authentication
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

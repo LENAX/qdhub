@@ -51,6 +51,16 @@ func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // ==================== Data Store Endpoints ====================
 
 // CreateDataStore handles POST /api/v1/datastores
+// @Summary      Create a new data store
+// @Description  Create a new quantitative data store configuration
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateDataStoreReq  true  "Data store details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /datastores [post]
 func (h *DataStoreHandler) CreateDataStore(c *gin.Context) {
 	var req CreateDataStoreReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -73,6 +83,14 @@ func (h *DataStoreHandler) CreateDataStore(c *gin.Context) {
 }
 
 // ListDataStores handles GET /api/v1/datastores
+// @Summary      List all data stores
+// @Description  Get a list of all configured data stores
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores [get]
 func (h *DataStoreHandler) ListDataStores(c *gin.Context) {
 	stores, err := h.dataStoreSvc.ListDataStores(c.Request.Context())
 	if err != nil {
@@ -83,6 +101,16 @@ func (h *DataStoreHandler) ListDataStores(c *gin.Context) {
 }
 
 // GetDataStore handles GET /api/v1/datastores/:id
+// @Summary      Get a data store
+// @Description  Get details of a specific data store by ID
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores/{id} [get]
 func (h *DataStoreHandler) GetDataStore(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -95,6 +123,18 @@ func (h *DataStoreHandler) GetDataStore(c *gin.Context) {
 }
 
 // UpdateDataStore handles PUT /api/v1/datastores/:id
+// @Summary      Update a data store
+// @Description  Update details of a specific data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string              true  "Data store ID"
+// @Param        request  body      UpdateDataStoreReq  true  "Updated data store details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /datastores/{id} [put]
 func (h *DataStoreHandler) UpdateDataStore(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -118,6 +158,16 @@ func (h *DataStoreHandler) UpdateDataStore(c *gin.Context) {
 }
 
 // DeleteDataStore handles DELETE /api/v1/datastores/:id
+// @Summary      Delete a data store
+// @Description  Delete a specific data store configuration
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      204  {object}  nil
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores/{id} [delete]
 func (h *DataStoreHandler) DeleteDataStore(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -130,6 +180,16 @@ func (h *DataStoreHandler) DeleteDataStore(c *gin.Context) {
 }
 
 // TestConnection handles POST /api/v1/datastores/:id/test
+// @Summary      Test data store connection
+// @Description  Test the connection to a data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores/{id}/test [post]
 func (h *DataStoreHandler) TestConnection(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -144,6 +204,18 @@ func (h *DataStoreHandler) TestConnection(c *gin.Context) {
 // ==================== Schema Endpoints ====================
 
 // GenerateSchema handles POST /api/v1/datastores/:id/schemas/generate
+// @Summary      Generate table schema
+// @Description  Generate a table schema from API metadata
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string            true  "Data store ID"
+// @Param        request  body      GenerateSchemaReq true  "Schema generation details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /datastores/{id}/schemas/generate [post]
 func (h *DataStoreHandler) GenerateSchema(c *gin.Context) {
 	dataStoreID := shared.ID(c.Param("id"))
 
@@ -167,6 +239,16 @@ func (h *DataStoreHandler) GenerateSchema(c *gin.Context) {
 }
 
 // ListSchemas handles GET /api/v1/datastores/:id/schemas
+// @Summary      List table schemas
+// @Description  Get all table schemas for a data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores/{id}/schemas [get]
 func (h *DataStoreHandler) ListSchemas(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -179,6 +261,17 @@ func (h *DataStoreHandler) ListSchemas(c *gin.Context) {
 }
 
 // GetSchema handles GET /api/v1/datastores/:id/schemas/:schemaId
+// @Summary      Get table schema
+// @Description  Get details of a specific table schema
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string  true  "Data store ID"
+// @Param        schemaId  path      string  true  "Schema ID"
+// @Success      200       {object}  Response
+// @Failure      404       {object}  Response
+// @Failure      500       {object}  Response
+// @Router       /datastores/{id}/schemas/{schemaId} [get]
 func (h *DataStoreHandler) GetSchema(c *gin.Context) {
 	schemaID := shared.ID(c.Param("schemaId"))
 
@@ -191,6 +284,19 @@ func (h *DataStoreHandler) GetSchema(c *gin.Context) {
 }
 
 // UpdateSchema handles PUT /api/v1/datastores/:id/schemas/:schemaId
+// @Summary      Update table schema
+// @Description  Update a table schema configuration
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string          true  "Data store ID"
+// @Param        schemaId  path      string          true  "Schema ID"
+// @Param        request   body      UpdateSchemaReq true  "Updated schema details"
+// @Success      200       {object}  Response
+// @Failure      400       {object}  Response
+// @Failure      404       {object}  Response
+// @Failure      500       {object}  Response
+// @Router       /datastores/{id}/schemas/{schemaId} [put]
 func (h *DataStoreHandler) UpdateSchema(c *gin.Context) {
 	schemaID := shared.ID(c.Param("schemaId"))
 
@@ -213,6 +319,17 @@ func (h *DataStoreHandler) UpdateSchema(c *gin.Context) {
 }
 
 // CreateTable handles POST /api/v1/datastores/:id/schemas/:schemaId/create
+// @Summary      Create table
+// @Description  Create a table in the data store based on the schema
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string  true  "Data store ID"
+// @Param        schemaId  path      string  true  "Schema ID"
+// @Success      200       {object}  Response
+// @Failure      404       {object}  Response
+// @Failure      500       {object}  Response
+// @Router       /datastores/{id}/schemas/{schemaId}/create [post]
 func (h *DataStoreHandler) CreateTable(c *gin.Context) {
 	schemaID := shared.ID(c.Param("schemaId"))
 
@@ -225,6 +342,17 @@ func (h *DataStoreHandler) CreateTable(c *gin.Context) {
 }
 
 // DropTable handles DELETE /api/v1/datastores/:id/schemas/:schemaId
+// @Summary      Drop table
+// @Description  Drop a table from the data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string  true  "Data store ID"
+// @Param        schemaId  path      string  true  "Schema ID"
+// @Success      204       {object}  nil
+// @Failure      404       {object}  Response
+// @Failure      500       {object}  Response
+// @Router       /datastores/{id}/schemas/{schemaId} [delete]
 func (h *DataStoreHandler) DropTable(c *gin.Context) {
 	schemaID := shared.ID(c.Param("schemaId"))
 
@@ -237,6 +365,16 @@ func (h *DataStoreHandler) DropTable(c *gin.Context) {
 }
 
 // SyncSchemaStatus handles POST /api/v1/datastores/:id/sync-status
+// @Summary      Sync schema status
+// @Description  Synchronize schema status with the data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datastores/{id}/sync-status [post]
 func (h *DataStoreHandler) SyncSchemaStatus(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
@@ -251,6 +389,16 @@ func (h *DataStoreHandler) SyncSchemaStatus(c *gin.Context) {
 // ==================== Mapping Rule Endpoints ====================
 
 // CreateMappingRule handles POST /api/v1/mapping-rules
+// @Summary      Create mapping rule
+// @Description  Create a data type mapping rule
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateMappingRuleReq true  "Mapping rule details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /mapping-rules [post]
 func (h *DataStoreHandler) CreateMappingRule(c *gin.Context) {
 	var req CreateMappingRuleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -274,6 +422,17 @@ func (h *DataStoreHandler) CreateMappingRule(c *gin.Context) {
 }
 
 // GetMappingRules handles GET /api/v1/mapping-rules
+// @Summary      Get mapping rules
+// @Description  Get data type mapping rules
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        data_source_type  query     string  true  "Data source type"
+// @Param        target_db_type    query     string  true  "Target database type"
+// @Success      200               {object}  Response
+// @Failure      400               {object}  Response
+// @Failure      500               {object}  Response
+// @Router       /mapping-rules [get]
 func (h *DataStoreHandler) GetMappingRules(c *gin.Context) {
 	dataSourceType := c.Query("data_source_type")
 	targetDBType := c.Query("target_db_type")

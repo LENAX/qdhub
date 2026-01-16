@@ -10,10 +10,11 @@ import (
 )
 
 // Response represents a standard API response.
+// @Description Standard API response wrapper
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int         `json:"code" example:"0"`
+	Message string      `json:"message" example:"success"`
+	Data    interface{} `json:"data,omitempty" swaggertype:"object"`
 }
 
 // PagedResponse represents a paginated API response.

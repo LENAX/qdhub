@@ -88,7 +88,7 @@ run_migrations "$CONFIG_FILE" || true
 # For local development, just run the binary
 if [[ "$ENV" == "dev" ]]; then
     echo -e "${GREEN}Starting ${APP_NAME} in development mode...${NC}"
-    ./bin/${APP_NAME} -config "$CONFIG_FILE"
+    ./bin/${APP_NAME} server --config "$CONFIG_FILE" --mode debug
     exit 0
 fi
 
@@ -122,7 +122,7 @@ Type=simple
 User=qdhub
 Group=qdhub
 WorkingDirectory=${DEPLOY_DIR}
-ExecStart=${DEPLOY_DIR}/${APP_NAME} -config ${DEPLOY_DIR}/configs/config.yaml
+ExecStart=${DEPLOY_DIR}/${APP_NAME} server --config ${DEPLOY_DIR}/configs/config.yaml
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${DEPLOY_DIR}/logs/stdout.log

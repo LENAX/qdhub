@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"qdhub/internal/application/contracts"
+
+	_ "qdhub/docs" // Import generated swagger docs
 )
 
 // ServerConfig holds HTTP server configuration.
@@ -84,6 +88,14 @@ func (s *Server) setupRoutes() {
 
 	// Health check
 	s.engine.GET("/health", s.healthCheck)
+
+	// Swagger documentation
+	s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Alias for /docs -> /swagger/index.html
+	s.engine.GET("/docs", func(c *gin.Context) {
+		c.Redirect(302, "/swagger/index.html")
+	})
+	s.engine.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")

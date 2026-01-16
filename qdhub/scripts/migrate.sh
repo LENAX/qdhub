@@ -35,8 +35,9 @@ parse_config() {
     fi
     
     # Extract database driver and dsn from config
-    DB_DRIVER=$(grep -A5 "^database:" "$CONFIG_FILE" | grep "driver:" | sed 's/.*driver:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
-    DB_DSN=$(grep -A5 "^database:" "$CONFIG_FILE" | grep "dsn:" | sed 's/.*dsn:[[:space:]]*"\?\([^"]*\)"\?.*/\1/' | tr -d ' ')
+    # Remove comments and extract values
+    DB_DRIVER=$(grep -A5 "^database:" "$CONFIG_FILE" | grep "driver:" | sed 's/#.*$//' | sed -E 's/.*driver:[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/' | tr -d ' ')
+    DB_DSN=$(grep -A5 "^database:" "$CONFIG_FILE" | grep "dsn:" | sed 's/#.*$//' | sed -E 's/.*dsn:[[:space:]]*"?([^"#[:space:]]+)"?.*/\1/' | tr -d ' ')
     
     # Expand environment variables in DSN
     DB_DSN=$(eval echo "$DB_DSN")
