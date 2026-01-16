@@ -11,7 +11,6 @@ import (
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
-	"qdhub/internal/domain/shared"
 	"qdhub/internal/infrastructure/persistence/repository"
 )
 
@@ -44,12 +43,11 @@ func TestDataStoreApplicationService_Integration_CreateAndGetDataStore(t *testin
 
 	// Create repositories
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	req := contracts.CreateDataStoreRequest{
@@ -88,12 +86,11 @@ func TestDataStoreApplicationService_Integration_UpdateDataStore(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -131,12 +128,11 @@ func TestDataStoreApplicationService_Integration_DeleteDataStore(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -166,12 +162,11 @@ func TestDataStoreApplicationService_Integration_ListDataStores(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create multiple data stores
 	for i := 0; i < 3; i++ {
@@ -200,19 +195,17 @@ func TestDataStoreApplicationService_Integration_GenerateTableSchema(t *testing.
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
 	// Create a data source first (required for API metadata FK)
-	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
 	if err := dataSourceRepo.Create(dataSource); err != nil {
 		t.Fatalf("Failed to create data source: %v", err)
 	}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -222,7 +215,8 @@ func TestDataStoreApplicationService_Integration_GenerateTableSchema(t *testing.
 		StoragePath: "/tmp/test.duckdb",
 	})
 
-	// Create API metadata with response fields
+	// Create API metadata with response fields using MetadataRepository
+	metadataRepo := repository.NewMetadataRepository(db)
 	api := metadata.NewAPIMetadata(dataSource.ID, "daily", "日线行情", "日线数据", "/api/daily")
 	api.SetResponseFields([]metadata.FieldMeta{
 		{Name: "ts_code", Type: "str", Description: "股票代码", IsPrimary: true},
@@ -230,7 +224,7 @@ func TestDataStoreApplicationService_Integration_GenerateTableSchema(t *testing.
 		{Name: "open", Type: "float", Description: "开盘价"},
 		{Name: "close", Type: "float", Description: "收盘价"},
 	})
-	if err := apiMetaRepo.Create(api); err != nil {
+	if err := metadataRepo.SaveAPIMetadata(ctx, api); err != nil {
 		t.Fatalf("Failed to create API metadata: %v", err)
 	}
 
@@ -267,12 +261,24 @@ func TestDataStoreApplicationService_Integration_TableSchemaLifecycle(t *testing
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	// Create a data source first (required for API metadata FK)
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
+	}
+
+	// Create API metadata (required for TableSchema FK)
+	metadataRepo := repository.NewMetadataRepository(db)
+	api := metadata.NewAPIMetadata(dataSource.ID, "test_api", "Test API", "Test API description", "/api/test")
+	if err := metadataRepo.SaveAPIMetadata(ctx, api); err != nil {
+		t.Fatalf("Failed to create API metadata: %v", err)
+	}
+
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -282,13 +288,13 @@ func TestDataStoreApplicationService_Integration_TableSchemaLifecycle(t *testing
 		StoragePath: "/tmp/test.duckdb",
 	})
 
-	// Create schema directly
-	schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
+	// Create schema directly using repository (with valid API metadata ID)
+	schema := datastore.NewTableSchema(ds.ID, api.ID, "test_table")
 	schema.SetColumns([]datastore.ColumnDef{
 		{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
 		{Name: "name", SourceType: "str", TargetType: "VARCHAR", Nullable: true},
 	})
-	if err := schemaRepo.Create(schema); err != nil {
+	if err := dsRepo.AddSchema(schema); err != nil {
 		t.Fatalf("Failed to create schema: %v", err)
 	}
 
@@ -330,12 +336,11 @@ func TestDataStoreApplicationService_Integration_MappingRules(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create mapping rule
 	rule, err := svc.CreateMappingRule(ctx, contracts.CreateMappingRuleRequest{
@@ -369,12 +374,11 @@ func TestDataStoreApplicationService_Integration_TestConnection(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	schemaRepo := repository.NewTableSchemaRepository(db)
 	ruleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	apiMetaRepo := repository.NewAPIMetadataRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
 	adapter := NewMockIntegrationQuantDBAdapter()
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{

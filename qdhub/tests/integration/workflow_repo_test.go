@@ -12,7 +12,7 @@ import (
 	"qdhub/internal/infrastructure/persistence/repository"
 )
 
-// setupIntegrationDB is defined in test_helper.go
+// _setupIntegrationDB is kept here for reference but setupIntegrationDB is defined in test_helper.go
 func _setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 	// Create a temporary file for the database
 	tmpfile, err := os.CreateTemp("", "integration_test_*.db")
@@ -175,18 +175,15 @@ func TestWorkflowDefinitionRepository_Integration(t *testing.T) {
 	})
 }
 
-func TestWorkflowInstanceRepository_Integration(t *testing.T) {
+func TestWorkflowInstance_Integration(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()
 
+	// WorkflowInstance operations are now handled via WorkflowDefinitionRepository
+	// as per DDD aggregate pattern
 	defRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	if err != nil {
 		t.Fatalf("Failed to create definition repository: %v", err)
-	}
-
-	instRepo, err := repository.NewWorkflowInstanceRepository(db)
-	if err != nil {
-		t.Fatalf("Failed to create instance repository: %v", err)
 	}
 
 	// Create a workflow definition first
@@ -196,57 +193,57 @@ func TestWorkflowInstanceRepository_Integration(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	t.Run("Create and Get", func(t *testing.T) {
+	t.Run("AddInstance and GetInstance", func(t *testing.T) {
 		inst := workflow.NewWorkflowInstance(wf.ID())
 
-		err := instRepo.Create(inst)
+		err := defRepo.AddInstance(inst)
 		if err != nil {
-			t.Fatalf("Create() error = %v", err)
+			t.Fatalf("AddInstance() error = %v", err)
 		}
 
 		if inst.ID == "" {
 			t.Error("Instance ID should be set after creation")
 		}
 
-		got, err := instRepo.Get(inst.ID)
+		got, err := defRepo.GetInstance(inst.ID)
 		if err != nil {
-			t.Fatalf("Get() error = %v", err)
+			t.Fatalf("GetInstance() error = %v", err)
 		}
 
 		if got == nil {
-			t.Fatal("Get() returned nil")
+			t.Fatal("GetInstance() returned nil")
 		}
 
 		if got.ID != inst.ID {
-			t.Errorf("Get() ID = %s, want %s", got.ID, inst.ID)
+			t.Errorf("GetInstance() ID = %s, want %s", got.ID, inst.ID)
 		}
 
 		if got.WorkflowID != wf.ID() {
-			t.Errorf("Get() WorkflowID = %s, want %s", got.WorkflowID, wf.ID())
+			t.Errorf("GetInstance() WorkflowID = %s, want %s", got.WorkflowID, wf.ID())
 		}
 	})
 
-	t.Run("GetByWorkflowDef", func(t *testing.T) {
+	t.Run("GetInstancesByDef", func(t *testing.T) {
 		// Create multiple instances
 		inst1 := workflow.NewWorkflowInstance(wf.ID())
 		inst2 := workflow.NewWorkflowInstance(wf.ID())
 
-		err := instRepo.Create(inst1)
+		err := defRepo.AddInstance(inst1)
 		if err != nil {
-			t.Fatalf("Create() error = %v", err)
+			t.Fatalf("AddInstance() error = %v", err)
 		}
-		err = instRepo.Create(inst2)
+		err = defRepo.AddInstance(inst2)
 		if err != nil {
-			t.Fatalf("Create() error = %v", err)
+			t.Fatalf("AddInstance() error = %v", err)
 		}
 
-		instances, err := instRepo.GetByWorkflowDef(wf.ID())
+		instances, err := defRepo.GetInstancesByDef(wf.ID())
 		if err != nil {
-			t.Fatalf("GetByWorkflowDef() error = %v", err)
+			t.Fatalf("GetInstancesByDef() error = %v", err)
 		}
 
 		if len(instances) < 2 {
-			t.Errorf("GetByWorkflowDef() returned %d instances, want at least 2", len(instances))
+			t.Errorf("GetInstancesByDef() returned %d instances, want at least 2", len(instances))
 		}
 
 		// Verify both instances are in the list
@@ -261,59 +258,59 @@ func TestWorkflowInstanceRepository_Integration(t *testing.T) {
 		}
 
 		if !found1 {
-			t.Error("GetByWorkflowDef() should contain inst1")
+			t.Error("GetInstancesByDef() should contain inst1")
 		}
 		if !found2 {
-			t.Error("GetByWorkflowDef() should contain inst2")
+			t.Error("GetInstancesByDef() should contain inst2")
 		}
 	})
 
-	t.Run("Update", func(t *testing.T) {
+	t.Run("UpdateInstance", func(t *testing.T) {
 		inst := workflow.NewWorkflowInstance(wf.ID())
 
-		err := instRepo.Create(inst)
+		err := defRepo.AddInstance(inst)
 		if err != nil {
-			t.Fatalf("Create() error = %v", err)
+			t.Fatalf("AddInstance() error = %v", err)
 		}
 
 		// Update the instance status
 		inst.Status = "Running"
-		err = instRepo.Update(inst)
+		err = defRepo.UpdateInstance(inst)
 		if err != nil {
-			t.Fatalf("Update() error = %v", err)
+			t.Fatalf("UpdateInstance() error = %v", err)
 		}
 
 		// Verify the update
-		got, err := instRepo.Get(inst.ID)
+		got, err := defRepo.GetInstance(inst.ID)
 		if err != nil {
-			t.Fatalf("Get() error = %v", err)
+			t.Fatalf("GetInstance() error = %v", err)
 		}
 
 		if got.Status != "Running" {
-			t.Errorf("Update() Status = %s, want Running", got.Status)
+			t.Errorf("UpdateInstance() Status = %s, want Running", got.Status)
 		}
 	})
 
-	t.Run("Delete", func(t *testing.T) {
+	t.Run("DeleteInstance", func(t *testing.T) {
 		inst := workflow.NewWorkflowInstance(wf.ID())
 
-		err := instRepo.Create(inst)
+		err := defRepo.AddInstance(inst)
 		if err != nil {
-			t.Fatalf("Create() error = %v", err)
+			t.Fatalf("AddInstance() error = %v", err)
 		}
 
-		err = instRepo.Delete(inst.ID)
+		err = defRepo.DeleteInstance(inst.ID)
 		if err != nil {
-			t.Fatalf("Delete() error = %v", err)
+			t.Fatalf("DeleteInstance() error = %v", err)
 		}
 
-		got, err := instRepo.Get(inst.ID)
+		got, err := defRepo.GetInstance(inst.ID)
 		if err != nil {
-			t.Fatalf("Get() error = %v", err)
+			t.Fatalf("GetInstance() error = %v", err)
 		}
 
 		if got != nil {
-			t.Error("Delete() should remove the instance")
+			t.Error("DeleteInstance() should remove the instance")
 		}
 	})
 }

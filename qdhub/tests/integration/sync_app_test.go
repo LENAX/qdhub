@@ -24,20 +24,18 @@ import (
 
 // ==================== Integration Test Helpers ====================
 
-type testContext struct {
+type syncTestContext struct {
 	db             *persistence.DB
 	engine         *engine.Engine
 	syncJobRepo    *repository.SyncJobRepositoryImpl
-	syncExecRepo   *repository.SyncExecutionRepositoryImpl
 	wfDefRepo      *repository.WorkflowDefinitionRepositoryImpl
-	wfInstRepo     *repository.WorkflowInstanceRepositoryImpl
 	adapter        workflow.TaskEngineAdapter
 	syncAppService contracts.SyncApplicationService
 	wfAppService   contracts.WorkflowApplicationService
 	cleanup        func()
 }
 
-func setupTestContext(t *testing.T) *testContext {
+func setupSyncTestContext(t *testing.T) *syncTestContext {
 	t.Helper()
 
 	// Create temp database file
@@ -103,7 +101,6 @@ func setupTestContext(t *testing.T) *testContext {
 
 	// Create repositories
 	syncJobRepo := repository.NewSyncJobRepository(db)
-	syncExecRepo := repository.NewSyncExecutionRepository(db)
 	wfDefRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	if err != nil {
 		eng.Stop()
@@ -112,29 +109,19 @@ func setupTestContext(t *testing.T) *testContext {
 		os.Remove(dbPath)
 		t.Fatalf("Failed to create workflow definition repository: %v", err)
 	}
-	wfInstRepo, err := repository.NewWorkflowInstanceRepository(db)
-	if err != nil {
-		eng.Stop()
-		db.Close()
-		sqlxDB.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create workflow instance repository: %v", err)
-	}
 
 	// Create adapter
 	adapter := taskengine.NewTaskEngineAdapter(eng)
 
 	// Create services
-	syncAppService := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
-	wfAppService := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+	syncAppService := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+	wfAppService := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-	return &testContext{
+	return &syncTestContext{
 		db:             db,
 		engine:         eng,
 		syncJobRepo:    syncJobRepo,
-		syncExecRepo:   syncExecRepo,
 		wfDefRepo:      wfDefRepo,
-		wfInstRepo:     wfInstRepo,
 		adapter:        adapter,
 		syncAppService: syncAppService,
 		wfAppService:   wfAppService,
@@ -155,7 +142,7 @@ func setupTestContext(t *testing.T) *testContext {
 // Workflow integration tests below test the actual Task Engine integration.
 
 func TestWorkflowApplicationService_Integration_CreateAndGetWorkflowDefinition(t *testing.T) {
-	tc := setupTestContext(t)
+	tc := setupSyncTestContext(t)
 	defer tc.cleanup()
 
 	ctx := context.Background()
@@ -188,7 +175,7 @@ func TestWorkflowApplicationService_Integration_CreateAndGetWorkflowDefinition(t
 }
 
 func TestWorkflowApplicationService_Integration_EnableDisableWorkflow(t *testing.T) {
-	tc := setupTestContext(t)
+	tc := setupSyncTestContext(t)
 	defer tc.cleanup()
 
 	ctx := context.Background()
@@ -224,7 +211,7 @@ func TestWorkflowApplicationService_Integration_EnableDisableWorkflow(t *testing
 }
 
 func TestWorkflowApplicationService_Integration_ListWorkflowDefinitions(t *testing.T) {
-	tc := setupTestContext(t)
+	tc := setupSyncTestContext(t)
 	defer tc.cleanup()
 
 	ctx := context.Background()
@@ -251,7 +238,7 @@ func TestWorkflowApplicationService_Integration_ListWorkflowDefinitions(t *testi
 }
 
 func TestWorkflowApplicationService_Integration_ExecuteWorkflow(t *testing.T) {
-	tc := setupTestContext(t)
+	tc := setupSyncTestContext(t)
 	defer tc.cleanup()
 
 	ctx := context.Background()

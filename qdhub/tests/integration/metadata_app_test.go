@@ -36,8 +36,12 @@ func (m *MockIntegrationDocumentParser) ParseCatalog(content string) ([]metadata
 	}, []string{"/api/daily"}, nil
 }
 
-func (m *MockIntegrationDocumentParser) ParseAPIDetail(content string, categoryID *shared.ID) (*metadata.APIMetadata, error) {
+func (m *MockIntegrationDocumentParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
 	return nil, nil
+}
+
+func (m *MockIntegrationDocumentParser) SupportedType() metadata.DocumentType {
+	return metadata.DocumentTypeHTML
 }
 
 // ==================== Integration Tests ====================
@@ -50,12 +54,9 @@ func TestMetadataApplicationService_Integration_CreateAndGetDataSource(t *testin
 
 	// Create repositories
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source
 	req := contracts.CreateDataSourceRequest{
@@ -90,12 +91,9 @@ func TestMetadataApplicationService_Integration_UpdateDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -130,12 +128,9 @@ func TestMetadataApplicationService_Integration_DeleteDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -165,12 +160,9 @@ func TestMetadataApplicationService_Integration_ListDataSources(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create multiple data sources
 	for i := 0; i < 3; i++ {
@@ -199,12 +191,9 @@ func TestMetadataApplicationService_Integration_APIMetadataLifecycle(t *testing.
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -285,12 +274,9 @@ func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -353,12 +339,9 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testin
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -389,12 +372,9 @@ func TestMetadataApplicationService_Integration_DeleteDataSourceWithRelatedEntit
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
-	catRepo := repository.NewAPICategoryRepository(db)
-	apiRepo := repository.NewAPIMetadataRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	// Create data source
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
