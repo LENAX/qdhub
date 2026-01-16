@@ -299,6 +299,14 @@ func (m *MockTaskEngineAdapter) UnregisterWorkflow(ctx context.Context, definiti
 	return nil
 }
 
+func (m *MockTaskEngineAdapter) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	return []*workflow.TaskInstance{}, nil
+}
+
+func (m *MockTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceID string) error {
+	return nil
+}
+
 // MockJobScheduler is a mock implementation of sync.JobScheduler.
 type MockJobScheduler struct {
 	scheduledJobs map[string]string // jobID -> cronExpr
