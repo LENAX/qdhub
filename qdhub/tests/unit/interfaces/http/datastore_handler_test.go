@@ -1,0 +1,736 @@
+package http_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
+	"qdhub/internal/application/contracts"
+	"qdhub/internal/domain/datastore"
+	"qdhub/internal/domain/shared"
+	httpapi "qdhub/internal/interfaces/http"
+)
+
+// MockDataStoreService is a mock implementation of DataStoreApplicationService.
+type MockDataStoreService struct {
+	mock.Mock
+}
+
+func (m *MockDataStoreService) CreateDataStore(ctx context.Context, req contracts.CreateDataStoreRequest) (*datastore.QuantDataStore, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.QuantDataStore), args.Error(1)
+}
+
+func (m *MockDataStoreService) GetDataStore(ctx context.Context, id shared.ID) (*datastore.QuantDataStore, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.QuantDataStore), args.Error(1)
+}
+
+func (m *MockDataStoreService) UpdateDataStore(ctx context.Context, id shared.ID, req contracts.UpdateDataStoreRequest) error {
+	args := m.Called(ctx, id, req)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) DeleteDataStore(ctx context.Context, id shared.ID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) ListDataStores(ctx context.Context) ([]*datastore.QuantDataStore, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*datastore.QuantDataStore), args.Error(1)
+}
+
+func (m *MockDataStoreService) TestConnection(ctx context.Context, id shared.ID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) GenerateTableSchema(ctx context.Context, req contracts.GenerateSchemaRequest) (*datastore.TableSchema, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.TableSchema), args.Error(1)
+}
+
+func (m *MockDataStoreService) CreateTable(ctx context.Context, schemaID shared.ID) error {
+	args := m.Called(ctx, schemaID)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) DropTable(ctx context.Context, schemaID shared.ID) error {
+	args := m.Called(ctx, schemaID)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) GetTableSchema(ctx context.Context, id shared.ID) (*datastore.TableSchema, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.TableSchema), args.Error(1)
+}
+
+func (m *MockDataStoreService) GetTableSchemaByAPI(ctx context.Context, apiMetadataID shared.ID) (*datastore.TableSchema, error) {
+	args := m.Called(ctx, apiMetadataID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.TableSchema), args.Error(1)
+}
+
+func (m *MockDataStoreService) ListTableSchemas(ctx context.Context, dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
+	args := m.Called(ctx, dataStoreID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*datastore.TableSchema), args.Error(1)
+}
+
+func (m *MockDataStoreService) UpdateTableSchema(ctx context.Context, id shared.ID, req contracts.UpdateSchemaRequest) error {
+	args := m.Called(ctx, id, req)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) SyncSchemaStatus(ctx context.Context, dataStoreID shared.ID) error {
+	args := m.Called(ctx, dataStoreID)
+	return args.Error(0)
+}
+
+func (m *MockDataStoreService) CreateMappingRule(ctx context.Context, req contracts.CreateMappingRuleRequest) (*datastore.DataTypeMappingRule, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.DataTypeMappingRule), args.Error(1)
+}
+
+func (m *MockDataStoreService) GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error) {
+	args := m.Called(ctx, dataSourceType, targetDBType)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*datastore.DataTypeMappingRule), args.Error(1)
+}
+
+func setupDataStoreRouter(mockSvc *MockDataStoreService) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := httpapi.NewDataStoreHandler(mockSvc)
+	v1 := router.Group("/api/v1")
+	handler.RegisterRoutes(v1)
+	return router
+}
+
+func TestListDataStores(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	stores := []*datastore.QuantDataStore{
+		datastore.NewQuantDataStore("test-store", "Test Store", datastore.DataStoreTypeDuckDB, "", "./data.duckdb"),
+	}
+	mockSvc.On("ListDataStores", mock.Anything).Return(stores, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateDataStore(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	ds := datastore.NewQuantDataStore("test-store", "Test Store", datastore.DataStoreTypeDuckDB, "", "./data.duckdb")
+	mockSvc.On("CreateDataStore", mock.Anything, mock.MatchedBy(func(req contracts.CreateDataStoreRequest) bool {
+		return req.Name == "test-store"
+	})).Return(ds, nil)
+
+	body := map[string]interface{}{
+		"name":         "test-store",
+		"description":  "Test Store",
+		"type":         "duckdb",
+		"storage_path": "./data.duckdb",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetDataStore(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	ds := datastore.NewQuantDataStore("test-store", "Test Store", datastore.DataStoreTypeDuckDB, "", "./data.duckdb")
+	mockSvc.On("GetDataStore", mock.Anything, shared.ID("test-id")).Return(ds, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/test-id", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestDeleteDataStore(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("DeleteDataStore", mock.Anything, shared.ID("test-id")).Return(nil)
+
+	req, _ := http.NewRequest("DELETE", "/api/v1/datastores/test-id", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestTestConnection(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("TestConnection", mock.Anything, shared.ID("test-id")).Return(nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/test-id/test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestListSchemas(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	schemas := []*datastore.TableSchema{
+		datastore.NewTableSchema(shared.ID("ds-1"), shared.ID("api-1"), "test_table"),
+	}
+	mockSvc.On("ListTableSchemas", mock.Anything, shared.ID("test-id")).Return(schemas, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/test-id/schemas", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGenerateSchema(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	schema := datastore.NewTableSchema(shared.ID("ds-1"), shared.ID("api-1"), "test_table")
+	mockSvc.On("GenerateTableSchema", mock.Anything, mock.MatchedBy(func(req contracts.GenerateSchemaRequest) bool {
+		return req.TableName == "test_table"
+	})).Return(schema, nil)
+
+	body := map[string]interface{}{
+		"api_metadata_id": "api-1",
+		"table_name":      "test_table",
+		"auto_create":     false,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/schemas/generate", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateTable(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("CreateTable", mock.Anything, shared.ID("schema-1")).Return(nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/schemas/schema-1/create", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetMappingRules(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	rules := []*datastore.DataTypeMappingRule{}
+	mockSvc.On("GetMappingRules", mock.Anything, "tushare", "duckdb").Return(rules, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/mapping-rules?data_source_type=tushare&target_db_type=duckdb", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetMappingRulesMissingParams(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	req, _ := http.NewRequest("GET", "/api/v1/mapping-rules", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateDataStore(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("UpdateDataStore", mock.Anything, shared.ID("test-id"), mock.Anything).Return(nil)
+
+	body := map[string]interface{}{
+		"name":        "updated-store",
+		"description": "Updated Store",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/test-id", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetSchema(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	schema := datastore.NewTableSchema(shared.ID("ds-1"), shared.ID("api-1"), "test_table")
+	mockSvc.On("GetTableSchema", mock.Anything, shared.ID("schema-1")).Return(schema, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/ds-1/schemas/schema-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestUpdateSchema(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("UpdateTableSchema", mock.Anything, shared.ID("schema-1"), mock.Anything).Return(nil)
+
+	body := map[string]interface{}{
+		"primary_keys": []string{"id"},
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/ds-1/schemas/schema-1", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestDropTable(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("DropTable", mock.Anything, shared.ID("schema-1")).Return(nil)
+
+	req, _ := http.NewRequest("DELETE", "/api/v1/datastores/ds-1/schemas/schema-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestSyncSchemaStatus(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("SyncSchemaStatus", mock.Anything, shared.ID("ds-1")).Return(nil)
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/sync-status", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateMappingRule(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	rule := datastore.NewDataTypeMappingRule("tushare", "str", "duckdb", "VARCHAR", 0, false)
+	mockSvc.On("CreateMappingRule", mock.Anything, mock.MatchedBy(func(req contracts.CreateMappingRuleRequest) bool {
+		return req.DataSourceType == "tushare"
+	})).Return(rule, nil)
+
+	body := map[string]interface{}{
+		"data_source_type": "tushare",
+		"source_type":      "str",
+		"target_db_type":   "duckdb",
+		"target_type":      "VARCHAR",
+		"priority":         0,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/mapping-rules", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetDataStoreNotFound(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("GetDataStore", mock.Anything, shared.ID("not-found")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil))
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/not-found", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+// ==================== Error Scenario Tests ====================
+
+func TestListDataStoresError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("ListDataStores", mock.Anything).Return(nil, errors.New("database error"))
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateDataStoreInvalidBody(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	// Missing required fields
+	body := map[string]interface{}{
+		"description": "Test Store",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateDataStoreServiceError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("CreateDataStore", mock.Anything, mock.Anything).Return(nil, shared.NewDomainError(shared.ErrCodeConflict, "data store already exists", nil))
+
+	body := map[string]interface{}{
+		"name":         "test-store",
+		"description":  "Test Store",
+		"type":         "duckdb",
+		"storage_path": "./data.duckdb",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestUpdateDataStoreInvalidBody(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/test-id", bytes.NewBuffer([]byte("invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateDataStoreServiceError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("UpdateDataStore", mock.Anything, shared.ID("test-id"), mock.Anything).Return(shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil))
+
+	body := map[string]interface{}{
+		"name": "updated-store",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/test-id", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestDeleteDataStoreError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("DeleteDataStore", mock.Anything, shared.ID("test-id")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil))
+
+	req, _ := http.NewRequest("DELETE", "/api/v1/datastores/test-id", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestTestConnectionError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("TestConnection", mock.Anything, shared.ID("test-id")).Return(errors.New("connection failed"))
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/test-id/test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGenerateSchemaInvalidBody(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	// Missing required fields
+	body := map[string]interface{}{
+		"auto_create": false,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/schemas/generate", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGenerateSchemaError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("GenerateTableSchema", mock.Anything, mock.Anything).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "api not found", nil))
+
+	body := map[string]interface{}{
+		"api_metadata_id": "api-1",
+		"table_name":      "test_table",
+		"auto_create":     false,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/schemas/generate", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestListSchemasError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("ListTableSchemas", mock.Anything, shared.ID("test-id")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil))
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/test-id/schemas", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetSchemaError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("GetTableSchema", mock.Anything, shared.ID("schema-1")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "schema not found", nil))
+
+	req, _ := http.NewRequest("GET", "/api/v1/datastores/ds-1/schemas/schema-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestUpdateSchemaInvalidBody(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/ds-1/schemas/schema-1", bytes.NewBuffer([]byte("invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestUpdateSchemaServiceError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("UpdateTableSchema", mock.Anything, shared.ID("schema-1"), mock.Anything).Return(shared.NewDomainError(shared.ErrCodeNotFound, "schema not found", nil))
+
+	body := map[string]interface{}{
+		"primary_keys": []string{"id"},
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("PUT", "/api/v1/datastores/ds-1/schemas/schema-1", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateTableError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("CreateTable", mock.Anything, shared.ID("schema-1")).Return(errors.New("create table failed"))
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/schemas/schema-1/create", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestDropTableError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("DropTable", mock.Anything, shared.ID("schema-1")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "schema not found", nil))
+
+	req, _ := http.NewRequest("DELETE", "/api/v1/datastores/ds-1/schemas/schema-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestSyncSchemaStatusError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("SyncSchemaStatus", mock.Anything, shared.ID("ds-1")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil))
+
+	req, _ := http.NewRequest("POST", "/api/v1/datastores/ds-1/sync-status", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestCreateMappingRuleInvalidBody(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	// Missing required fields
+	body := map[string]interface{}{
+		"priority": 0,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/mapping-rules", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateMappingRuleServiceError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("CreateMappingRule", mock.Anything, mock.Anything).Return(nil, shared.NewDomainError(shared.ErrCodeConflict, "rule already exists", nil))
+
+	body := map[string]interface{}{
+		"data_source_type": "tushare",
+		"source_type":      "str",
+		"target_db_type":   "duckdb",
+		"target_type":      "VARCHAR",
+		"priority":         0,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/api/v1/mapping-rules", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestGetMappingRulesServiceError(t *testing.T) {
+	mockSvc := new(MockDataStoreService)
+	router := setupDataStoreRouter(mockSvc)
+
+	mockSvc.On("GetMappingRules", mock.Anything, "tushare", "duckdb").Return(nil, errors.New("database error"))
+
+	req, _ := http.NewRequest("GET", "/api/v1/mapping-rules?data_source_type=tushare&target_db_type=duckdb", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	mockSvc.AssertExpectations(t)
+}

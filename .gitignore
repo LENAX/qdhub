@@ -3,3 +3,5 @@
 .cursor
 qdhub/coverage.out
 *.out
+qdhub/coverage_all.out
+qdhub/coverage_all.out
