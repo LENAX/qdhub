@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,7 @@ import (
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/scheduler"
 	httphandler "qdhub/internal/interfaces/http"
 )
 
@@ -118,6 +120,41 @@ func (m *MockHTTPTaskEngineAdapter) GetInstanceStatus(ctx context.Context, insta
 	}, nil
 }
 
+// MockHTTPJobScheduler is a mock implementation of sync.JobScheduler.
+type MockHTTPJobScheduler struct {
+	scheduledJobs map[string]string
+}
+
+func NewMockHTTPJobScheduler() *MockHTTPJobScheduler {
+	return &MockHTTPJobScheduler{
+		scheduledJobs: make(map[string]string),
+	}
+}
+
+func (m *MockHTTPJobScheduler) Start() {}
+
+func (m *MockHTTPJobScheduler) Stop() context.Context {
+	return context.Background()
+}
+
+func (m *MockHTTPJobScheduler) ScheduleJob(jobID string, cronExpr string) error {
+	m.scheduledJobs[jobID] = cronExpr
+	return nil
+}
+
+func (m *MockHTTPJobScheduler) UnscheduleJob(jobID string) {
+	delete(m.scheduledJobs, jobID)
+}
+
+func (m *MockHTTPJobScheduler) IsScheduled(jobID string) bool {
+	_, exists := m.scheduledJobs[jobID]
+	return exists
+}
+
+func (m *MockHTTPJobScheduler) GetNextRunTime(jobID string) *time.Time {
+	return nil
+}
+
 // ==================== Test Setup ====================
 
 // httpTestContext holds all components for HTTP integration tests.
@@ -154,11 +191,13 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	quantDBAdapter := &MockHTTPQuantDBAdapter{}
 	parserFactory := NewMockHTTPDocumentParserFactory()
 	taskEngineAdapter := &MockHTTPTaskEngineAdapter{}
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	jobScheduler := NewMockHTTPJobScheduler()
 
 	// Create application services
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter)
+	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server

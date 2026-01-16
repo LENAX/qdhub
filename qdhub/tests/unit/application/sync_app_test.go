@@ -11,6 +11,7 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/scheduler"
 )
 
 // ==================== Mock Implementations ====================
@@ -298,6 +299,52 @@ func (m *MockTaskEngineAdapter) UnregisterWorkflow(ctx context.Context, definiti
 	return nil
 }
 
+// MockJobScheduler is a mock implementation of sync.JobScheduler.
+type MockJobScheduler struct {
+	scheduledJobs map[string]string // jobID -> cronExpr
+	scheduleErr   error
+}
+
+func NewMockJobScheduler() *MockJobScheduler {
+	return &MockJobScheduler{
+		scheduledJobs: make(map[string]string),
+	}
+}
+
+func (m *MockJobScheduler) Start() {}
+
+func (m *MockJobScheduler) Stop() context.Context {
+	return context.Background()
+}
+
+func (m *MockJobScheduler) ScheduleJob(jobID string, cronExpr string) error {
+	if m.scheduleErr != nil {
+		return m.scheduleErr
+	}
+	m.scheduledJobs[jobID] = cronExpr
+	return nil
+}
+
+func (m *MockJobScheduler) UnscheduleJob(jobID string) {
+	delete(m.scheduledJobs, jobID)
+}
+
+func (m *MockJobScheduler) IsScheduled(jobID string) bool {
+	_, exists := m.scheduledJobs[jobID]
+	return exists
+}
+
+func (m *MockJobScheduler) GetNextRunTime(jobID string) *time.Time {
+	return nil
+}
+
+// newTestSyncService creates a SyncApplicationService with proper dependencies for testing.
+func newTestSyncService(syncJobRepo *MockSyncJobRepository, wfDefRepo *MockWorkflowDefinitionRepository, adapter *MockTaskEngineAdapter) contracts.SyncApplicationService {
+	cronCalc := scheduler.NewCronSchedulerCalculatorAdapter()
+	jobSched := NewMockJobScheduler()
+	return impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter, cronCalc, jobSched)
+}
+
 // ==================== Test Cases ====================
 
 func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
@@ -312,7 +359,7 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test Workflow", workflow.WfCategorySync, "yaml: content", false)
 		wfDefRepo.Create(wfDef)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		req := contracts.CreateSyncJobRequest{
 			Name:          "Test Sync Job",
@@ -340,7 +387,7 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		req := contracts.CreateSyncJobRequest{
 			Name:          "Test Sync Job",
@@ -366,7 +413,7 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test Workflow", workflow.WfCategorySync, "yaml: content", false)
 		wfDefRepo.Create(wfDef)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		req := contracts.CreateSyncJobRequest{
 			Name:          "Test Sync Job",
@@ -396,7 +443,7 @@ func TestSyncApplicationService_GetSyncJob(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		result, err := svc.GetSyncJob(ctx, job.ID)
 		if err != nil {
@@ -412,7 +459,7 @@ func TestSyncApplicationService_GetSyncJob(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.GetSyncJob(ctx, shared.NewID())
 		if err == nil {
@@ -432,7 +479,7 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateSyncJob(ctx, job.ID, contracts.UpdateSyncJobRequest{
@@ -457,7 +504,7 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 		job.MarkRunning()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateSyncJob(ctx, job.ID, contracts.UpdateSyncJobRequest{
@@ -473,7 +520,7 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateSyncJob(ctx, shared.NewID(), contracts.UpdateSyncJobRequest{
@@ -496,7 +543,7 @@ func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DeleteSyncJob(ctx, job.ID)
 		if err != nil {
@@ -518,7 +565,7 @@ func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
 		job.MarkRunning()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DeleteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -531,7 +578,7 @@ func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DeleteSyncJob(ctx, shared.NewID())
 		if err == nil {
@@ -557,7 +604,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		execID, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err != nil {
@@ -586,7 +633,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		// Job is disabled by default
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -606,7 +653,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.MarkRunning()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -627,7 +674,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -645,7 +692,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -666,7 +713,7 @@ func TestSyncApplicationService_GetSyncExecution(t *testing.T) {
 		exec := sync.NewSyncExecution(shared.NewID(), shared.NewID())
 		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		result, err := svc.GetSyncExecution(ctx, exec.ID)
 		if err != nil {
@@ -682,7 +729,7 @@ func TestSyncApplicationService_GetSyncExecution(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.GetSyncExecution(ctx, shared.NewID())
 		if err == nil {
@@ -707,7 +754,7 @@ func TestSyncApplicationService_CancelExecution(t *testing.T) {
 		exec.MarkRunning()
 		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.CancelExecution(ctx, exec.ID)
 		if err != nil {
@@ -732,7 +779,7 @@ func TestSyncApplicationService_CancelExecution(t *testing.T) {
 		exec.MarkSuccess(100)
 		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.CancelExecution(ctx, exec.ID)
 		if err == nil {
@@ -745,7 +792,7 @@ func TestSyncApplicationService_CancelExecution(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.CancelExecution(ctx, shared.NewID())
 		if err == nil {
@@ -765,7 +812,7 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.EnableJob(ctx, job.ID)
 		if err != nil {
@@ -787,7 +834,7 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 		job.SetCronExpression("0 0 * * * *")
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.EnableJob(ctx, job.ID)
 		if err != nil {
@@ -809,7 +856,7 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DisableJob(ctx, job.ID)
 		if err != nil {
@@ -827,7 +874,7 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.EnableJob(ctx, shared.NewID())
 		if err == nil {
@@ -847,7 +894,7 @@ func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		cronExpr := "0 0 * * * *"
 		err := svc.UpdateSchedule(ctx, job.ID, cronExpr)
@@ -869,7 +916,7 @@ func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.UpdateSchedule(ctx, job.ID, "invalid")
 		if err == nil {
@@ -882,7 +929,7 @@ func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.UpdateSchedule(ctx, shared.NewID(), "0 0 * * * *")
 		if err == nil {
@@ -907,7 +954,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 		exec.MarkRunning()
 		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
 			ExecutionID: exec.ID,
@@ -940,7 +987,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 		exec.MarkRunning()
 		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		errMsg := "sync failed"
 		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
@@ -963,7 +1010,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+		svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
 			ExecutionID: shared.NewID(),
@@ -989,7 +1036,7 @@ func TestSyncApplicationService_ListSyncJobs(t *testing.T) {
 		syncJobRepo.Create(job)
 	}
 
-	svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+	svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 	jobs, err := svc.ListSyncJobs(ctx)
 	if err != nil {
@@ -1016,7 +1063,7 @@ func TestSyncApplicationService_ListSyncExecutions(t *testing.T) {
 		syncJobRepo.AddExecution(exec)
 	}
 
-	svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+	svc := newTestSyncService(syncJobRepo, wfDefRepo, adapter)
 
 	execs, err := svc.ListSyncExecutions(ctx, job.ID)
 	if err != nil {

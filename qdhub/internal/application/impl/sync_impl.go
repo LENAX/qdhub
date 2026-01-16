@@ -19,6 +19,7 @@ type SyncApplicationServiceImpl struct {
 	taskEngineAdapter workflow.TaskEngineAdapter
 	syncValidator     sync.SyncJobValidator
 	cronCalculator    sync.CronScheduleCalculator
+	jobScheduler      sync.JobScheduler
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -26,13 +27,16 @@ func NewSyncApplicationService(
 	syncJobRepo sync.SyncJobRepository,
 	workflowDefRepo workflow.WorkflowDefinitionRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
+	cronCalculator sync.CronScheduleCalculator,
+	jobScheduler sync.JobScheduler,
 ) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncJobRepo:       syncJobRepo,
 		workflowDefRepo:   workflowDefRepo,
 		taskEngineAdapter: taskEngineAdapter,
 		syncValidator:     sync.NewSyncJobValidator(),
-		cronCalculator:    sync.NewCronScheduleCalculator(),
+		cronCalculator:    cronCalculator,
+		jobScheduler:      jobScheduler,
 	}
 }
 
@@ -310,16 +314,28 @@ func (s *SyncApplicationServiceImpl) EnableJob(ctx context.Context, jobID shared
 		return err
 	}
 
-	// Calculate next run time if cron expression is set
+	// Schedule the job if cron expression is set
 	if job.CronExpression != nil && *job.CronExpression != "" {
-		nextRunTime, err := s.cronCalculator.CalculateNextRunTime(*job.CronExpression, job.UpdatedAt.ToTime())
+		// Calculate next run time
+		nextRunTime, err := s.cronCalculator.CalculateNextRunTime(*job.CronExpression, time.Now())
 		if err != nil {
 			return fmt.Errorf("failed to calculate next run time: %w", err)
 		}
 		job.NextRunAt = nextRunTime
+
+		// Register with scheduler if available
+		if s.jobScheduler != nil {
+			if err := s.jobScheduler.ScheduleJob(jobID.String(), *job.CronExpression); err != nil {
+				return fmt.Errorf("failed to schedule job: %w", err)
+			}
+		}
 	}
 
 	if err := s.syncJobRepo.Update(job); err != nil {
+		// Rollback scheduler registration on failure
+		if s.jobScheduler != nil {
+			s.jobScheduler.UnscheduleJob(jobID.String())
+		}
 		return fmt.Errorf("failed to update sync job: %w", err)
 	}
 
@@ -341,6 +357,11 @@ func (s *SyncApplicationServiceImpl) DisableJob(ctx context.Context, jobID share
 	}
 
 	job.NextRunAt = nil
+
+	// Unschedule from scheduler
+	if s.jobScheduler != nil {
+		s.jobScheduler.UnscheduleJob(jobID.String())
+	}
 
 	if err := s.syncJobRepo.Update(job); err != nil {
 		return fmt.Errorf("failed to update sync job: %w", err)
@@ -366,13 +387,20 @@ func (s *SyncApplicationServiceImpl) UpdateSchedule(ctx context.Context, jobID s
 
 	job.SetCronExpression(cronExpression)
 
-	// Recalculate next run time if job is enabled
+	// Recalculate next run time and reschedule if job is enabled
 	if job.Status == sync.JobStatusEnabled {
-		nextRunTime, err := s.cronCalculator.CalculateNextRunTime(cronExpression, job.UpdatedAt.ToTime())
+		nextRunTime, err := s.cronCalculator.CalculateNextRunTime(cronExpression, time.Now())
 		if err != nil {
 			return fmt.Errorf("failed to calculate next run time: %w", err)
 		}
 		job.NextRunAt = nextRunTime
+
+		// Reschedule with new expression
+		if s.jobScheduler != nil {
+			if err := s.jobScheduler.ScheduleJob(jobID.String(), cronExpression); err != nil {
+				return fmt.Errorf("failed to reschedule job: %w", err)
+			}
+		}
 	}
 
 	if err := s.syncJobRepo.Update(job); err != nil {
@@ -415,10 +443,17 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 		return fmt.Errorf("failed to get sync job: %w", err)
 	}
 	if job != nil {
-		// Calculate next run time if cron expression is set
+		// Get next run time from scheduler or calculate it
 		var nextRunAt *time.Time
 		if job.CronExpression != nil && *job.CronExpression != "" {
-			nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*job.CronExpression, job.UpdatedAt.ToTime())
+			// Try to get from scheduler first (most accurate)
+			if s.jobScheduler != nil {
+				nextRunAt = s.jobScheduler.GetNextRunTime(exec.SyncJobID.String())
+			}
+			// Fallback to calculation if scheduler not available or job not scheduled
+			if nextRunAt == nil {
+				nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*job.CronExpression, time.Now())
+			}
 		}
 		job.MarkCompleted(nextRunAt)
 		_ = s.syncJobRepo.Update(job)

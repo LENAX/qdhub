@@ -14,6 +14,7 @@ import (
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -112,9 +113,13 @@ func setupSyncTestContext(t *testing.T) *syncTestContext {
 
 	// Create adapter
 	adapter := taskengine.NewTaskEngineAdapter(eng)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+
+	// Create a simple scheduler that doesn't actually schedule (for testing)
+	jobScheduler := scheduler.NewCronScheduler(nil)
 
 	// Create services
-	syncAppService := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+	syncAppService := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter, cronCalculator, jobScheduler)
 	wfAppService := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 	return &syncTestContext{
