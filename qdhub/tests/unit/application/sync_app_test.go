@@ -16,16 +16,19 @@ import (
 // ==================== Mock Implementations ====================
 
 // MockSyncJobRepository is a mock implementation of sync.SyncJobRepository.
+// Following DDD, this repository handles both SyncJob (aggregate root) and SyncExecution (child entity).
 type MockSyncJobRepository struct {
-	jobs      map[shared.ID]*sync.SyncJob
-	createErr error
-	updateErr error
-	deleteErr error
+	jobs       map[shared.ID]*sync.SyncJob
+	executions map[shared.ID]*sync.SyncExecution
+	createErr  error
+	updateErr  error
+	deleteErr  error
 }
 
 func NewMockSyncJobRepository() *MockSyncJobRepository {
 	return &MockSyncJobRepository{
-		jobs: make(map[shared.ID]*sync.SyncJob),
+		jobs:       make(map[shared.ID]*sync.SyncJob),
+		executions: make(map[shared.ID]*sync.SyncExecution),
 	}
 }
 
@@ -69,20 +72,9 @@ func (m *MockSyncJobRepository) List() ([]*sync.SyncJob, error) {
 	return result, nil
 }
 
-// MockSyncExecutionRepository is a mock implementation of sync.SyncExecutionRepository.
-type MockSyncExecutionRepository struct {
-	executions map[shared.ID]*sync.SyncExecution
-	createErr  error
-	updateErr  error
-}
+// ==================== Child Entity Operations (SyncExecution) ====================
 
-func NewMockSyncExecutionRepository() *MockSyncExecutionRepository {
-	return &MockSyncExecutionRepository{
-		executions: make(map[shared.ID]*sync.SyncExecution),
-	}
-}
-
-func (m *MockSyncExecutionRepository) Create(exec *sync.SyncExecution) error {
+func (m *MockSyncJobRepository) AddExecution(exec *sync.SyncExecution) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -90,7 +82,7 @@ func (m *MockSyncExecutionRepository) Create(exec *sync.SyncExecution) error {
 	return nil
 }
 
-func (m *MockSyncExecutionRepository) Get(id shared.ID) (*sync.SyncExecution, error) {
+func (m *MockSyncJobRepository) GetExecution(id shared.ID) (*sync.SyncExecution, error) {
 	exec, exists := m.executions[id]
 	if !exists {
 		return nil, nil
@@ -98,17 +90,17 @@ func (m *MockSyncExecutionRepository) Get(id shared.ID) (*sync.SyncExecution, er
 	return exec, nil
 }
 
-func (m *MockSyncExecutionRepository) GetBySyncJob(syncJobID shared.ID) ([]*sync.SyncExecution, error) {
+func (m *MockSyncJobRepository) GetExecutionsByJob(jobID shared.ID) ([]*sync.SyncExecution, error) {
 	result := make([]*sync.SyncExecution, 0)
 	for _, exec := range m.executions {
-		if exec.SyncJobID == syncJobID {
+		if exec.SyncJobID == jobID {
 			result = append(result, exec)
 		}
 	}
 	return result, nil
 }
 
-func (m *MockSyncExecutionRepository) Update(exec *sync.SyncExecution) error {
+func (m *MockSyncJobRepository) UpdateExecution(exec *sync.SyncExecution) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -116,23 +108,52 @@ func (m *MockSyncExecutionRepository) Update(exec *sync.SyncExecution) error {
 	return nil
 }
 
-func (m *MockSyncExecutionRepository) Delete(id shared.ID) error {
-	delete(m.executions, id)
-	return nil
+// ==================== Extended Query Operations ====================
+
+func (m *MockSyncJobRepository) FindBy(conditions ...shared.QueryCondition) ([]*sync.SyncJob, error) {
+	return m.List()
+}
+
+func (m *MockSyncJobRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*sync.SyncJob, error) {
+	return m.List()
+}
+
+func (m *MockSyncJobRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[sync.SyncJob], error) {
+	jobs, _ := m.List()
+	return shared.NewPageResult(jobs, int64(len(jobs)), pagination), nil
+}
+
+func (m *MockSyncJobRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[sync.SyncJob], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockSyncJobRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.jobs)), nil
+}
+
+func (m *MockSyncJobRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.jobs) > 0, nil
 }
 
 // MockWorkflowDefinitionRepository is a mock implementation.
+// Following DDD, this repository handles both WorkflowDefinition (aggregate root) and WorkflowInstance (child entity).
 type MockWorkflowDefinitionRepository struct {
 	definitions map[string]*workflow.WorkflowDefinition
+	instances   map[string]*workflow.WorkflowInstance
+	createErr   error
 }
 
 func NewMockWorkflowDefinitionRepository() *MockWorkflowDefinitionRepository {
 	return &MockWorkflowDefinitionRepository{
 		definitions: make(map[string]*workflow.WorkflowDefinition),
+		instances:   make(map[string]*workflow.WorkflowInstance),
 	}
 }
 
 func (m *MockWorkflowDefinitionRepository) Create(def *workflow.WorkflowDefinition) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
 	m.definitions[def.ID()] = def
 	return nil
 }
@@ -163,23 +184,14 @@ func (m *MockWorkflowDefinitionRepository) List() ([]*workflow.WorkflowDefinitio
 	return result, nil
 }
 
-// MockWorkflowInstanceRepository is a mock implementation.
-type MockWorkflowInstanceRepository struct {
-	instances map[string]*workflow.WorkflowInstance
-}
+// ==================== Child Entity Operations (WorkflowInstance) ====================
 
-func NewMockWorkflowInstanceRepository() *MockWorkflowInstanceRepository {
-	return &MockWorkflowInstanceRepository{
-		instances: make(map[string]*workflow.WorkflowInstance),
-	}
-}
-
-func (m *MockWorkflowInstanceRepository) Create(inst *workflow.WorkflowInstance) error {
+func (m *MockWorkflowDefinitionRepository) AddInstance(inst *workflow.WorkflowInstance) error {
 	m.instances[inst.ID] = inst
 	return nil
 }
 
-func (m *MockWorkflowInstanceRepository) Get(id string) (*workflow.WorkflowInstance, error) {
+func (m *MockWorkflowDefinitionRepository) GetInstance(id string) (*workflow.WorkflowInstance, error) {
 	inst, exists := m.instances[id]
 	if !exists {
 		return nil, nil
@@ -187,7 +199,7 @@ func (m *MockWorkflowInstanceRepository) Get(id string) (*workflow.WorkflowInsta
 	return inst, nil
 }
 
-func (m *MockWorkflowInstanceRepository) GetByWorkflowDef(workflowDefID string) ([]*workflow.WorkflowInstance, error) {
+func (m *MockWorkflowDefinitionRepository) GetInstancesByDef(workflowDefID string) ([]*workflow.WorkflowInstance, error) {
 	result := make([]*workflow.WorkflowInstance, 0)
 	for _, inst := range m.instances {
 		if inst.WorkflowID == workflowDefID {
@@ -197,14 +209,41 @@ func (m *MockWorkflowInstanceRepository) GetByWorkflowDef(workflowDefID string) 
 	return result, nil
 }
 
-func (m *MockWorkflowInstanceRepository) Update(inst *workflow.WorkflowInstance) error {
+func (m *MockWorkflowDefinitionRepository) UpdateInstance(inst *workflow.WorkflowInstance) error {
 	m.instances[inst.ID] = inst
 	return nil
 }
 
-func (m *MockWorkflowInstanceRepository) Delete(id string) error {
+func (m *MockWorkflowDefinitionRepository) DeleteInstance(id string) error {
 	delete(m.instances, id)
 	return nil
+}
+
+// ==================== Extended Query Operations ====================
+
+func (m *MockWorkflowDefinitionRepository) FindBy(conditions ...shared.QueryCondition) ([]*workflow.WorkflowDefinition, error) {
+	return m.List()
+}
+
+func (m *MockWorkflowDefinitionRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*workflow.WorkflowDefinition, error) {
+	return m.List()
+}
+
+func (m *MockWorkflowDefinitionRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[workflow.WorkflowDefinition], error) {
+	defs, _ := m.List()
+	return shared.NewPageResult(defs, int64(len(defs)), pagination), nil
+}
+
+func (m *MockWorkflowDefinitionRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[workflow.WorkflowDefinition], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockWorkflowDefinitionRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.definitions)), nil
+}
+
+func (m *MockWorkflowDefinitionRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.definitions) > 0, nil
 }
 
 // MockTaskEngineAdapter is a mock implementation of workflow.TaskEngineAdapter.
@@ -266,16 +305,14 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create a workflow definition
 		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test Workflow", workflow.WfCategorySync, "yaml: content", false)
 		wfDefRepo.Create(wfDef)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		req := contracts.CreateSyncJobRequest{
 			Name:          "Test Sync Job",
@@ -300,12 +337,10 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 
 	t.Run("WorkflowDefinition not found", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		req := contracts.CreateSyncJobRequest{
 			Name:          "Test Sync Job",
@@ -321,6 +356,32 @@ func TestSyncApplicationService_CreateSyncJob(t *testing.T) {
 			t.Fatal("Expected error for non-existent workflow definition")
 		}
 	})
+
+	t.Run("Repository error", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		syncJobRepo.createErr = errors.New("create error")
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test Workflow", workflow.WfCategorySync, "yaml: content", false)
+		wfDefRepo.Create(wfDef)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		req := contracts.CreateSyncJobRequest{
+			Name:          "Test Sync Job",
+			Description:   "A test sync job",
+			APIMetadataID: shared.NewID(),
+			DataStoreID:   shared.NewID(),
+			WorkflowDefID: shared.ID(wfDef.ID()),
+			Mode:          sync.SyncModeBatch,
+		}
+
+		_, err := svc.CreateSyncJob(ctx, req)
+		if err == nil {
+			t.Fatal("Expected error for repository failure")
+		}
+	})
 }
 
 func TestSyncApplicationService_GetSyncJob(t *testing.T) {
@@ -328,16 +389,14 @@ func TestSyncApplicationService_GetSyncJob(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create a job directly
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		result, err := svc.GetSyncJob(ctx, job.ID)
 		if err != nil {
@@ -350,12 +409,10 @@ func TestSyncApplicationService_GetSyncJob(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.GetSyncJob(ctx, shared.NewID())
 		if err == nil {
@@ -369,15 +426,13 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateSyncJob(ctx, job.ID, contracts.UpdateSyncJobRequest{
@@ -395,16 +450,14 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 
 	t.Run("Cannot update running job", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		job.MarkRunning()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateSyncJob(ctx, job.ID, contracts.UpdateSyncJobRequest{
@@ -414,6 +467,22 @@ func TestSyncApplicationService_UpdateSyncJob(t *testing.T) {
 			t.Fatal("Expected error when updating running job")
 		}
 	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		newName := "Updated Name"
+		err := svc.UpdateSyncJob(ctx, shared.NewID(), contracts.UpdateSyncJobRequest{
+			Name: &newName,
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent job")
+		}
+	})
 }
 
 func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
@@ -421,15 +490,13 @@ func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DeleteSyncJob(ctx, job.ID)
 		if err != nil {
@@ -444,20 +511,31 @@ func TestSyncApplicationService_DeleteSyncJob(t *testing.T) {
 
 	t.Run("Cannot delete running job", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		job.MarkRunning()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DeleteSyncJob(ctx, job.ID)
 		if err == nil {
 			t.Fatal("Expected error when deleting running job")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.DeleteSyncJob(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent job")
 		}
 	})
 }
@@ -467,9 +545,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create workflow definition
@@ -481,7 +557,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		execID, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err != nil {
@@ -500,9 +576,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 
 	t.Run("Cannot execute disabled job", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test", workflow.WfCategorySync, "yaml: test", false)
@@ -512,7 +586,7 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		// Job is disabled by default
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
@@ -520,11 +594,29 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		}
 	})
 
+	t.Run("Cannot execute already running job", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		wfDef := workflow.NewWorkflowDefinition("test-wf", "Test", workflow.WfCategorySync, "yaml: test", false)
+		wfDefRepo.Create(wfDef)
+
+		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.ID(wfDef.ID()), sync.SyncModeBatch)
+		job.MarkRunning()
+		syncJobRepo.Create(job)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		_, err := svc.ExecuteSyncJob(ctx, job.ID)
+		if err == nil {
+			t.Fatal("Expected error when executing already running job")
+		}
+	})
+
 	t.Run("Task engine submit error", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 		adapter.submitErr = errors.New("task engine error")
 
@@ -535,11 +627,66 @@ func TestSyncApplicationService_ExecuteSyncJob(t *testing.T) {
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		_, err := svc.ExecuteSyncJob(ctx, job.ID)
 		if err == nil {
 			t.Fatal("Expected error when task engine fails")
+		}
+	})
+
+	t.Run("Workflow definition not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		// Job references a non-existent workflow definition
+		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
+		job.Enable()
+		syncJobRepo.Create(job)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		_, err := svc.ExecuteSyncJob(ctx, job.ID)
+		if err == nil {
+			t.Fatal("Expected error when workflow definition not found")
+		}
+	})
+}
+
+func TestSyncApplicationService_GetSyncExecution(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Success", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		// Create execution directly
+		exec := sync.NewSyncExecution(shared.NewID(), shared.NewID())
+		syncJobRepo.AddExecution(exec)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		result, err := svc.GetSyncExecution(ctx, exec.ID)
+		if err != nil {
+			t.Fatalf("GetSyncExecution failed: %v", err)
+		}
+		if result.ID != exec.ID {
+			t.Errorf("Expected ID %s, got %s", exec.ID, result.ID)
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		_, err := svc.GetSyncExecution(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent execution")
 		}
 	})
 }
@@ -549,9 +696,7 @@ func TestSyncApplicationService_CancelExecution(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
@@ -560,18 +705,51 @@ func TestSyncApplicationService_CancelExecution(t *testing.T) {
 
 		exec := sync.NewSyncExecution(job.ID, shared.NewID())
 		exec.MarkRunning()
-		syncExecRepo.Create(exec)
+		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.CancelExecution(ctx, exec.ID)
 		if err != nil {
 			t.Fatalf("CancelExecution failed: %v", err)
 		}
 
-		updated, _ := syncExecRepo.Get(exec.ID)
+		updated, _ := syncJobRepo.GetExecution(exec.ID)
 		if updated.Status != sync.ExecStatusCancelled {
 			t.Errorf("Expected execution status cancelled, got %s", updated.Status)
+		}
+	})
+
+	t.Run("Cannot cancel completed execution", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
+		syncJobRepo.Create(job)
+
+		exec := sync.NewSyncExecution(job.ID, shared.NewID())
+		exec.MarkSuccess(100)
+		syncJobRepo.AddExecution(exec)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.CancelExecution(ctx, exec.ID)
+		if err == nil {
+			t.Fatal("Expected error when cancelling completed execution")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.CancelExecution(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent execution")
 		}
 	})
 }
@@ -581,15 +759,13 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 
 	t.Run("Enable job", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.EnableJob(ctx, job.ID)
 		if err != nil {
@@ -602,18 +778,38 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 		}
 	})
 
+	t.Run("Enable job with cron expression", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
+		job.SetCronExpression("0 0 * * * *")
+		syncJobRepo.Create(job)
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.EnableJob(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("EnableJob failed: %v", err)
+		}
+
+		updated, _ := syncJobRepo.Get(job.ID)
+		if updated.NextRunAt == nil {
+			t.Error("Expected next run time to be set")
+		}
+	})
+
 	t.Run("Disable job", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		job.Enable()
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.DisableJob(ctx, job.ID)
 		if err != nil {
@@ -625,6 +821,19 @@ func TestSyncApplicationService_EnableDisableJob(t *testing.T) {
 			t.Errorf("Expected job status disabled, got %s", updated.Status)
 		}
 	})
+
+	t.Run("Enable not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.EnableJob(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent job")
+		}
+	})
 }
 
 func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
@@ -632,15 +841,13 @@ func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		cronExpr := "0 0 * * * *"
 		err := svc.UpdateSchedule(ctx, job.ID, cronExpr)
@@ -656,19 +863,30 @@ func TestSyncApplicationService_UpdateSchedule(t *testing.T) {
 
 	t.Run("Invalid cron expression", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
 		syncJobRepo.Create(job)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.UpdateSchedule(ctx, job.ID, "invalid")
 		if err == nil {
 			t.Fatal("Expected error for invalid cron expression")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.UpdateSchedule(ctx, shared.NewID(), "0 0 * * * *")
+		if err == nil {
+			t.Fatal("Expected error for non-existent job")
 		}
 	})
 }
@@ -678,9 +896,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 
 	t.Run("Success callback", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
@@ -689,9 +905,9 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 
 		exec := sync.NewSyncExecution(job.ID, shared.NewID())
 		exec.MarkRunning()
-		syncExecRepo.Create(exec)
+		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
 			ExecutionID: exec.ID,
@@ -702,7 +918,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 			t.Fatalf("HandleExecutionCallback failed: %v", err)
 		}
 
-		updated, _ := syncExecRepo.Get(exec.ID)
+		updated, _ := syncJobRepo.GetExecution(exec.ID)
 		if updated.Status != sync.ExecStatusSuccess {
 			t.Errorf("Expected execution status success, got %s", updated.Status)
 		}
@@ -713,9 +929,7 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 
 	t.Run("Failure callback", func(t *testing.T) {
 		syncJobRepo := NewMockSyncJobRepository()
-		syncExecRepo := NewMockSyncExecutionRepository()
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
@@ -724,9 +938,9 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 
 		exec := sync.NewSyncExecution(job.ID, shared.NewID())
 		exec.MarkRunning()
-		syncExecRepo.Create(exec)
+		syncJobRepo.AddExecution(exec)
 
-		svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 		errMsg := "sync failed"
 		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
@@ -738,9 +952,26 @@ func TestSyncApplicationService_HandleExecutionCallback(t *testing.T) {
 			t.Fatalf("HandleExecutionCallback failed: %v", err)
 		}
 
-		updated, _ := syncExecRepo.Get(exec.ID)
+		updated, _ := syncJobRepo.GetExecution(exec.ID)
 		if updated.Status != sync.ExecStatusFailed {
 			t.Errorf("Expected execution status failed, got %s", updated.Status)
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		syncJobRepo := NewMockSyncJobRepository()
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
+
+		err := svc.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
+			ExecutionID: shared.NewID(),
+			Success:     true,
+			RecordCount: 100,
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent execution")
 		}
 	})
 }
@@ -749,9 +980,7 @@ func TestSyncApplicationService_ListSyncJobs(t *testing.T) {
 	ctx := context.Background()
 
 	syncJobRepo := NewMockSyncJobRepository()
-	syncExecRepo := NewMockSyncExecutionRepository()
 	wfDefRepo := NewMockWorkflowDefinitionRepository()
-	wfInstRepo := NewMockWorkflowInstanceRepository()
 	adapter := NewMockTaskEngineAdapter()
 
 	// Create multiple jobs
@@ -760,7 +989,7 @@ func TestSyncApplicationService_ListSyncJobs(t *testing.T) {
 		syncJobRepo.Create(job)
 	}
 
-	svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+	svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 	jobs, err := svc.ListSyncJobs(ctx)
 	if err != nil {
@@ -775,9 +1004,7 @@ func TestSyncApplicationService_ListSyncExecutions(t *testing.T) {
 	ctx := context.Background()
 
 	syncJobRepo := NewMockSyncJobRepository()
-	syncExecRepo := NewMockSyncExecutionRepository()
 	wfDefRepo := NewMockWorkflowDefinitionRepository()
-	wfInstRepo := NewMockWorkflowInstanceRepository()
 	adapter := NewMockTaskEngineAdapter()
 
 	job := sync.NewSyncJob("Test", "Desc", shared.NewID(), shared.NewID(), shared.NewID(), sync.SyncModeBatch)
@@ -786,10 +1013,10 @@ func TestSyncApplicationService_ListSyncExecutions(t *testing.T) {
 	// Create multiple executions
 	for i := 0; i < 3; i++ {
 		exec := sync.NewSyncExecution(job.ID, shared.NewID())
-		syncExecRepo.Create(exec)
+		syncJobRepo.AddExecution(exec)
 	}
 
-	svc := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+	svc := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter)
 
 	execs, err := svc.ListSyncExecutions(ctx, job.ID)
 	if err != nil {

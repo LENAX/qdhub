@@ -15,8 +15,10 @@ import (
 // ==================== Mock Implementations ====================
 
 // MockQuantDataStoreRepository is a mock implementation of datastore.QuantDataStoreRepository.
+// Following DDD, this repository handles both QuantDataStore (aggregate root) and TableSchema (child entity).
 type MockQuantDataStoreRepository struct {
 	stores    map[shared.ID]*datastore.QuantDataStore
+	schemas   map[shared.ID]*datastore.TableSchema
 	createErr error
 	updateErr error
 	deleteErr error
@@ -24,7 +26,8 @@ type MockQuantDataStoreRepository struct {
 
 func NewMockQuantDataStoreRepository() *MockQuantDataStoreRepository {
 	return &MockQuantDataStoreRepository{
-		stores: make(map[shared.ID]*datastore.QuantDataStore),
+		stores:  make(map[shared.ID]*datastore.QuantDataStore),
+		schemas: make(map[shared.ID]*datastore.TableSchema),
 	}
 }
 
@@ -68,21 +71,9 @@ func (m *MockQuantDataStoreRepository) List() ([]*datastore.QuantDataStore, erro
 	return result, nil
 }
 
-// MockTableSchemaRepository is a mock implementation of datastore.TableSchemaRepository.
-type MockTableSchemaRepository struct {
-	schemas   map[shared.ID]*datastore.TableSchema
-	createErr error
-	updateErr error
-	deleteErr error
-}
+// ==================== Child Entity Operations (TableSchema) ====================
 
-func NewMockTableSchemaRepository() *MockTableSchemaRepository {
-	return &MockTableSchemaRepository{
-		schemas: make(map[shared.ID]*datastore.TableSchema),
-	}
-}
-
-func (m *MockTableSchemaRepository) Create(schema *datastore.TableSchema) error {
+func (m *MockQuantDataStoreRepository) AddSchema(schema *datastore.TableSchema) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -90,7 +81,7 @@ func (m *MockTableSchemaRepository) Create(schema *datastore.TableSchema) error 
 	return nil
 }
 
-func (m *MockTableSchemaRepository) Get(id shared.ID) (*datastore.TableSchema, error) {
+func (m *MockQuantDataStoreRepository) GetSchema(id shared.ID) (*datastore.TableSchema, error) {
 	schema, exists := m.schemas[id]
 	if !exists {
 		return nil, nil
@@ -98,7 +89,16 @@ func (m *MockTableSchemaRepository) Get(id shared.ID) (*datastore.TableSchema, e
 	return schema, nil
 }
 
-func (m *MockTableSchemaRepository) GetByDataStore(dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
+func (m *MockQuantDataStoreRepository) GetSchemaByAPIMetadata(apiMetadataID shared.ID) (*datastore.TableSchema, error) {
+	for _, schema := range m.schemas {
+		if schema.APIMetadataID == apiMetadataID {
+			return schema, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockQuantDataStoreRepository) GetSchemasByDataStore(dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
 	result := make([]*datastore.TableSchema, 0)
 	for _, schema := range m.schemas {
 		if schema.DataStoreID == dataStoreID {
@@ -108,16 +108,7 @@ func (m *MockTableSchemaRepository) GetByDataStore(dataStoreID shared.ID) ([]*da
 	return result, nil
 }
 
-func (m *MockTableSchemaRepository) GetByAPIMetadata(apiMetadataID shared.ID) (*datastore.TableSchema, error) {
-	for _, schema := range m.schemas {
-		if schema.APIMetadataID == apiMetadataID {
-			return schema, nil
-		}
-	}
-	return nil, nil
-}
-
-func (m *MockTableSchemaRepository) Update(schema *datastore.TableSchema) error {
+func (m *MockQuantDataStoreRepository) UpdateSchema(schema *datastore.TableSchema) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -125,12 +116,39 @@ func (m *MockTableSchemaRepository) Update(schema *datastore.TableSchema) error 
 	return nil
 }
 
-func (m *MockTableSchemaRepository) Delete(id shared.ID) error {
+func (m *MockQuantDataStoreRepository) DeleteSchema(id shared.ID) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
 	delete(m.schemas, id)
 	return nil
+}
+
+// ==================== Extended Query Operations ====================
+
+func (m *MockQuantDataStoreRepository) FindBy(conditions ...shared.QueryCondition) ([]*datastore.QuantDataStore, error) {
+	return m.List()
+}
+
+func (m *MockQuantDataStoreRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*datastore.QuantDataStore, error) {
+	return m.List()
+}
+
+func (m *MockQuantDataStoreRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[datastore.QuantDataStore], error) {
+	stores, _ := m.List()
+	return shared.NewPageResult(stores, int64(len(stores)), pagination), nil
+}
+
+func (m *MockQuantDataStoreRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[datastore.QuantDataStore], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockQuantDataStoreRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.stores)), nil
+}
+
+func (m *MockQuantDataStoreRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.stores) > 0, nil
 }
 
 // MockMappingRuleRepository is a mock implementation of datastore.DataTypeMappingRuleRepository.
@@ -200,23 +218,122 @@ func (m *MockMappingRuleRepository) Delete(id shared.ID) error {
 	return nil
 }
 
-// MockAPIMetadataRepository is a mock for metadata.APIMetadataRepository.
-type MockAPIMetadataRepository struct {
-	apis map[shared.ID]*metadata.APIMetadata
+// ==================== Extended Query Operations ====================
+
+func (m *MockMappingRuleRepository) FindBy(conditions ...shared.QueryCondition) ([]*datastore.DataTypeMappingRule, error) {
+	return m.List()
 }
 
-func NewMockAPIMetadataRepository() *MockAPIMetadataRepository {
-	return &MockAPIMetadataRepository{
-		apis: make(map[shared.ID]*metadata.APIMetadata),
+func (m *MockMappingRuleRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*datastore.DataTypeMappingRule, error) {
+	return m.List()
+}
+
+func (m *MockMappingRuleRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[datastore.DataTypeMappingRule], error) {
+	rules, _ := m.List()
+	return shared.NewPageResult(rules, int64(len(rules)), pagination), nil
+}
+
+func (m *MockMappingRuleRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[datastore.DataTypeMappingRule], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockMappingRuleRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.rules)), nil
+}
+
+func (m *MockMappingRuleRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.rules) > 0, nil
+}
+
+// MockDataSourceRepository is a mock implementation of metadata.DataSourceRepository.
+type MockDataSourceRepository struct {
+	sources    map[shared.ID]*metadata.DataSource
+	categories map[shared.ID]*metadata.APICategory
+	apis       map[shared.ID]*metadata.APIMetadata
+	tokens     map[shared.ID]*metadata.Token
+}
+
+func NewMockDataSourceRepository() *MockDataSourceRepository {
+	return &MockDataSourceRepository{
+		sources:    make(map[shared.ID]*metadata.DataSource),
+		categories: make(map[shared.ID]*metadata.APICategory),
+		apis:       make(map[shared.ID]*metadata.APIMetadata),
+		tokens:     make(map[shared.ID]*metadata.Token),
 	}
 }
 
-func (m *MockAPIMetadataRepository) Create(meta *metadata.APIMetadata) error {
+func (m *MockDataSourceRepository) Create(ds *metadata.DataSource) error {
+	m.sources[ds.ID] = ds
+	return nil
+}
+
+func (m *MockDataSourceRepository) Get(id shared.ID) (*metadata.DataSource, error) {
+	ds, exists := m.sources[id]
+	if !exists {
+		return nil, nil
+	}
+	return ds, nil
+}
+
+func (m *MockDataSourceRepository) Update(ds *metadata.DataSource) error {
+	m.sources[ds.ID] = ds
+	return nil
+}
+
+func (m *MockDataSourceRepository) Delete(id shared.ID) error {
+	delete(m.sources, id)
+	return nil
+}
+
+func (m *MockDataSourceRepository) List() ([]*metadata.DataSource, error) {
+	result := make([]*metadata.DataSource, 0, len(m.sources))
+	for _, ds := range m.sources {
+		result = append(result, ds)
+	}
+	return result, nil
+}
+
+// Child Entity Operations (APICategory)
+func (m *MockDataSourceRepository) AddCategory(cat *metadata.APICategory) error {
+	m.categories[cat.ID] = cat
+	return nil
+}
+
+func (m *MockDataSourceRepository) GetCategory(id shared.ID) (*metadata.APICategory, error) {
+	cat, exists := m.categories[id]
+	if !exists {
+		return nil, nil
+	}
+	return cat, nil
+}
+
+func (m *MockDataSourceRepository) ListCategoriesByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
+	result := make([]*metadata.APICategory, 0)
+	for _, cat := range m.categories {
+		if cat.DataSourceID == dataSourceID {
+			result = append(result, cat)
+		}
+	}
+	return result, nil
+}
+
+func (m *MockDataSourceRepository) UpdateCategory(cat *metadata.APICategory) error {
+	m.categories[cat.ID] = cat
+	return nil
+}
+
+func (m *MockDataSourceRepository) DeleteCategory(id shared.ID) error {
+	delete(m.categories, id)
+	return nil
+}
+
+// Child Entity Operations (APIMetadata)
+func (m *MockDataSourceRepository) AddAPIMetadata(meta *metadata.APIMetadata) error {
 	m.apis[meta.ID] = meta
 	return nil
 }
 
-func (m *MockAPIMetadataRepository) Get(id shared.ID) (*metadata.APIMetadata, error) {
+func (m *MockDataSourceRepository) GetAPIMetadata(id shared.ID) (*metadata.APIMetadata, error) {
 	api, exists := m.apis[id]
 	if !exists {
 		return nil, nil
@@ -224,17 +341,7 @@ func (m *MockAPIMetadataRepository) Get(id shared.ID) (*metadata.APIMetadata, er
 	return api, nil
 }
 
-func (m *MockAPIMetadataRepository) Update(meta *metadata.APIMetadata) error {
-	m.apis[meta.ID] = meta
-	return nil
-}
-
-func (m *MockAPIMetadataRepository) Delete(id shared.ID) error {
-	delete(m.apis, id)
-	return nil
-}
-
-func (m *MockAPIMetadataRepository) ListByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
+func (m *MockDataSourceRepository) ListAPIMetadataByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
 	result := make([]*metadata.APIMetadata, 0)
 	for _, api := range m.apis {
 		if api.DataSourceID == dataSourceID {
@@ -244,7 +351,7 @@ func (m *MockAPIMetadataRepository) ListByDataSource(dataSourceID shared.ID) ([]
 	return result, nil
 }
 
-func (m *MockAPIMetadataRepository) ListByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
+func (m *MockDataSourceRepository) ListAPIMetadataByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
 	result := make([]*metadata.APIMetadata, 0)
 	for _, api := range m.apis {
 		if api.CategoryID != nil && *api.CategoryID == categoryID {
@@ -252,6 +359,70 @@ func (m *MockAPIMetadataRepository) ListByCategory(categoryID shared.ID) ([]*met
 		}
 	}
 	return result, nil
+}
+
+func (m *MockDataSourceRepository) UpdateAPIMetadata(meta *metadata.APIMetadata) error {
+	m.apis[meta.ID] = meta
+	return nil
+}
+
+func (m *MockDataSourceRepository) DeleteAPIMetadata(id shared.ID) error {
+	delete(m.apis, id)
+	return nil
+}
+
+// Child Entity Operations (Token)
+func (m *MockDataSourceRepository) SetToken(token *metadata.Token) error {
+	m.tokens[token.ID] = token
+	return nil
+}
+
+func (m *MockDataSourceRepository) GetToken(id shared.ID) (*metadata.Token, error) {
+	token, exists := m.tokens[id]
+	if !exists {
+		return nil, nil
+	}
+	return token, nil
+}
+
+func (m *MockDataSourceRepository) GetTokenByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
+	for _, token := range m.tokens {
+		if token.DataSourceID == dataSourceID {
+			return token, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockDataSourceRepository) DeleteToken(id shared.ID) error {
+	delete(m.tokens, id)
+	return nil
+}
+
+// Extended Query Operations
+func (m *MockDataSourceRepository) FindBy(conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return m.List()
+}
+
+func (m *MockDataSourceRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return m.List()
+}
+
+func (m *MockDataSourceRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[metadata.DataSource], error) {
+	sources, _ := m.List()
+	return shared.NewPageResult(sources, int64(len(sources)), pagination), nil
+}
+
+func (m *MockDataSourceRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[metadata.DataSource], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockDataSourceRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.sources)), nil
+}
+
+func (m *MockDataSourceRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.sources) > 0, nil
 }
 
 // MockQuantDBAdapter is a mock implementation of QuantDBAdapter.
@@ -284,12 +455,11 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		req := contracts.CreateDataStoreRequest{
 			Name:        "Test Store",
@@ -317,12 +487,11 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 	t.Run("Repository error", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
 		dsRepo.createErr = errors.New("create error")
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		req := contracts.CreateDataStoreRequest{
 			Name:        "Test Store",
@@ -343,15 +512,14 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		result, err := svc.GetDataStore(ctx, ds.ID)
 		if err != nil {
@@ -364,12 +532,11 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		_, err := svc.GetDataStore(ctx, shared.NewID())
 		if err == nil {
@@ -383,15 +550,14 @@ func TestDataStoreApplicationService_UpdateDataStore(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		newName := "Updated Name"
 		newDesc := "Updated Description"
@@ -414,12 +580,11 @@ func TestDataStoreApplicationService_UpdateDataStore(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		newName := "Updated Name"
 		err := svc.UpdateDataStore(ctx, shared.NewID(), contracts.UpdateDataStoreRequest{
@@ -436,15 +601,14 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.DeleteDataStore(ctx, ds.ID)
 		if err != nil {
@@ -459,9 +623,8 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 
 	t.Run("Cannot delete with existing schemas", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
@@ -469,13 +632,27 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 
 		// Create a schema for this data store
 		schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.DeleteDataStore(ctx, ds.ID)
 		if err == nil {
 			t.Fatal("Expected error when deleting data store with existing schemas")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		err := svc.DeleteDataStore(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent data store")
 		}
 	})
 }
@@ -484,9 +661,8 @@ func TestDataStoreApplicationService_ListDataStores(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := NewMockQuantDataStoreRepository()
-	schemaRepo := NewMockTableSchemaRepository()
 	ruleRepo := NewMockMappingRuleRepository()
-	apiMetaRepo := NewMockAPIMetadataRepository()
+	dataSourceRepo := NewMockDataSourceRepository()
 	adapter := NewMockQuantDBAdapter()
 
 	// Create multiple data stores
@@ -495,7 +671,7 @@ func TestDataStoreApplicationService_ListDataStores(t *testing.T) {
 		dsRepo.Create(ds)
 	}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	stores, err := svc.ListDataStores(ctx)
 	if err != nil {
@@ -511,15 +687,14 @@ func TestDataStoreApplicationService_TestConnection(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.TestConnection(ctx, ds.ID)
 		if err != nil {
@@ -529,20 +704,33 @@ func TestDataStoreApplicationService_TestConnection(t *testing.T) {
 
 	t.Run("Connection failed", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 		adapter.testConnErr = errors.New("connection failed")
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.TestConnection(ctx, ds.ID)
 		if err == nil {
 			t.Fatal("Expected error when connection fails")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		err := svc.TestConnection(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent data store")
 		}
 	})
 }
@@ -552,9 +740,8 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		// Create data store
@@ -569,7 +756,7 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 			{Name: "open", Type: "float", Description: "开盘价"},
 			{Name: "close", Type: "float", Description: "收盘价"},
 		})
-		apiMetaRepo.Create(api)
+		dataSourceRepo.AddAPIMetadata(api)
 
 		// Create mapping rules
 		rule1 := datastore.NewDataTypeMappingRule("tushare", "str", "duckdb", "VARCHAR", 100, true)
@@ -577,7 +764,7 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 		rule2 := datastore.NewDataTypeMappingRule("tushare", "float", "duckdb", "DOUBLE", 100, true)
 		ruleRepo.Create(rule2)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		schema, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
 			APIMetadataID: api.ID,
@@ -601,12 +788,11 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 
 	t.Run("DataStore not found", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		_, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
 			APIMetadataID: shared.NewID(),
@@ -617,6 +803,27 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 			t.Fatal("Expected error for non-existent data store")
 		}
 	})
+
+	t.Run("API metadata not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
+		dsRepo.Create(ds)
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		_, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
+			APIMetadataID: shared.NewID(),
+			DataStoreID:   ds.ID,
+			TableName:     "test_table",
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent API metadata")
+		}
+	})
 }
 
 func TestDataStoreApplicationService_CreateTable(t *testing.T) {
@@ -624,9 +831,8 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		// Create data store
@@ -639,16 +845,16 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 			{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
 			{Name: "name", SourceType: "str", TargetType: "VARCHAR", Nullable: true},
 		})
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.CreateTable(ctx, schema.ID)
 		if err != nil {
 			t.Fatalf("CreateTable failed: %v", err)
 		}
 
-		updated, _ := schemaRepo.Get(schema.ID)
+		updated, _ := dsRepo.GetSchema(schema.ID)
 		if updated.Status != datastore.SchemaStatusCreated {
 			t.Errorf("Expected schema status created, got %s", updated.Status)
 		}
@@ -656,9 +862,8 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 
 	t.Run("DDL execution failed", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 		adapter.executeDDLErr = errors.New("DDL error")
 
@@ -669,18 +874,32 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 		schema.SetColumns([]datastore.ColumnDef{
 			{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
 		})
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.CreateTable(ctx, schema.ID)
 		if err == nil {
 			t.Fatal("Expected error when DDL execution fails")
 		}
 
-		updated, _ := schemaRepo.Get(schema.ID)
+		updated, _ := dsRepo.GetSchema(schema.ID)
 		if updated.Status != datastore.SchemaStatusFailed {
 			t.Errorf("Expected schema status failed, got %s", updated.Status)
+		}
+	})
+
+	t.Run("Schema not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		err := svc.CreateTable(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent schema")
 		}
 	})
 }
@@ -690,9 +909,8 @@ func TestDataStoreApplicationService_DropTable(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
@@ -700,18 +918,32 @@ func TestDataStoreApplicationService_DropTable(t *testing.T) {
 
 		schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
 		schema.MarkCreated()
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.DropTable(ctx, schema.ID)
 		if err != nil {
 			t.Fatalf("DropTable failed: %v", err)
 		}
 
-		deleted, _ := schemaRepo.Get(schema.ID)
+		deleted, _ := dsRepo.GetSchema(schema.ID)
 		if deleted != nil {
 			t.Error("Schema should be deleted")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		err := svc.DropTable(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent schema")
 		}
 	})
 }
@@ -721,15 +953,14 @@ func TestDataStoreApplicationService_GetTableSchema(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		schema := datastore.NewTableSchema(shared.NewID(), shared.NewID(), "test_table")
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		result, err := svc.GetTableSchema(ctx, schema.ID)
 		if err != nil {
@@ -742,12 +973,11 @@ func TestDataStoreApplicationService_GetTableSchema(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		_, err := svc.GetTableSchema(ctx, shared.NewID())
 		if err == nil {
@@ -759,43 +989,57 @@ func TestDataStoreApplicationService_GetTableSchema(t *testing.T) {
 func TestDataStoreApplicationService_GetTableSchemaByAPI(t *testing.T) {
 	ctx := context.Background()
 
-	dsRepo := NewMockQuantDataStoreRepository()
-	schemaRepo := NewMockTableSchemaRepository()
-	ruleRepo := NewMockMappingRuleRepository()
-	apiMetaRepo := NewMockAPIMetadataRepository()
-	adapter := NewMockQuantDBAdapter()
+	t.Run("Success", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
 
-	apiID := shared.NewID()
-	schema := datastore.NewTableSchema(shared.NewID(), apiID, "test_table")
-	schemaRepo.Create(schema)
+		apiID := shared.NewID()
+		schema := datastore.NewTableSchema(shared.NewID(), apiID, "test_table")
+		dsRepo.AddSchema(schema)
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
-	result, err := svc.GetTableSchemaByAPI(ctx, apiID)
-	if err != nil {
-		t.Fatalf("GetTableSchemaByAPI failed: %v", err)
-	}
-	if result.APIMetadataID != apiID {
-		t.Errorf("Expected API ID %s, got %s", apiID, result.APIMetadataID)
-	}
+		result, err := svc.GetTableSchemaByAPI(ctx, apiID)
+		if err != nil {
+			t.Fatalf("GetTableSchemaByAPI failed: %v", err)
+		}
+		if result.APIMetadataID != apiID {
+			t.Errorf("Expected API ID %s, got %s", apiID, result.APIMetadataID)
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		_, err := svc.GetTableSchemaByAPI(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent schema")
+		}
+	})
 }
 
 func TestDataStoreApplicationService_ListTableSchemas(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := NewMockQuantDataStoreRepository()
-	schemaRepo := NewMockTableSchemaRepository()
 	ruleRepo := NewMockMappingRuleRepository()
-	apiMetaRepo := NewMockAPIMetadataRepository()
+	dataSourceRepo := NewMockDataSourceRepository()
 	adapter := NewMockQuantDBAdapter()
 
 	dsID := shared.NewID()
 	for i := 0; i < 3; i++ {
 		schema := datastore.NewTableSchema(dsID, shared.NewID(), "test_table")
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 	}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	schemas, err := svc.ListTableSchemas(ctx, dsID)
 	if err != nil {
@@ -811,15 +1055,14 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		schema := datastore.NewTableSchema(shared.NewID(), shared.NewID(), "test_table")
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		newCols := []datastore.ColumnDef{
 			{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
@@ -831,7 +1074,7 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 			t.Fatalf("UpdateTableSchema failed: %v", err)
 		}
 
-		updated, _ := schemaRepo.Get(schema.ID)
+		updated, _ := dsRepo.GetSchema(schema.ID)
 		if len(updated.Columns) != 1 {
 			t.Errorf("Expected 1 column, got %d", len(updated.Columns))
 		}
@@ -839,16 +1082,15 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 
 	t.Run("Cannot update created schema", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
 		schema := datastore.NewTableSchema(shared.NewID(), shared.NewID(), "test_table")
 		schema.MarkCreated()
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		newCols := []datastore.ColumnDef{
 			{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
@@ -860,6 +1102,25 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 			t.Fatal("Expected error when updating created schema")
 		}
 	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		newCols := []datastore.ColumnDef{
+			{Name: "id", SourceType: "int", TargetType: "INTEGER", Nullable: false},
+		}
+		err := svc.UpdateTableSchema(ctx, shared.NewID(), contracts.UpdateSchemaRequest{
+			Columns: &newCols,
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent schema")
+		}
+	})
 }
 
 func TestDataStoreApplicationService_CreateMappingRule(t *testing.T) {
@@ -867,12 +1128,11 @@ func TestDataStoreApplicationService_CreateMappingRule(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		req := contracts.CreateMappingRuleRequest{
 			DataSourceType: "tushare",
@@ -899,9 +1159,8 @@ func TestDataStoreApplicationService_GetMappingRules(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := NewMockQuantDataStoreRepository()
-	schemaRepo := NewMockTableSchemaRepository()
 	ruleRepo := NewMockMappingRuleRepository()
-	apiMetaRepo := NewMockAPIMetadataRepository()
+	dataSourceRepo := NewMockDataSourceRepository()
 	adapter := NewMockQuantDBAdapter()
 
 	// Create rules
@@ -910,7 +1169,7 @@ func TestDataStoreApplicationService_GetMappingRules(t *testing.T) {
 	rule2 := datastore.NewDataTypeMappingRule("tushare", "int", "duckdb", "INTEGER", 100, true)
 	ruleRepo.Create(rule2)
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 	rules, err := svc.GetMappingRules(ctx, "tushare", "duckdb")
 	if err != nil {
@@ -924,11 +1183,10 @@ func TestDataStoreApplicationService_GetMappingRules(t *testing.T) {
 func TestDataStoreApplicationService_SyncSchemaStatus(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("Success", func(t *testing.T) {
+	t.Run("Success - table exists", func(t *testing.T) {
 		dsRepo := NewMockQuantDataStoreRepository()
-		schemaRepo := NewMockTableSchemaRepository()
 		ruleRepo := NewMockMappingRuleRepository()
-		apiMetaRepo := NewMockAPIMetadataRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 		adapter.tableExists = true
 
@@ -936,18 +1194,32 @@ func TestDataStoreApplicationService_SyncSchemaStatus(t *testing.T) {
 		dsRepo.Create(ds)
 
 		schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
-		schemaRepo.Create(schema)
+		dsRepo.AddSchema(schema)
 
-		svc := impl.NewDataStoreApplicationService(dsRepo, schemaRepo, ruleRepo, apiMetaRepo, adapter)
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
 
 		err := svc.SyncSchemaStatus(ctx, ds.ID)
 		if err != nil {
 			t.Fatalf("SyncSchemaStatus failed: %v", err)
 		}
 
-		updated, _ := schemaRepo.Get(schema.ID)
+		updated, _ := dsRepo.GetSchema(schema.ID)
 		if updated.Status != datastore.SchemaStatusCreated {
 			t.Errorf("Expected schema status created, got %s", updated.Status)
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockQuantDataStoreRepository()
+		ruleRepo := NewMockMappingRuleRepository()
+		dataSourceRepo := NewMockDataSourceRepository()
+		adapter := NewMockQuantDBAdapter()
+
+		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter)
+
+		err := svc.SyncSchemaStatus(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent data store")
 		}
 	})
 }

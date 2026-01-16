@@ -13,21 +13,28 @@ import (
 
 // ==================== Mock Implementations ====================
 
-// MockDataSourceRepository is a mock implementation of metadata.DataSourceRepository.
-type MockDataSourceRepository struct {
-	sources   map[shared.ID]*metadata.DataSource
-	createErr error
-	updateErr error
-	deleteErr error
+// MockMetaDataSourceRepository is a mock implementation of metadata.DataSourceRepository.
+// Following DDD, this repository handles both DataSource (aggregate root) and its child entities.
+type MockMetaDataSourceRepository struct {
+	sources    map[shared.ID]*metadata.DataSource
+	categories map[shared.ID]*metadata.APICategory
+	apis       map[shared.ID]*metadata.APIMetadata
+	tokens     map[shared.ID]*metadata.Token
+	createErr  error
+	updateErr  error
+	deleteErr  error
 }
 
-func NewMockDataSourceRepository() *MockDataSourceRepository {
-	return &MockDataSourceRepository{
-		sources: make(map[shared.ID]*metadata.DataSource),
+func NewMockMetaDataSourceRepository() *MockMetaDataSourceRepository {
+	return &MockMetaDataSourceRepository{
+		sources:    make(map[shared.ID]*metadata.DataSource),
+		categories: make(map[shared.ID]*metadata.APICategory),
+		apis:       make(map[shared.ID]*metadata.APIMetadata),
+		tokens:     make(map[shared.ID]*metadata.Token),
 	}
 }
 
-func (m *MockDataSourceRepository) Create(ds *metadata.DataSource) error {
+func (m *MockMetaDataSourceRepository) Create(ds *metadata.DataSource) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -35,7 +42,7 @@ func (m *MockDataSourceRepository) Create(ds *metadata.DataSource) error {
 	return nil
 }
 
-func (m *MockDataSourceRepository) Get(id shared.ID) (*metadata.DataSource, error) {
+func (m *MockMetaDataSourceRepository) Get(id shared.ID) (*metadata.DataSource, error) {
 	ds, exists := m.sources[id]
 	if !exists {
 		return nil, nil
@@ -43,7 +50,7 @@ func (m *MockDataSourceRepository) Get(id shared.ID) (*metadata.DataSource, erro
 	return ds, nil
 }
 
-func (m *MockDataSourceRepository) Update(ds *metadata.DataSource) error {
+func (m *MockMetaDataSourceRepository) Update(ds *metadata.DataSource) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -51,7 +58,7 @@ func (m *MockDataSourceRepository) Update(ds *metadata.DataSource) error {
 	return nil
 }
 
-func (m *MockDataSourceRepository) Delete(id shared.ID) error {
+func (m *MockMetaDataSourceRepository) Delete(id shared.ID) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
@@ -59,7 +66,7 @@ func (m *MockDataSourceRepository) Delete(id shared.ID) error {
 	return nil
 }
 
-func (m *MockDataSourceRepository) List() ([]*metadata.DataSource, error) {
+func (m *MockMetaDataSourceRepository) List() ([]*metadata.DataSource, error) {
 	result := make([]*metadata.DataSource, 0, len(m.sources))
 	for _, ds := range m.sources {
 		result = append(result, ds)
@@ -67,27 +74,13 @@ func (m *MockDataSourceRepository) List() ([]*metadata.DataSource, error) {
 	return result, nil
 }
 
-// MockAPICategoryRepository is a mock implementation of metadata.APICategoryRepository.
-type MockAPICategoryRepository struct {
-	categories map[shared.ID]*metadata.APICategory
-	createErr  error
-}
-
-func NewMockAPICategoryRepository() *MockAPICategoryRepository {
-	return &MockAPICategoryRepository{
-		categories: make(map[shared.ID]*metadata.APICategory),
-	}
-}
-
-func (m *MockAPICategoryRepository) Create(cat *metadata.APICategory) error {
-	if m.createErr != nil {
-		return m.createErr
-	}
+// Child Entity Operations (APICategory)
+func (m *MockMetaDataSourceRepository) AddCategory(cat *metadata.APICategory) error {
 	m.categories[cat.ID] = cat
 	return nil
 }
 
-func (m *MockAPICategoryRepository) Get(id shared.ID) (*metadata.APICategory, error) {
+func (m *MockMetaDataSourceRepository) GetCategory(id shared.ID) (*metadata.APICategory, error) {
 	cat, exists := m.categories[id]
 	if !exists {
 		return nil, nil
@@ -95,17 +88,7 @@ func (m *MockAPICategoryRepository) Get(id shared.ID) (*metadata.APICategory, er
 	return cat, nil
 }
 
-func (m *MockAPICategoryRepository) Update(cat *metadata.APICategory) error {
-	m.categories[cat.ID] = cat
-	return nil
-}
-
-func (m *MockAPICategoryRepository) Delete(id shared.ID) error {
-	delete(m.categories, id)
-	return nil
-}
-
-func (m *MockAPICategoryRepository) ListByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
+func (m *MockMetaDataSourceRepository) ListCategoriesByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
 	result := make([]*metadata.APICategory, 0)
 	for _, cat := range m.categories {
 		if cat.DataSourceID == dataSourceID {
@@ -115,29 +98,23 @@ func (m *MockAPICategoryRepository) ListByDataSource(dataSourceID shared.ID) ([]
 	return result, nil
 }
 
-// MockMetaAPIMetadataRepository is a mock for metadata.APIMetadataRepository.
-type MockMetaAPIMetadataRepository struct {
-	apis      map[shared.ID]*metadata.APIMetadata
-	createErr error
-	updateErr error
-	deleteErr error
+func (m *MockMetaDataSourceRepository) UpdateCategory(cat *metadata.APICategory) error {
+	m.categories[cat.ID] = cat
+	return nil
 }
 
-func NewMockMetaAPIMetadataRepository() *MockMetaAPIMetadataRepository {
-	return &MockMetaAPIMetadataRepository{
-		apis: make(map[shared.ID]*metadata.APIMetadata),
-	}
+func (m *MockMetaDataSourceRepository) DeleteCategory(id shared.ID) error {
+	delete(m.categories, id)
+	return nil
 }
 
-func (m *MockMetaAPIMetadataRepository) Create(meta *metadata.APIMetadata) error {
-	if m.createErr != nil {
-		return m.createErr
-	}
+// Child Entity Operations (APIMetadata)
+func (m *MockMetaDataSourceRepository) AddAPIMetadata(meta *metadata.APIMetadata) error {
 	m.apis[meta.ID] = meta
 	return nil
 }
 
-func (m *MockMetaAPIMetadataRepository) Get(id shared.ID) (*metadata.APIMetadata, error) {
+func (m *MockMetaDataSourceRepository) GetAPIMetadata(id shared.ID) (*metadata.APIMetadata, error) {
 	api, exists := m.apis[id]
 	if !exists {
 		return nil, nil
@@ -145,23 +122,7 @@ func (m *MockMetaAPIMetadataRepository) Get(id shared.ID) (*metadata.APIMetadata
 	return api, nil
 }
 
-func (m *MockMetaAPIMetadataRepository) Update(meta *metadata.APIMetadata) error {
-	if m.updateErr != nil {
-		return m.updateErr
-	}
-	m.apis[meta.ID] = meta
-	return nil
-}
-
-func (m *MockMetaAPIMetadataRepository) Delete(id shared.ID) error {
-	if m.deleteErr != nil {
-		return m.deleteErr
-	}
-	delete(m.apis, id)
-	return nil
-}
-
-func (m *MockMetaAPIMetadataRepository) ListByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
+func (m *MockMetaDataSourceRepository) ListAPIMetadataByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
 	result := make([]*metadata.APIMetadata, 0)
 	for _, api := range m.apis {
 		if api.DataSourceID == dataSourceID {
@@ -171,7 +132,7 @@ func (m *MockMetaAPIMetadataRepository) ListByDataSource(dataSourceID shared.ID)
 	return result, nil
 }
 
-func (m *MockMetaAPIMetadataRepository) ListByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
+func (m *MockMetaDataSourceRepository) ListAPIMetadataByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
 	result := make([]*metadata.APIMetadata, 0)
 	for _, api := range m.apis {
 		if api.CategoryID != nil && *api.CategoryID == categoryID {
@@ -181,29 +142,23 @@ func (m *MockMetaAPIMetadataRepository) ListByCategory(categoryID shared.ID) ([]
 	return result, nil
 }
 
-// MockTokenRepository is a mock implementation of metadata.TokenRepository.
-type MockTokenRepository struct {
-	tokens    map[shared.ID]*metadata.Token
-	createErr error
-	updateErr error
-	deleteErr error
+func (m *MockMetaDataSourceRepository) UpdateAPIMetadata(meta *metadata.APIMetadata) error {
+	m.apis[meta.ID] = meta
+	return nil
 }
 
-func NewMockTokenRepository() *MockTokenRepository {
-	return &MockTokenRepository{
-		tokens: make(map[shared.ID]*metadata.Token),
-	}
+func (m *MockMetaDataSourceRepository) DeleteAPIMetadata(id shared.ID) error {
+	delete(m.apis, id)
+	return nil
 }
 
-func (m *MockTokenRepository) Create(token *metadata.Token) error {
-	if m.createErr != nil {
-		return m.createErr
-	}
+// Child Entity Operations (Token)
+func (m *MockMetaDataSourceRepository) SetToken(token *metadata.Token) error {
 	m.tokens[token.ID] = token
 	return nil
 }
 
-func (m *MockTokenRepository) Get(id shared.ID) (*metadata.Token, error) {
+func (m *MockMetaDataSourceRepository) GetToken(id shared.ID) (*metadata.Token, error) {
 	token, exists := m.tokens[id]
 	if !exists {
 		return nil, nil
@@ -211,7 +166,7 @@ func (m *MockTokenRepository) Get(id shared.ID) (*metadata.Token, error) {
 	return token, nil
 }
 
-func (m *MockTokenRepository) GetByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
+func (m *MockMetaDataSourceRepository) GetTokenByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
 	for _, token := range m.tokens {
 		if token.DataSourceID == dataSourceID {
 			return token, nil
@@ -220,20 +175,35 @@ func (m *MockTokenRepository) GetByDataSource(dataSourceID shared.ID) (*metadata
 	return nil, nil
 }
 
-func (m *MockTokenRepository) Update(token *metadata.Token) error {
-	if m.updateErr != nil {
-		return m.updateErr
-	}
-	m.tokens[token.ID] = token
+func (m *MockMetaDataSourceRepository) DeleteToken(id shared.ID) error {
+	delete(m.tokens, id)
 	return nil
 }
 
-func (m *MockTokenRepository) Delete(id shared.ID) error {
-	if m.deleteErr != nil {
-		return m.deleteErr
-	}
-	delete(m.tokens, id)
-	return nil
+// Extended Query Operations
+func (m *MockMetaDataSourceRepository) FindBy(conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return m.List()
+}
+
+func (m *MockMetaDataSourceRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*metadata.DataSource, error) {
+	return m.List()
+}
+
+func (m *MockMetaDataSourceRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[metadata.DataSource], error) {
+	sources, _ := m.List()
+	return shared.NewPageResult(sources, int64(len(sources)), pagination), nil
+}
+
+func (m *MockMetaDataSourceRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[metadata.DataSource], error) {
+	return m.ListWithPagination(pagination)
+}
+
+func (m *MockMetaDataSourceRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	return int64(len(m.sources)), nil
+}
+
+func (m *MockMetaDataSourceRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return len(m.sources) > 0, nil
 }
 
 // MockDocumentParserFactory is a mock implementation of metadata.DocumentParserFactory.
@@ -287,13 +257,10 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -315,14 +282,11 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 	})
 
 	t.Run("Repository error", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		dsRepo.createErr = errors.New("create error")
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -342,16 +306,13 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		result, err := svc.GetDataSource(ctx, ds.ID)
 		if err != nil {
@@ -363,13 +324,10 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		_, err := svc.GetDataSource(ctx, shared.NewID())
 		if err == nil {
@@ -382,16 +340,13 @@ func TestMetadataApplicationService_UpdateDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		newName := "Tushare Pro"
 		newDesc := "Updated description"
@@ -410,13 +365,10 @@ func TestMetadataApplicationService_UpdateDataSource(t *testing.T) {
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		newName := "Updated"
 		err := svc.UpdateDataSource(ctx, shared.NewID(), contracts.UpdateDataSourceRequest{
@@ -432,16 +384,13 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteDataSource(ctx, ds.ID)
 		if err != nil {
@@ -455,10 +404,7 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 	})
 
 	t.Run("Deletes related entities", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -466,30 +412,37 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 
 		// Create related API and category
 		api := metadata.NewAPIMetadata(ds.ID, "daily", "日线行情", "日线数据", "/api/daily")
-		apiRepo.Create(api)
+		dsRepo.AddAPIMetadata(api)
 
 		cat := metadata.NewAPICategory(ds.ID, "股票数据", "股票相关数据", "/stock", nil, 1)
-		catRepo.Create(cat)
+		dsRepo.AddCategory(cat)
 
 		token := metadata.NewToken(ds.ID, "test-token", nil)
-		tokenRepo.Create(token)
+		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteDataSource(ctx, ds.ID)
 		if err != nil {
 			t.Fatalf("DeleteDataSource failed: %v", err)
 		}
 
-		// Verify related entities are deleted
-		apis, _ := apiRepo.ListByDataSource(ds.ID)
-		if len(apis) != 0 {
-			t.Error("Related APIs should be deleted")
+		// Verify data source is deleted
+		deleted, _ := dsRepo.Get(ds.ID)
+		if deleted != nil {
+			t.Error("Data source should be deleted")
 		}
+	})
 
-		cats, _ := catRepo.ListByDataSource(ds.ID)
-		if len(cats) != 0 {
-			t.Error("Related categories should be deleted")
+	t.Run("Not found", func(t *testing.T) {
+		dsRepo := NewMockMetaDataSourceRepository()
+		parserFactory := NewMockDocumentParserFactory()
+
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+
+		err := svc.DeleteDataSource(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent data source")
 		}
 	})
 }
@@ -497,10 +450,7 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 func TestMetadataApplicationService_ListDataSources(t *testing.T) {
 	ctx := context.Background()
 
-	dsRepo := NewMockDataSourceRepository()
-	catRepo := NewMockAPICategoryRepository()
-	apiRepo := NewMockMetaAPIMetadataRepository()
-	tokenRepo := NewMockTokenRepository()
+	dsRepo := NewMockMetaDataSourceRepository()
 	parserFactory := NewMockDocumentParserFactory()
 
 	// Create multiple data sources
@@ -509,7 +459,7 @@ func TestMetadataApplicationService_ListDataSources(t *testing.T) {
 		dsRepo.Create(ds)
 	}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	sources, err := svc.ListDataSources(ctx)
 	if err != nil {
@@ -524,16 +474,13 @@ func TestMetadataApplicationService_CreateAPIMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		req := contracts.CreateAPIMetadataRequest{
 			DataSourceID: ds.ID,
@@ -571,13 +518,10 @@ func TestMetadataApplicationService_CreateAPIMetadata(t *testing.T) {
 	})
 
 	t.Run("DataSource not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		req := contracts.CreateAPIMetadataRequest{
 			DataSourceID: shared.NewID(),
@@ -598,16 +542,13 @@ func TestMetadataApplicationService_GetAPIMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		api := metadata.NewAPIMetadata(shared.NewID(), "daily", "日线行情", "日线数据", "/api/daily")
-		apiRepo.Create(api)
+		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		result, err := svc.GetAPIMetadata(ctx, api.ID)
 		if err != nil {
@@ -619,13 +560,10 @@ func TestMetadataApplicationService_GetAPIMetadata(t *testing.T) {
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		_, err := svc.GetAPIMetadata(ctx, shared.NewID())
 		if err == nil {
@@ -638,16 +576,17 @@ func TestMetadataApplicationService_UpdateAPIMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		api := metadata.NewAPIMetadata(shared.NewID(), "daily", "日线行情", "日线数据", "/api/daily")
-		apiRepo.Create(api)
+		// API must have at least one response field for validation
+		api.SetResponseFields([]metadata.FieldMeta{
+			{Name: "ts_code", Type: "str", Description: "股票代码", IsPrimary: true},
+		})
+		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		newDisplayName := "每日行情"
 		newDesc := "更新后的描述"
@@ -659,20 +598,17 @@ func TestMetadataApplicationService_UpdateAPIMetadata(t *testing.T) {
 			t.Fatalf("UpdateAPIMetadata failed: %v", err)
 		}
 
-		updated, _ := apiRepo.Get(api.ID)
+		updated, _ := dsRepo.GetAPIMetadata(api.ID)
 		if updated.DisplayName != newDisplayName {
 			t.Errorf("Expected display name %s, got %s", newDisplayName, updated.DisplayName)
 		}
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		newDisplayName := "更新"
 		err := svc.UpdateAPIMetadata(ctx, shared.NewID(), contracts.UpdateAPIMetadataRequest{
@@ -688,36 +624,30 @@ func TestMetadataApplicationService_DeleteAPIMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		api := metadata.NewAPIMetadata(shared.NewID(), "daily", "日线行情", "日线数据", "/api/daily")
-		apiRepo.Create(api)
+		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteAPIMetadata(ctx, api.ID)
 		if err != nil {
 			t.Fatalf("DeleteAPIMetadata failed: %v", err)
 		}
 
-		deleted, _ := apiRepo.Get(api.ID)
+		deleted, _ := dsRepo.GetAPIMetadata(api.ID)
 		if deleted != nil {
 			t.Error("API metadata should be deleted")
 		}
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteAPIMetadata(ctx, shared.NewID())
 		if err == nil {
@@ -729,19 +659,16 @@ func TestMetadataApplicationService_DeleteAPIMetadata(t *testing.T) {
 func TestMetadataApplicationService_ListAPIMetadataByDataSource(t *testing.T) {
 	ctx := context.Background()
 
-	dsRepo := NewMockDataSourceRepository()
-	catRepo := NewMockAPICategoryRepository()
-	apiRepo := NewMockMetaAPIMetadataRepository()
-	tokenRepo := NewMockTokenRepository()
+	dsRepo := NewMockMetaDataSourceRepository()
 	parserFactory := NewMockDocumentParserFactory()
 
 	dsID := shared.NewID()
 	for i := 0; i < 3; i++ {
 		api := metadata.NewAPIMetadata(dsID, "api", "API", "API Desc", "/api")
-		apiRepo.Create(api)
+		dsRepo.AddAPIMetadata(api)
 	}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 	apis, err := svc.ListAPIMetadataByDataSource(ctx, dsID)
 	if err != nil {
@@ -756,10 +683,7 @@ func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 
 		mockParser := &MockDocumentParser{
 			categories: []metadata.APICategory{
@@ -773,7 +697,7 @@ func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		result, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
 			DataSourceID: ds.ID,
@@ -789,13 +713,10 @@ func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 	})
 
 	t.Run("DataSource not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		_, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
 			DataSourceID: shared.NewID(),
@@ -812,16 +733,13 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Create new token", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: ds.ID,
@@ -831,7 +749,7 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 			t.Fatalf("SaveToken failed: %v", err)
 		}
 
-		token, _ := tokenRepo.GetByDataSource(ds.ID)
+		token, _ := dsRepo.GetTokenByDataSource(ds.ID)
 		if token == nil {
 			t.Fatal("Token should be created")
 		}
@@ -841,10 +759,7 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 	})
 
 	t.Run("Update existing token", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -852,9 +767,9 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 
 		// Create existing token
 		existingToken := metadata.NewToken(ds.ID, "old-token", nil)
-		tokenRepo.Create(existingToken)
+		dsRepo.SetToken(existingToken)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: ds.ID,
@@ -864,20 +779,17 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 			t.Fatalf("SaveToken failed: %v", err)
 		}
 
-		token, _ := tokenRepo.GetByDataSource(ds.ID)
+		token, _ := dsRepo.GetTokenByDataSource(ds.ID)
 		if token.TokenValue != "updated-token" {
 			t.Errorf("Expected token value 'updated-token', got %s", token.TokenValue)
 		}
 	})
 
 	t.Run("DataSource not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: shared.NewID(),
@@ -893,17 +805,14 @@ func TestMetadataApplicationService_GetToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		dsID := shared.NewID()
 		token := metadata.NewToken(dsID, "test-token", nil)
-		tokenRepo.Create(token)
+		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		result, err := svc.GetToken(ctx, dsID)
 		if err != nil {
@@ -915,13 +824,10 @@ func TestMetadataApplicationService_GetToken(t *testing.T) {
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		_, err := svc.GetToken(ctx, shared.NewID())
 		if err == nil {
@@ -934,37 +840,31 @@ func TestMetadataApplicationService_DeleteToken(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
 		dsID := shared.NewID()
 		token := metadata.NewToken(dsID, "test-token", nil)
-		tokenRepo.Create(token)
+		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteToken(ctx, dsID)
 		if err != nil {
 			t.Fatalf("DeleteToken failed: %v", err)
 		}
 
-		deleted, _ := tokenRepo.GetByDataSource(dsID)
+		deleted, _ := dsRepo.GetTokenByDataSource(dsID)
 		if deleted != nil {
 			t.Error("Token should be deleted")
 		}
 	})
 
 	t.Run("Not found", func(t *testing.T) {
-		dsRepo := NewMockDataSourceRepository()
-		catRepo := NewMockAPICategoryRepository()
-		apiRepo := NewMockMetaAPIMetadataRepository()
-		tokenRepo := NewMockTokenRepository()
+		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, catRepo, apiRepo, tokenRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
 
 		err := svc.DeleteToken(ctx, shared.NewID())
 		if err == nil {
