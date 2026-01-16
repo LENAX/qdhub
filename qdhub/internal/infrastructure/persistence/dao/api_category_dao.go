@@ -81,7 +81,7 @@ func (d *APICategoryDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // ListByDataSource retrieves all API categories for a data source.
 func (d *APICategoryDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) ([]*metadata.APICategory, error) {
-	query := `SELECT * FROM api_categories WHERE data_source_id = ? ORDER BY sort_order`
+	query := d.DB().Rebind(`SELECT * FROM api_categories WHERE data_source_id = ? ORDER BY sort_order`)
 	var rows []*APICategoryRow
 
 	var err error
@@ -104,7 +104,7 @@ func (d *APICategoryDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) (
 
 // DeleteByDataSource deletes all API categories for a data source.
 func (d *APICategoryDAO) DeleteByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) error {
-	query := `DELETE FROM api_categories WHERE data_source_id = ?`
+	query := d.DB().Rebind(`DELETE FROM api_categories WHERE data_source_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, dataSourceID.String())

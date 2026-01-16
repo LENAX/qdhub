@@ -1,10 +1,11 @@
-// Package application contains application service implementations.
-package application
+// Package impl contains application service implementations.
+package impl
 
 import (
 	"context"
 	"fmt"
 
+	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 )
@@ -12,7 +13,6 @@ import (
 // WorkflowApplicationServiceImpl implements WorkflowApplicationService.
 type WorkflowApplicationServiceImpl struct {
 	workflowDefRepo   workflow.WorkflowDefinitionRepository
-	workflowInstRepo  workflow.WorkflowInstanceRepository
 	taskEngineAdapter workflow.TaskEngineAdapter
 	workflowValidator workflow.WorkflowValidator
 	progressCalc      workflow.ProgressCalculator
@@ -21,12 +21,10 @@ type WorkflowApplicationServiceImpl struct {
 // NewWorkflowApplicationService creates a new WorkflowApplicationService implementation.
 func NewWorkflowApplicationService(
 	workflowDefRepo workflow.WorkflowDefinitionRepository,
-	workflowInstRepo workflow.WorkflowInstanceRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
-) WorkflowApplicationService {
+) contracts.WorkflowApplicationService {
 	return &WorkflowApplicationServiceImpl{
 		workflowDefRepo:   workflowDefRepo,
-		workflowInstRepo:  workflowInstRepo,
 		taskEngineAdapter: taskEngineAdapter,
 		workflowValidator: workflow.NewWorkflowValidator(),
 		progressCalc:      workflow.NewProgressCalculator(),
@@ -36,7 +34,7 @@ func NewWorkflowApplicationService(
 // ==================== Workflow Definition Management ====================
 
 // CreateWorkflowDefinition creates a new workflow definition.
-func (s *WorkflowApplicationServiceImpl) CreateWorkflowDefinition(ctx context.Context, req CreateWorkflowDefinitionRequest) (*workflow.WorkflowDefinition, error) {
+func (s *WorkflowApplicationServiceImpl) CreateWorkflowDefinition(ctx context.Context, req contracts.CreateWorkflowDefinitionRequest) (*workflow.WorkflowDefinition, error) {
 	// Create domain entity
 	def := workflow.NewWorkflowDefinition(
 		req.Name,
@@ -79,7 +77,7 @@ func (s *WorkflowApplicationServiceImpl) GetWorkflowDefinition(ctx context.Conte
 }
 
 // UpdateWorkflowDefinition updates a workflow definition.
-func (s *WorkflowApplicationServiceImpl) UpdateWorkflowDefinition(ctx context.Context, id shared.ID, req UpdateWorkflowDefinitionRequest) error {
+func (s *WorkflowApplicationServiceImpl) UpdateWorkflowDefinition(ctx context.Context, id shared.ID, req contracts.UpdateWorkflowDefinitionRequest) error {
 	def, err := s.workflowDefRepo.Get(id.String())
 	if err != nil {
 		return fmt.Errorf("failed to get workflow definition: %w", err)
@@ -89,7 +87,7 @@ func (s *WorkflowApplicationServiceImpl) UpdateWorkflowDefinition(ctx context.Co
 	}
 
 	// Check for running instances
-	instances, err := s.workflowInstRepo.GetByWorkflowDef(id.String())
+	instances, err := s.workflowDefRepo.GetInstancesByDef(id.String())
 	if err != nil {
 		return fmt.Errorf("failed to check running instances: %w", err)
 	}
@@ -139,7 +137,7 @@ func (s *WorkflowApplicationServiceImpl) DeleteWorkflowDefinition(ctx context.Co
 	}
 
 	// Check for running instances
-	instances, err := s.workflowInstRepo.GetByWorkflowDef(id.String())
+	instances, err := s.workflowDefRepo.GetInstancesByDef(id.String())
 	if err != nil {
 		return fmt.Errorf("failed to check running instances: %w", err)
 	}
@@ -213,7 +211,7 @@ func (s *WorkflowApplicationServiceImpl) DisableWorkflow(ctx context.Context, id
 	}
 
 	// Check for running instances
-	instances, err := s.workflowInstRepo.GetByWorkflowDef(id.String())
+	instances, err := s.workflowDefRepo.GetInstancesByDef(id.String())
 	if err != nil {
 		return fmt.Errorf("failed to check running instances: %w", err)
 	}
@@ -235,7 +233,7 @@ func (s *WorkflowApplicationServiceImpl) DisableWorkflow(ctx context.Context, id
 // ==================== Workflow Execution ====================
 
 // ExecuteWorkflow executes a workflow definition.
-func (s *WorkflowApplicationServiceImpl) ExecuteWorkflow(ctx context.Context, req ExecuteWorkflowRequest) (shared.ID, error) {
+func (s *WorkflowApplicationServiceImpl) ExecuteWorkflow(ctx context.Context, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
 	// Get workflow definition
 	def, err := s.workflowDefRepo.Get(req.WorkflowDefID.String())
 	if err != nil {
@@ -266,7 +264,7 @@ func (s *WorkflowApplicationServiceImpl) ExecuteWorkflow(ctx context.Context, re
 
 // GetWorkflowInstance retrieves a workflow instance by ID.
 func (s *WorkflowApplicationServiceImpl) GetWorkflowInstance(ctx context.Context, id shared.ID) (*workflow.WorkflowInstance, error) {
-	inst, err := s.workflowInstRepo.Get(id.String())
+	inst, err := s.workflowDefRepo.GetInstance(id.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow instance: %w", err)
 	}
@@ -278,7 +276,7 @@ func (s *WorkflowApplicationServiceImpl) GetWorkflowInstance(ctx context.Context
 
 // ListWorkflowInstances lists all instances for a workflow definition.
 func (s *WorkflowApplicationServiceImpl) ListWorkflowInstances(ctx context.Context, workflowDefID shared.ID, status *workflow.WfInstStatus) ([]*workflow.WorkflowInstance, error) {
-	instances, err := s.workflowInstRepo.GetByWorkflowDef(workflowDefID.String())
+	instances, err := s.workflowDefRepo.GetInstancesByDef(workflowDefID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workflow instances: %w", err)
 	}
@@ -310,17 +308,25 @@ func (s *WorkflowApplicationServiceImpl) GetWorkflowStatus(ctx context.Context, 
 
 // ==================== Instance Control ====================
 
+func getWorkflowInstance(repo workflow.WorkflowDefinitionRepository, instanceID shared.ID) (*workflow.WorkflowInstance, error) {
+	instSlice, err := repo.GetInstancesByDef(instanceID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow instance: %w", err)
+	}
+	if len(instSlice) == 0 {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
+	}
+	return instSlice[0], nil
+}
+
 // PauseWorkflow pauses a running workflow instance.
 func (s *WorkflowApplicationServiceImpl) PauseWorkflow(ctx context.Context, instanceID shared.ID) error {
-	inst, err := s.workflowInstRepo.Get(instanceID.String())
+	inst, err := getWorkflowInstance(s.workflowDefRepo, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get workflow instance: %w", err)
-	}
-	if inst == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
+		return err
 	}
 
-	if inst.Status != "Running" {
+	if workflow.WfInstStatus(inst.Status) != workflow.WfInstStatusRunning {
 		return shared.NewDomainError(shared.ErrCodeInvalidState, "can only pause running instances", nil)
 	}
 
@@ -333,15 +339,12 @@ func (s *WorkflowApplicationServiceImpl) PauseWorkflow(ctx context.Context, inst
 
 // ResumeWorkflow resumes a paused workflow instance.
 func (s *WorkflowApplicationServiceImpl) ResumeWorkflow(ctx context.Context, instanceID shared.ID) error {
-	inst, err := s.workflowInstRepo.Get(instanceID.String())
+	inst, err := getWorkflowInstance(s.workflowDefRepo, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get workflow instance: %w", err)
-	}
-	if inst == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
+		return err
 	}
 
-	if inst.Status != "Paused" {
+	if workflow.WfInstStatus(inst.Status) != workflow.WfInstStatusPaused {
 		return shared.NewDomainError(shared.ErrCodeInvalidState, "can only resume paused instances", nil)
 	}
 
@@ -354,16 +357,13 @@ func (s *WorkflowApplicationServiceImpl) ResumeWorkflow(ctx context.Context, ins
 
 // CancelWorkflow cancels a workflow instance.
 func (s *WorkflowApplicationServiceImpl) CancelWorkflow(ctx context.Context, instanceID shared.ID) error {
-	inst, err := s.workflowInstRepo.Get(instanceID.String())
+	inst, err := getWorkflowInstance(s.workflowDefRepo, instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to get workflow instance: %w", err)
-	}
-	if inst == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
+		return err
 	}
 
 	// Can only cancel non-terminal instances
-	if inst.Status == "Success" || inst.Status == "Failed" || inst.Status == "Terminated" {
+	if workflow.WfInstStatus(inst.Status) == workflow.WfInstStatusSuccess || workflow.WfInstStatus(inst.Status) == workflow.WfInstStatusFailed || workflow.WfInstStatus(inst.Status) == workflow.WfInstStatusCancelled {
 		return shared.NewDomainError(shared.ErrCodeInvalidState, "instance is already in terminal state", nil)
 	}
 
@@ -385,7 +385,7 @@ func (s *WorkflowApplicationServiceImpl) SyncWithEngine(ctx context.Context, ins
 	}
 
 	// Get local instance
-	inst, err := s.workflowInstRepo.Get(instanceID.String())
+	inst, err := s.workflowDefRepo.GetInstance(instanceID.String())
 	if err != nil {
 		return fmt.Errorf("failed to get workflow instance: %w", err)
 	}
@@ -395,7 +395,7 @@ func (s *WorkflowApplicationServiceImpl) SyncWithEngine(ctx context.Context, ins
 
 	// Update local status
 	inst.Status = status.Status
-	if err := s.workflowInstRepo.Update(inst); err != nil {
+	if err := s.workflowDefRepo.UpdateInstance(inst); err != nil {
 		return fmt.Errorf("failed to update workflow instance: %w", err)
 	}
 
@@ -411,7 +411,7 @@ func (s *WorkflowApplicationServiceImpl) SyncAllInstances(ctx context.Context) e
 	}
 
 	for _, def := range defs {
-		instances, err := s.workflowInstRepo.GetByWorkflowDef(def.ID())
+		instances, err := s.workflowDefRepo.GetInstancesByDef(def.ID())
 		if err != nil {
 			continue // Skip on error
 		}

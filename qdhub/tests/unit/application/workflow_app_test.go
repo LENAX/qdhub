@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"qdhub/internal/application"
+	"qdhub/internal/application/contracts"
+	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 )
@@ -17,12 +18,11 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		req := application.CreateWorkflowDefinitionRequest{
+		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
 			Category:       workflow.WfCategorySync,
@@ -44,12 +44,11 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 
 	t.Run("Invalid YAML", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		req := application.CreateWorkflowDefinitionRequest{
+		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
 			Category:       workflow.WfCategorySync,
@@ -62,6 +61,27 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 			t.Fatal("Expected error for empty YAML")
 		}
 	})
+
+	t.Run("Repository error", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		wfDefRepo.createErr = errors.New("create error")
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		req := contracts.CreateWorkflowDefinitionRequest{
+			Name:           "Test Workflow",
+			Description:    "A test workflow",
+			Category:       workflow.WfCategorySync,
+			DefinitionYAML: "name: test\ntasks: []",
+			IsSystem:       false,
+		}
+
+		_, err := svc.CreateWorkflowDefinition(ctx, req)
+		if err == nil {
+			t.Fatal("Expected error for repository failure")
+		}
+	})
 }
 
 func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
@@ -69,13 +89,12 @@ func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		result, err := svc.GetWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -88,10 +107,9 @@ func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		_, err := svc.GetWorkflowDefinition(ctx, shared.NewID())
 		if err == nil {
@@ -105,16 +123,15 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		newName := "Updated Name"
-		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), application.UpdateWorkflowDefinitionRequest{
+		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), contracts.UpdateWorkflowDefinitionRequest{
 			Name: &newName,
 		})
 		if err != nil {
@@ -129,7 +146,6 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 
 	t.Run("Cannot update with running instances", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
@@ -138,16 +154,31 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 		// Create a running instance
 		inst := workflow.NewWorkflowInstance(def.ID())
 		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		newName := "Updated Name"
-		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), application.UpdateWorkflowDefinitionRequest{
+		err := svc.UpdateWorkflowDefinition(ctx, shared.ID(def.ID()), contracts.UpdateWorkflowDefinitionRequest{
 			Name: &newName,
 		})
 		if err == nil {
 			t.Fatal("Expected error when updating with running instances")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		newName := "Updated Name"
+		err := svc.UpdateWorkflowDefinition(ctx, shared.NewID(), contracts.UpdateWorkflowDefinitionRequest{
+			Name: &newName,
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent definition")
 		}
 	})
 }
@@ -157,13 +188,12 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.DeleteWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -178,7 +208,6 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 
 	t.Run("Cannot delete with running instances", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
@@ -187,13 +216,25 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 		// Create a running instance
 		inst := workflow.NewWorkflowInstance(def.ID())
 		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.DeleteWorkflowDefinition(ctx, shared.ID(def.ID()))
 		if err == nil {
 			t.Fatal("Expected error when deleting with running instances")
+		}
+	})
+
+	t.Run("Not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		err := svc.DeleteWorkflowDefinition(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent definition")
 		}
 	})
 }
@@ -203,7 +244,6 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 
 	t.Run("List all", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create multiple definitions
@@ -212,7 +252,7 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 			wfDefRepo.Create(def)
 		}
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		defs, err := svc.ListWorkflowDefinitions(ctx, nil)
 		if err != nil {
@@ -225,7 +265,6 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 
 	t.Run("Filter by category", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create definitions with different categories
@@ -235,7 +274,7 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 		metaDef := workflow.NewWorkflowDefinition("Meta", "Desc", workflow.WfCategoryMetadata, "yaml: test", false)
 		wfDefRepo.Create(metaDef)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		syncCategory := workflow.WfCategorySync
 		defs, err := svc.ListWorkflowDefinitions(ctx, &syncCategory)
@@ -253,13 +292,12 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 
 	t.Run("Enable workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.EnableWorkflow(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -274,14 +312,13 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 
 	t.Run("Disable workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.DisableWorkflow(ctx, shared.ID(def.ID()))
 		if err != nil {
@@ -296,7 +333,6 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 
 	t.Run("Cannot disable with running instances", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
@@ -306,13 +342,25 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		// Create a running instance
 		inst := workflow.NewWorkflowInstance(def.ID())
 		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.DisableWorkflow(ctx, shared.ID(def.ID()))
 		if err == nil {
 			t.Fatal("Expected error when disabling with running instances")
+		}
+	})
+
+	t.Run("Enable not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		err := svc.EnableWorkflow(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent definition")
 		}
 	})
 }
@@ -322,16 +370,15 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		instID, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		instID, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 			TriggerParams: map[string]interface{}{"key": "value"},
@@ -346,7 +393,6 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 	t.Run("Cannot execute disabled workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
@@ -354,9 +400,9 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		def.Disable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		_, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 		})
@@ -367,7 +413,6 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 	t.Run("Task engine submit error", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 		adapter.submitErr = errors.New("task engine error")
 
@@ -375,14 +420,29 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		def.Enable()
 		wfDefRepo.Create(def)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		_, err := svc.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
 			TriggerType:   workflow.TriggerTypeManual,
 		})
 		if err == nil {
 			t.Fatal("Expected error when task engine fails")
+		}
+	})
+
+	t.Run("Workflow definition not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
+			WorkflowDefID: shared.NewID(),
+			TriggerType:   workflow.TriggerTypeManual,
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent workflow definition")
 		}
 	})
 }
@@ -392,13 +452,12 @@ func TestWorkflowApplicationService_GetWorkflowInstance(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		inst := workflow.NewWorkflowInstance("wf-id")
-		wfInstRepo.Create(inst)
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		result, err := svc.GetWorkflowInstance(ctx, shared.ID(inst.ID))
 		if err != nil {
@@ -411,10 +470,9 @@ func TestWorkflowApplicationService_GetWorkflowInstance(t *testing.T) {
 
 	t.Run("Not found", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		_, err := svc.GetWorkflowInstance(ctx, shared.NewID())
 		if err == nil {
@@ -428,7 +486,6 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 
 	t.Run("List all for workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		wfID := "test-workflow-id"
@@ -436,10 +493,10 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 		// Create multiple instances
 		for i := 0; i < 3; i++ {
 			inst := workflow.NewWorkflowInstance(wfID)
-			wfInstRepo.Create(inst)
+			wfDefRepo.AddInstance(inst)
 		}
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		instances, err := svc.ListWorkflowInstances(ctx, shared.ID(wfID), nil)
 		if err != nil {
@@ -452,7 +509,6 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 
 	t.Run("Filter by status", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
 		wfID := "test-workflow-id"
@@ -460,13 +516,13 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 		// Create instances with different statuses
 		runningInst := workflow.NewWorkflowInstance(wfID)
 		runningInst.Status = "Running"
-		wfInstRepo.Create(runningInst)
+		wfDefRepo.AddInstance(runningInst)
 
 		successInst := workflow.NewWorkflowInstance(wfID)
 		successInst.Status = "Success"
-		wfInstRepo.Create(successInst)
+		wfDefRepo.AddInstance(successInst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		runningStatus := workflow.WfInstStatusRunning
 		instances, err := svc.ListWorkflowInstances(ctx, shared.ID(wfID), &runningStatus)
@@ -484,16 +540,18 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Pause workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		// Note: getWorkflowInstance uses GetInstancesByDef(instanceID), so WorkflowID should match instanceID
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.PauseWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.PauseWorkflow(ctx, shared.ID(instID))
 		if err != nil {
 			t.Fatalf("PauseWorkflow failed: %v", err)
 		}
@@ -501,16 +559,17 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Cannot pause non-running instance", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Success"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusSuccess) // "success"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.PauseWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.PauseWorkflow(ctx, shared.ID(instID))
 		if err == nil {
 			t.Fatal("Expected error when pausing non-running instance")
 		}
@@ -518,16 +577,17 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Resume workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Paused"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusPaused) // "paused"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.ResumeWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.ResumeWorkflow(ctx, shared.ID(instID))
 		if err != nil {
 			t.Fatalf("ResumeWorkflow failed: %v", err)
 		}
@@ -535,16 +595,17 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Cannot resume non-paused instance", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.ResumeWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.ResumeWorkflow(ctx, shared.ID(instID))
 		if err == nil {
 			t.Fatal("Expected error when resuming non-paused instance")
 		}
@@ -552,16 +613,17 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Cancel workflow", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.CancelWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.CancelWorkflow(ctx, shared.ID(instID))
 		if err != nil {
 			t.Fatalf("CancelWorkflow failed: %v", err)
 		}
@@ -569,16 +631,17 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 
 	t.Run("Cannot cancel terminal instance", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		inst := workflow.NewWorkflowInstance("wf-id")
-		inst.Status = "Success"
-		wfInstRepo.Create(inst)
+		instID := "test-instance-id"
+		inst := workflow.NewWorkflowInstance(instID)
+		inst.ID = instID
+		inst.Status = string(workflow.WfInstStatusSuccess) // "success"
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		err := svc.CancelWorkflow(ctx, shared.ID(inst.ID))
+		err := svc.CancelWorkflow(ctx, shared.ID(instID))
 		if err == nil {
 			t.Fatal("Expected error when cancelling terminal instance")
 		}
@@ -589,7 +652,6 @@ func TestWorkflowApplicationService_GetWorkflowStatus(t *testing.T) {
 	ctx := context.Background()
 
 	wfDefRepo := NewMockWorkflowDefinitionRepository()
-	wfInstRepo := NewMockWorkflowInstanceRepository()
 	adapter := NewMockTaskEngineAdapter()
 	adapter.instanceStatus = &workflow.WorkflowStatus{
 		InstanceID:    "test-id",
@@ -600,7 +662,7 @@ func TestWorkflowApplicationService_GetWorkflowStatus(t *testing.T) {
 		FailedTask:    0,
 	}
 
-	svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+	svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 	status, err := svc.GetWorkflowStatus(ctx, shared.ID("test-id"))
 	if err != nil {
@@ -616,7 +678,6 @@ func TestWorkflowApplicationService_SyncWithEngine(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
-		wfInstRepo := NewMockWorkflowInstanceRepository()
 		adapter := NewMockTaskEngineAdapter()
 		adapter.instanceStatus = &workflow.WorkflowStatus{
 			InstanceID: "test-id",
@@ -626,18 +687,30 @@ func TestWorkflowApplicationService_SyncWithEngine(t *testing.T) {
 		inst := workflow.NewWorkflowInstance("wf-id")
 		inst.ID = "test-id"
 		inst.Status = "Running"
-		wfInstRepo.Create(inst)
+		wfDefRepo.AddInstance(inst)
 
-		svc := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
 		err := svc.SyncWithEngine(ctx, shared.ID(inst.ID))
 		if err != nil {
 			t.Fatalf("SyncWithEngine failed: %v", err)
 		}
 
-		updated, _ := wfInstRepo.Get(inst.ID)
+		updated, _ := wfDefRepo.GetInstance(inst.ID)
 		if updated.Status != "Success" {
 			t.Errorf("Expected status Success, got %s", updated.Status)
+		}
+	})
+
+	t.Run("Instance not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		err := svc.SyncWithEngine(ctx, shared.NewID())
+		if err == nil {
+			t.Fatal("Expected error for non-existent instance")
 		}
 	})
 }

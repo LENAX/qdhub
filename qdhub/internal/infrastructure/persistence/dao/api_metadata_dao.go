@@ -90,7 +90,7 @@ func (d *APIMetadataDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // ListByDataSource retrieves all API metadata for a data source.
 func (d *APIMetadataDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
-	query := `SELECT * FROM api_metadata WHERE data_source_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM api_metadata WHERE data_source_id = ?`)
 	var rows []*APIMetadataRow
 
 	var err error
@@ -117,7 +117,7 @@ func (d *APIMetadataDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) (
 
 // ListByCategory retrieves all API metadata for a category.
 func (d *APIMetadataDAO) ListByCategory(tx *sqlx.Tx, categoryID shared.ID) ([]*metadata.APIMetadata, error) {
-	query := `SELECT * FROM api_metadata WHERE category_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM api_metadata WHERE category_id = ?`)
 	var rows []*APIMetadataRow
 
 	var err error
@@ -144,7 +144,7 @@ func (d *APIMetadataDAO) ListByCategory(tx *sqlx.Tx, categoryID shared.ID) ([]*m
 
 // DeleteByDataSource deletes all API metadata for a data source.
 func (d *APIMetadataDAO) DeleteByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) error {
-	query := `DELETE FROM api_metadata WHERE data_source_id = ?`
+	query := d.DB().Rebind(`DELETE FROM api_metadata WHERE data_source_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, dataSourceID.String())

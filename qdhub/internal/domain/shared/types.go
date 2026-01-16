@@ -121,3 +121,14 @@ const (
 	ErrCodeConflict     = "CONFLICT"
 	ErrCodeInvalidState = "INVALID_STATE"
 )
+
+// IsNotFoundError checks if the error is a not found error.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if domainErr, ok := err.(*DomainError); ok {
+		return domainErr.Code == ErrCodeNotFound
+	}
+	return false
+}

@@ -55,7 +55,7 @@ func (d *TokenDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*metadata.Token, error) {
 
 // GetByDataSource retrieves a token by data source ID.
 func (d *TokenDAO) GetByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) (*metadata.Token, error) {
-	query := `SELECT * FROM tokens WHERE data_source_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM tokens WHERE data_source_id = ?`)
 	var row TokenRow
 
 	var err error
@@ -102,7 +102,7 @@ func (d *TokenDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // DeleteByDataSource deletes a token by data source ID.
 func (d *TokenDAO) DeleteByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) error {
-	query := `DELETE FROM tokens WHERE data_source_id = ?`
+	query := d.DB().Rebind(`DELETE FROM tokens WHERE data_source_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, dataSourceID.String())

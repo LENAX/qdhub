@@ -95,7 +95,7 @@ func (d *DataTypeMappingRuleDAO) ListAll(tx *sqlx.Tx) ([]*datastore.DataTypeMapp
 
 // GetBySourceAndTarget retrieves rules by source and target types, ordered by priority descending.
 func (d *DataTypeMappingRuleDAO) GetBySourceAndTarget(tx *sqlx.Tx, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error) {
-	query := `SELECT * FROM data_type_mapping_rules WHERE data_source_type = ? AND target_db_type = ? ORDER BY priority DESC`
+	query := d.DB().Rebind(`SELECT * FROM data_type_mapping_rules WHERE data_source_type = ? AND target_db_type = ? ORDER BY priority DESC`)
 	var rows []*DataTypeMappingRuleRow
 
 	var err error

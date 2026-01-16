@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -96,48 +97,123 @@ func (r *QuantDataStoreRepositoryImpl) List() ([]*datastore.QuantDataStore, erro
 	return r.dataStoreDAO.ListAll(nil)
 }
 
-// TableSchemaRepositoryImpl implements datastore.TableSchemaRepository.
-type TableSchemaRepositoryImpl struct {
-	db             *persistence.DB
-	tableSchemaDAO *dao.TableSchemaDAO
-}
+// ==================== Child Entity Operations (TableSchema) ====================
 
-// NewTableSchemaRepository creates a new TableSchemaRepositoryImpl.
-func NewTableSchemaRepository(db *persistence.DB) *TableSchemaRepositoryImpl {
-	return &TableSchemaRepositoryImpl{
-		db:             db,
-		tableSchemaDAO: dao.NewTableSchemaDAO(db.DB),
-	}
-}
-
-// Create creates a new table schema.
-func (r *TableSchemaRepositoryImpl) Create(schema *datastore.TableSchema) error {
+// AddSchema adds a new TableSchema to a QuantDataStore.
+func (r *QuantDataStoreRepositoryImpl) AddSchema(schema *datastore.TableSchema) error {
 	return r.tableSchemaDAO.Create(nil, schema)
 }
 
-// Get retrieves a table schema by ID.
-func (r *TableSchemaRepositoryImpl) Get(id shared.ID) (*datastore.TableSchema, error) {
+// GetSchema retrieves a TableSchema by ID.
+func (r *QuantDataStoreRepositoryImpl) GetSchema(id shared.ID) (*datastore.TableSchema, error) {
 	return r.tableSchemaDAO.GetByID(nil, id)
 }
 
-// GetByDataStore retrieves all table schemas for a data store.
-func (r *TableSchemaRepositoryImpl) GetByDataStore(dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
-	return r.tableSchemaDAO.GetByDataStore(nil, dataStoreID)
-}
-
-// GetByAPIMetadata retrieves a table schema by API metadata ID.
-func (r *TableSchemaRepositoryImpl) GetByAPIMetadata(apiMetadataID shared.ID) (*datastore.TableSchema, error) {
+// GetSchemaByAPIMetadata retrieves a TableSchema by API metadata ID.
+func (r *QuantDataStoreRepositoryImpl) GetSchemaByAPIMetadata(apiMetadataID shared.ID) (*datastore.TableSchema, error) {
 	return r.tableSchemaDAO.GetByAPIMetadata(nil, apiMetadataID)
 }
 
-// Update updates a table schema.
-func (r *TableSchemaRepositoryImpl) Update(schema *datastore.TableSchema) error {
+// GetSchemasByDataStore retrieves all TableSchemas for a QuantDataStore.
+func (r *QuantDataStoreRepositoryImpl) GetSchemasByDataStore(dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
+	return r.tableSchemaDAO.GetByDataStore(nil, dataStoreID)
+}
+
+// UpdateSchema updates a TableSchema.
+func (r *QuantDataStoreRepositoryImpl) UpdateSchema(schema *datastore.TableSchema) error {
 	return r.tableSchemaDAO.Update(nil, schema)
 }
 
-// Delete deletes a table schema.
-func (r *TableSchemaRepositoryImpl) Delete(id shared.ID) error {
+// DeleteSchema deletes a TableSchema by ID.
+func (r *QuantDataStoreRepositoryImpl) DeleteSchema(id shared.ID) error {
 	return r.tableSchemaDAO.DeleteByID(nil, id)
+}
+
+// ==================== Extended Query Operations ====================
+
+// FindBy retrieves entities matching the given conditions.
+func (r *QuantDataStoreRepositoryImpl) FindBy(conditions ...shared.QueryCondition) ([]*datastore.QuantDataStore, error) {
+	return r.findByInternal(nil, nil, conditions...)
+}
+
+// FindByWithOrder retrieves entities matching conditions with ordering.
+func (r *QuantDataStoreRepositoryImpl) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*datastore.QuantDataStore, error) {
+	return r.findByInternal(orderBy, nil, conditions...)
+}
+
+// ListWithPagination retrieves entities with pagination.
+func (r *QuantDataStoreRepositoryImpl) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[datastore.QuantDataStore], error) {
+	return r.FindByWithPagination(pagination)
+}
+
+// FindByWithPagination retrieves entities matching conditions with pagination.
+func (r *QuantDataStoreRepositoryImpl) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[datastore.QuantDataStore], error) {
+	total, err := r.Count(conditions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count entities: %w", err)
+	}
+
+	items, err := r.findByInternal(nil, &pagination, conditions...)
+	if err != nil {
+		return nil, err
+	}
+
+	return shared.NewPageResult(items, total, pagination), nil
+}
+
+// Count returns the total count of entities matching conditions.
+func (r *QuantDataStoreRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM quant_data_stores%s", whereClause)
+
+	var count int64
+	err := r.db.DB.Get(&count, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count quant_data_stores: %w", err)
+	}
+	return count, nil
+}
+
+// Exists checks if any entity matching conditions exists.
+func (r *QuantDataStoreRepositoryImpl) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	count, err := r.Count(conditions...)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *QuantDataStoreRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagination *shared.Pagination, conditions ...shared.QueryCondition) ([]*datastore.QuantDataStore, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	orderClause := buildOrderClause(orderBy)
+	limitClause := buildLimitClause(pagination)
+
+	query := fmt.Sprintf("SELECT * FROM quant_data_stores%s%s%s", whereClause, orderClause, limitClause)
+
+	var rows []dao.QuantDataStoreRow
+	err := r.db.DB.Select(&rows, query, args...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []*datastore.QuantDataStore{}, nil
+		}
+		return nil, fmt.Errorf("failed to find quant_data_stores: %w", err)
+	}
+
+	entities := make([]*datastore.QuantDataStore, len(rows))
+	for i, row := range rows {
+		entities[i] = &datastore.QuantDataStore{
+			ID:          shared.ID(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			Type:        datastore.DataStoreType(row.Type),
+			DSN:         row.DSN,
+			StoragePath: row.StoragePath,
+			Status:      shared.Status(row.Status),
+			CreatedAt:   shared.Timestamp(row.CreatedAt),
+			UpdatedAt:   shared.Timestamp(row.UpdatedAt),
+		}
+	}
+	return entities, nil
 }
 
 // DataTypeMappingRuleRepositoryImpl implements datastore.DataTypeMappingRuleRepository.
@@ -203,4 +279,91 @@ func (r *DataTypeMappingRuleRepositoryImpl) Update(rule *datastore.DataTypeMappi
 // Delete deletes a rule by ID.
 func (r *DataTypeMappingRuleRepositoryImpl) Delete(id shared.ID) error {
 	return r.mappingRuleDAO.DeleteByID(nil, id)
+}
+
+// ==================== Extended Query Operations ====================
+
+// FindBy retrieves entities matching the given conditions.
+func (r *DataTypeMappingRuleRepositoryImpl) FindBy(conditions ...shared.QueryCondition) ([]*datastore.DataTypeMappingRule, error) {
+	return r.findByInternal(nil, nil, conditions...)
+}
+
+// FindByWithOrder retrieves entities matching conditions with ordering.
+func (r *DataTypeMappingRuleRepositoryImpl) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*datastore.DataTypeMappingRule, error) {
+	return r.findByInternal(orderBy, nil, conditions...)
+}
+
+// ListWithPagination retrieves entities with pagination.
+func (r *DataTypeMappingRuleRepositoryImpl) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[datastore.DataTypeMappingRule], error) {
+	return r.FindByWithPagination(pagination)
+}
+
+// FindByWithPagination retrieves entities matching conditions with pagination.
+func (r *DataTypeMappingRuleRepositoryImpl) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[datastore.DataTypeMappingRule], error) {
+	total, err := r.Count(conditions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count entities: %w", err)
+	}
+
+	items, err := r.findByInternal(nil, &pagination, conditions...)
+	if err != nil {
+		return nil, err
+	}
+
+	return shared.NewPageResult(items, total, pagination), nil
+}
+
+// Count returns the total count of entities matching conditions.
+func (r *DataTypeMappingRuleRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM data_type_mapping_rules%s", whereClause)
+
+	var count int64
+	err := r.db.DB.Get(&count, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count data_type_mapping_rules: %w", err)
+	}
+	return count, nil
+}
+
+// Exists checks if any entity matching conditions exists.
+func (r *DataTypeMappingRuleRepositoryImpl) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	count, err := r.Count(conditions...)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *DataTypeMappingRuleRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagination *shared.Pagination, conditions ...shared.QueryCondition) ([]*datastore.DataTypeMappingRule, error) {
+	whereClause, args := buildWhereClause(conditions...)
+	orderClause := buildOrderClause(orderBy)
+	limitClause := buildLimitClause(pagination)
+
+	query := fmt.Sprintf("SELECT * FROM data_type_mapping_rules%s%s%s", whereClause, orderClause, limitClause)
+
+	var rows []dao.DataTypeMappingRuleRow
+	err := r.db.DB.Select(&rows, query, args...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []*datastore.DataTypeMappingRule{}, nil
+		}
+		return nil, fmt.Errorf("failed to find data_type_mapping_rules: %w", err)
+	}
+
+	entities := make([]*datastore.DataTypeMappingRule, len(rows))
+	for i, row := range rows {
+		entities[i] = &datastore.DataTypeMappingRule{
+			ID:             shared.ID(row.ID),
+			DataSourceType: row.DataSourceType,
+			SourceType:     row.SourceType,
+			TargetDBType:   row.TargetDBType,
+			TargetType:     row.TargetType,
+			Priority:       row.Priority,
+			IsDefault:      row.IsDefault,
+			CreatedAt:      shared.Timestamp(row.CreatedAt),
+			UpdatedAt:      shared.Timestamp(row.UpdatedAt),
+		}
+	}
+	return entities, nil
 }

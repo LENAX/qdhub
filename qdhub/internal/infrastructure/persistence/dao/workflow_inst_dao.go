@@ -86,7 +86,7 @@ func (d *WorkflowInstanceDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // GetByWorkflowDef retrieves all workflow instances for a workflow definition.
 func (d *WorkflowInstanceDAO) GetByWorkflowDef(tx *sqlx.Tx, workflowDefID shared.ID) ([]*qdhubworkflow.WorkflowInstance, error) {
-	query := `SELECT * FROM workflow_instances WHERE workflow_def_id = ? ORDER BY started_at DESC`
+	query := d.DB().Rebind(`SELECT * FROM workflow_instances WHERE workflow_def_id = ? ORDER BY started_at DESC`)
 	var rows []*WorkflowInstanceRow
 
 	var err error
@@ -113,7 +113,7 @@ func (d *WorkflowInstanceDAO) GetByWorkflowDef(tx *sqlx.Tx, workflowDefID shared
 
 // DeleteByWorkflowDef deletes all workflow instances for a workflow definition.
 func (d *WorkflowInstanceDAO) DeleteByWorkflowDef(tx *sqlx.Tx, workflowDefID shared.ID) error {
-	query := `DELETE FROM workflow_instances WHERE workflow_def_id = ?`
+	query := d.DB().Rebind(`DELETE FROM workflow_instances WHERE workflow_def_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, workflowDefID.String())

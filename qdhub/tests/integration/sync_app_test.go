@@ -8,7 +8,8 @@ import (
 	"os"
 	"testing"
 
-	"qdhub/internal/application"
+	"qdhub/internal/application/contracts"
+	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
@@ -24,16 +25,16 @@ import (
 // ==================== Integration Test Helpers ====================
 
 type testContext struct {
-	db              *persistence.DB
-	engine          *engine.Engine
-	syncJobRepo     *repository.SyncJobRepositoryImpl
-	syncExecRepo    *repository.SyncExecutionRepositoryImpl
-	wfDefRepo       *repository.WorkflowDefinitionRepositoryImpl
-	wfInstRepo      *repository.WorkflowInstanceRepositoryImpl
-	adapter         workflow.TaskEngineAdapter
-	syncAppService  application.SyncApplicationService
-	wfAppService    application.WorkflowApplicationService
-	cleanup         func()
+	db             *persistence.DB
+	engine         *engine.Engine
+	syncJobRepo    *repository.SyncJobRepositoryImpl
+	syncExecRepo   *repository.SyncExecutionRepositoryImpl
+	wfDefRepo      *repository.WorkflowDefinitionRepositoryImpl
+	wfInstRepo     *repository.WorkflowInstanceRepositoryImpl
+	adapter        workflow.TaskEngineAdapter
+	syncAppService contracts.SyncApplicationService
+	wfAppService   contracts.WorkflowApplicationService
+	cleanup        func()
 }
 
 func setupTestContext(t *testing.T) *testContext {
@@ -124,8 +125,8 @@ func setupTestContext(t *testing.T) *testContext {
 	adapter := taskengine.NewTaskEngineAdapter(eng)
 
 	// Create services
-	syncAppService := application.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
-	wfAppService := application.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
+	syncAppService := impl.NewSyncApplicationService(syncJobRepo, syncExecRepo, wfDefRepo, wfInstRepo, adapter)
+	wfAppService := impl.NewWorkflowApplicationService(wfDefRepo, wfInstRepo, adapter)
 
 	return &testContext{
 		db:             db,
@@ -160,7 +161,7 @@ func TestWorkflowApplicationService_Integration_CreateAndGetWorkflowDefinition(t
 	ctx := context.Background()
 
 	// Create workflow definition
-	req := application.CreateWorkflowDefinitionRequest{
+	req := contracts.CreateWorkflowDefinitionRequest{
 		Name:           "Integration Test Workflow",
 		Description:    "A workflow for integration testing",
 		Category:       workflow.WfCategorySync,
@@ -193,7 +194,7 @@ func TestWorkflowApplicationService_Integration_EnableDisableWorkflow(t *testing
 	ctx := context.Background()
 
 	// Create workflow definition
-	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, application.CreateWorkflowDefinitionRequest{
+	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
 		Name:           "Test Workflow",
 		Description:    "Test",
 		Category:       workflow.WfCategorySync,
@@ -230,7 +231,7 @@ func TestWorkflowApplicationService_Integration_ListWorkflowDefinitions(t *testi
 
 	// Create multiple workflow definitions
 	for i := 0; i < 3; i++ {
-		tc.wfAppService.CreateWorkflowDefinition(ctx, application.CreateWorkflowDefinitionRequest{
+		tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "Test",
 			Category:       workflow.WfCategorySync,
@@ -256,7 +257,7 @@ func TestWorkflowApplicationService_Integration_ExecuteWorkflow(t *testing.T) {
 	ctx := context.Background()
 
 	// Create workflow definition
-	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, application.CreateWorkflowDefinitionRequest{
+	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
 		Name:           "Test Workflow",
 		Description:    "Test",
 		Category:       workflow.WfCategorySync,
@@ -268,7 +269,7 @@ func TestWorkflowApplicationService_Integration_ExecuteWorkflow(t *testing.T) {
 	tc.wfAppService.EnableWorkflow(ctx, shared.ID(def.ID()))
 
 	// Execute workflow
-	instID, err := tc.wfAppService.ExecuteWorkflow(ctx, application.ExecuteWorkflowRequest{
+	instID, err := tc.wfAppService.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 		WorkflowDefID: shared.ID(def.ID()),
 		TriggerType:   workflow.TriggerTypeManual,
 		TriggerParams: map[string]interface{}{"test": "value"},

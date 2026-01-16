@@ -1,5 +1,5 @@
-// Package application contains application services that orchestrate use cases.
-package application
+// Package contracts defines application service interfaces and DTOs.
+package contracts
 
 import (
 	"context"
@@ -66,6 +66,14 @@ type DataStoreApplicationService interface {
 
 	// SyncSchemaStatus synchronizes schema status with actual database state.
 	SyncSchemaStatus(ctx context.Context, dataStoreID shared.ID) error
+
+	// ==================== Type Mapping Rule Management ====================
+
+	// CreateMappingRule creates a new type mapping rule.
+	CreateMappingRule(ctx context.Context, req CreateMappingRuleRequest) (*datastore.DataTypeMappingRule, error)
+
+	// GetMappingRules retrieves mapping rules for data source and target DB.
+	GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -100,4 +108,14 @@ type UpdateSchemaRequest struct {
 	Columns     *[]datastore.ColumnDef
 	PrimaryKeys *[]string
 	Indexes     *[]datastore.IndexDef
+}
+
+// CreateMappingRuleRequest represents a request to create a mapping rule.
+type CreateMappingRuleRequest struct {
+	DataSourceType string
+	SourceType     string
+	TargetDBType   string
+	TargetType     string
+	FieldPattern   *string
+	Priority       int
 }
