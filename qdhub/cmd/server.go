@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/LENAX/task-engine/pkg/core/engine"
+	"github.com/LENAX/task-engine/pkg/storage/sqlite"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -17,6 +19,7 @@ import (
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/scheduler"
+	"qdhub/internal/infrastructure/taskengine"
 	httpserver "qdhub/internal/interfaces/http"
 )
 
@@ -119,6 +122,53 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create workflow repository: %w", err)
 	}
 
+	// Initialize Task Engine
+	ctx := context.Background()
+
+	// Create Task Engine repositories
+	// Use the same database DSN for Task Engine storage
+	taskEngineDSN := db.DSN()
+
+	// Create aggregate repository for Task Engine
+	aggregateRepo, err := sqlite.NewWorkflowAggregateRepoFromDSN(taskEngineDSN)
+	if err != nil {
+		return fmt.Errorf("failed to create task engine aggregate repository: %w", err)
+	}
+
+	// Create Task Engine instance using aggregate repository
+	// Parameters: maxConcurrency=10, taskTimeout=60 seconds
+	eng, err := engine.NewEngineWithAggregateRepo(10, 60, aggregateRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create task engine: %w", err)
+	}
+
+	// Start Task Engine
+	if err := eng.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start task engine: %w", err)
+	}
+	defer eng.Stop()
+
+	// Initialize Task Engine (register job functions and handlers)
+	taskEngineDeps := &taskengine.Dependencies{
+		DataSourceRegistry: nil, // TODO: Initialize datasource registry if needed
+		MetadataRepo:       nil, // TODO: Initialize metadata repo if needed
+	}
+	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
+		return fmt.Errorf("failed to initialize task engine: %w", err)
+	}
+
+	// Create Task Engine adapter and workflow factory
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	workflowFactory := taskengine.GetWorkflowFactory(eng)
+
+	// Initialize built-in workflows
+	builtInInitializer := impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter)
+	if err := builtInInitializer.Initialize(ctx); err != nil {
+		// Log error but don't fail server startup
+		log.Printf("Warning: failed to initialize built-in workflows: %v", err)
+		log.Printf("Built-in workflows can be initialized later")
+	}
+
 	// Initialize infrastructure services
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	jobScheduler := scheduler.NewCronScheduler(nil) // TODO: Add job trigger callback
@@ -128,9 +178,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Initialize application services
 	// Note: Using nil for adapters that aren't fully implemented yet
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, nil)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, mappingRuleRepo, dataSourceRepo, nil)
+
+	// Create workflow service first (needed for dataStoreSvc)
+	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
+
+	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, mappingRuleRepo, dataSourceRepo, nil, workflowSvc)
 	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, nil, cronCalculator, jobScheduler)
-	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, nil)
 
 	// Configure server
 	serverConfig := httpserver.ServerConfig{

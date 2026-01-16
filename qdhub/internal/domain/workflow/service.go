@@ -39,8 +39,8 @@ type ProgressCalculator interface {
 
 // WorkflowStatus represents the detailed status of a workflow instance.
 type WorkflowStatus struct {
-	InstanceID    string  // Task Engine uses string ID
-	Status        string  // Task Engine status string
+	InstanceID    string // Task Engine uses string ID
+	Status        string // Task Engine status string
 	Progress      float64
 	TaskCount     int
 	CompletedTask int
@@ -75,4 +75,10 @@ type TaskEngineAdapter interface {
 
 	// UnregisterWorkflow unregisters a workflow definition.
 	UnregisterWorkflow(ctx context.Context, definitionID string) error
+
+	// GetTaskInstances retrieves all task instances for a workflow instance.
+	GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*TaskInstance, error)
+
+	// RetryTask retries a failed task instance.
+	RetryTask(ctx context.Context, taskInstanceID string) error
 }

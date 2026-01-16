@@ -157,37 +157,79 @@ func (b *BatchDataSyncWorkflowBuilder) WithMaxStocks(max int) *BatchDataSyncWork
 //
 // 事务支持：启用 SAGA 事务，同步失败时按 sync_batch_id 回滚数据
 //
+// 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_name}），
+// 执行时通过 workflow.ReplaceParams() 替换为实际值
+//
 // 返回错误：
-//   - ErrEmptyAPINames: api_names 不能为空
-//   - ErrEmptyDataSourceName: data_source_name 必填
-//   - ErrEmptyToken: token 必填
-//   - ErrEmptyTargetDBPath: target_db_path 必填
-//   - ErrEmptyStartDate: start_date 必填
-//   - ErrEmptyEndDate: end_date 必填
+//   - ErrEmptyAPINames: api_names 不能为空（仅在非占位符模式下验证）
+//   - ErrEmptyDataSourceName: data_source_name 必填（仅在非占位符模式下验证）
+//   - ErrEmptyToken: token 必填（仅在非占位符模式下验证）
+//   - ErrEmptyTargetDBPath: target_db_path 必填（仅在非占位符模式下验证）
+//   - ErrEmptyStartDate: start_date 必填（仅在非占位符模式下验证）
+//   - ErrEmptyEndDate: end_date 必填（仅在非占位符模式下验证）
 func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
 
-	// 参数验证
-	if err := params.Validate(); err != nil {
-		return nil, err
+	// 检查是否使用占位符模式（所有必填参数都为空）
+	usePlaceholders := params.DataSourceName == "" && params.Token == "" && 
+		params.TargetDBPath == "" && params.StartDate == "" && params.EndDate == "" &&
+		len(params.APINames) == 0
+
+	// 仅在非占位符模式下验证参数
+	if !usePlaceholders {
+		if err := params.Validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	var tasks []*task.Task
 
+	// 如果参数为空，使用占位符
+	dataSourceName := params.DataSourceName
+	if dataSourceName == "" {
+		dataSourceName = "${data_source_name}"
+	}
+	token := params.Token
+	if token == "" {
+		token = "${token}"
+	}
+	targetDBPath := params.TargetDBPath
+	if targetDBPath == "" {
+		targetDBPath = "${target_db_path}"
+	}
+	startDate := params.GetStartDateTime()
+	if startDate == "" {
+		startDate = "${start_date}"
+	}
+	endDate := params.GetEndDateTime()
+	if endDate == "" {
+		endDate = "${end_date}"
+	}
+
 	// 基础参数
 	baseParams := map[string]interface{}{
-		"data_source_name": params.DataSourceName,
-		"token":            params.Token,
-		"target_db_path":   params.TargetDBPath,
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
 	}
 
 	// 日期时间参数（支持可选时间）
 	dateTimeParams := map[string]interface{}{
-		"start_date": params.GetStartDateTime(),
-		"end_date":   params.GetEndDateTime(),
+		"start_date": startDate,
+		"end_date":   endDate,
 	}
 
 	// ==================== Level 0: 基础数据获取 ====================
+
+	// 处理日期参数（交易日历只用日期，不使用时间）
+	startDateOnly := params.StartDate
+	if startDateOnly == "" {
+		startDateOnly = "${start_date}"
+	}
+	endDateOnly := params.EndDate
+	if endDateOnly == "" {
+		endDateOnly = "${end_date}"
+	}
 
 	// Task: 获取交易日历
 	fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
@@ -195,8 +237,8 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			"api_name": "trade_cal",
 			"params": map[string]interface{}{
 				"exchange":   "SSE",
-				"start_date": params.StartDate, // 交易日历只用日期
-				"end_date":   params.EndDate,
+				"start_date": startDateOnly, // 交易日历只用日期
+				"end_date":   endDateOnly,
 			},
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -227,8 +269,16 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// ==================== Level 1: 数据同步模板任务 ====================
 
-	// 为每个 API 创建模板任务（APINames 必填，已在 Validate 中验证）
-	for _, apiName := range params.APINames {
+	// 处理 API 名称列表
+	apiNames := params.APINames
+	if len(apiNames) == 0 {
+		// 如果为空，使用占位符（注意：这需要特殊处理，因为占位符是字符串，不是数组）
+		// 这里我们创建一个特殊的占位符任务，执行时会通过参数替换处理
+		apiNames = []string{"${api_names}"} // 注意：这需要执行时解析为数组
+	}
+
+	// 为每个 API 创建模板任务
+	for _, apiName := range apiNames {
 		taskName := "Sync_" + apiName
 		templateTask, err := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（模板任务）", b.registry).
 			WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
@@ -253,7 +303,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
 			"api_name": "top_list",
 			"params": map[string]interface{}{
-				"trade_date": params.StartDate,
+				"trade_date": startDateOnly,
 			},
 		})).
 		WithDependency("FetchTradeCal"). // 依赖交易日历

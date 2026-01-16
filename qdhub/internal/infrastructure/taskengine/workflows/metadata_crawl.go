@@ -56,14 +56,27 @@ func (b *MetadataCrawlWorkflowBuilder) WithMaxAPICrawl(max int) *MetadataCrawlWo
 // 5. SaveMetadata - 保存 API 元数据（带事务补偿）
 //
 // 事务支持：启用 SAGA 事务，任务失败时自动回滚已保存的数据
+//
+// 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_id}），
+// 执行时通过 workflow.ReplaceParams() 替换为实际值
 func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
+
+	// 如果参数为空，使用占位符
+	dataSourceID := params.DataSourceID
+	if dataSourceID == "" {
+		dataSourceID = "${data_source_id}"
+	}
+	dataSourceName := params.DataSourceName
+	if dataSourceName == "" {
+		dataSourceName = "${data_source_name}"
+	}
 
 	// Task 1: 获取目录页面
 	fetchCatalogTask, err := builder.NewTaskBuilder("FetchCatalog", "获取数据源 API 目录页面", b.registry).
 		WithJobFunction("FetchCatalog", map[string]interface{}{
-			"data_source_id":   params.DataSourceID,
-			"data_source_name": params.DataSourceName,
+			"data_source_id":   dataSourceID,
+			"data_source_name": dataSourceName,
 		}).
 		WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "MetadataRefreshFailure").
@@ -75,8 +88,8 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	// Task 2: 解析目录结构
 	parseCatalogTask, err := builder.NewTaskBuilder("ParseCatalog", "解析 API 目录结构", b.registry).
 		WithJobFunction("ParseCatalog", map[string]interface{}{
-			"data_source_id":   params.DataSourceID,
-			"data_source_name": params.DataSourceName,
+			"data_source_id":   dataSourceID,
+			"data_source_name": dataSourceName,
 		}).
 		WithDependency("FetchCatalog").
 		WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshSuccess").
@@ -89,7 +102,7 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	// Task 3: 保存分类信息（带补偿）
 	saveCategoriesTask, err := builder.NewTaskBuilder("SaveCategories", "保存 API 分类信息", b.registry).
 		WithJobFunction("SaveCategories", map[string]interface{}{
-			"data_source_id": params.DataSourceID,
+			"data_source_id": dataSourceID,
 		}).
 		WithDependency("ParseCatalog").
 		WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshSuccess").
@@ -101,11 +114,14 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	// Task 4: 模板任务 - 动态生成 API 详情爬取子任务
+	maxAPICrawl := params.MaxAPICrawl
+	// 注意：max_api_crawl 是整数类型，如果为0且需要占位符，需要特殊处理
+	// 这里如果为0，保持0（表示不限制），如果需要占位符，应该在调用时传入特殊值
 	fetchAPIDetailsTask, err := builder.NewTaskBuilder("FetchAPIDetails", "爬取 API 详情（模板任务）", b.registry).
 		WithJobFunction("GenerateAPIDetailFetchSubTasks", map[string]interface{}{
-			"data_source_id":   params.DataSourceID,
-			"data_source_name": params.DataSourceName,
-			"max_api_crawl":    params.MaxAPICrawl,
+			"data_source_id":   dataSourceID,
+			"data_source_name": dataSourceName,
+			"max_api_crawl":    maxAPICrawl,
 		}).
 		WithDependency("ParseCatalog").
 		WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshSuccess").
@@ -119,7 +135,7 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	// Task 5: 保存 API 元数据（等待所有子任务完成后执行）
 	saveMetadataTask, err := builder.NewTaskBuilder("SaveAllMetadata", "保存所有 API 元数据", b.registry).
 		WithJobFunction("SaveAPIMetadata", map[string]interface{}{
-			"data_source_id": params.DataSourceID,
+			"data_source_id": dataSourceID,
 		}).
 		WithDependency("FetchAPIDetails"). // 依赖模板任务（会等待所有子任务完成）
 		WithDependency("SaveCategories").

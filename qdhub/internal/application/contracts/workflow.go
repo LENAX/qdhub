@@ -86,6 +86,10 @@ type WorkflowApplicationService interface {
 
 	// RetryTask retries a failed task instance.
 	RetryTask(ctx context.Context, taskInstanceID shared.ID) error
+
+	// ExecuteBuiltInWorkflowByName executes a built-in workflow by its API name (shortcut).
+	// This is a convenience method that looks up the workflow ID by name and executes it.
+	ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req ExecuteWorkflowRequest) (shared.ID, error)
 }
 
 // ==================== Request/Response DTOs ====================

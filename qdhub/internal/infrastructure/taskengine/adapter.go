@@ -3,7 +3,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -25,26 +24,19 @@ func NewTaskEngineAdapter(eng *engine.Engine) workflow.TaskEngineAdapter {
 }
 
 // SubmitWorkflow submits a workflow to Task Engine.
+// Uses Task Engine's native parameter replacement feature to replace placeholders
+// (e.g., ${param_name}) with actual values before submission.
 func (a *TaskEngineAdapterImpl) SubmitWorkflow(ctx context.Context, definition *workflow.WorkflowDefinition, params map[string]interface{}) (string, error) {
 	if definition == nil || definition.Workflow == nil {
 		return "", fmt.Errorf("workflow definition is nil")
 	}
 
-	// Set workflow parameters (serialize non-string values to JSON)
-	for key, value := range params {
-		var strValue string
-		switch v := value.(type) {
-		case string:
-			strValue = v
-		default:
-			// Serialize complex types to JSON
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return "", fmt.Errorf("failed to serialize parameter %s: %w", key, err)
-			}
-			strValue = string(jsonBytes)
+	// Use Task Engine's native ReplaceParams method to replace placeholders
+	// This will replace placeholders in both Workflow-level and Task-level parameters
+	if len(params) > 0 {
+		if err := definition.Workflow.ReplaceParams(params); err != nil {
+			return "", fmt.Errorf("failed to replace workflow parameters: %w", err)
 		}
-		definition.Workflow.SetParam(key, strValue)
 	}
 
 	// Submit workflow and get controller
@@ -156,4 +148,33 @@ func (a *TaskEngineAdapterImpl) UnregisterWorkflow(ctx context.Context, definiti
 	// Task Engine doesn't have explicit unregister
 	// Workflows are managed through the storage layer
 	return nil
+}
+
+// GetTaskInstances retrieves all task instances for a workflow instance.
+func (a *TaskEngineAdapterImpl) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	aggregateRepo := a.engine.GetAggregateRepo()
+	_, taskInstances, err := aggregateRepo.GetWorkflowInstanceWithTasks(ctx, engineInstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task instances: %w", err)
+	}
+
+	// Convert to workflow.TaskInstance (which is a type alias for taskenginestorage.TaskInstance)
+	// taskInstances is []*taskenginestorage.TaskInstance (slice of pointers)
+	// workflow.TaskInstance is a type alias, so we can directly convert
+	result := make([]*workflow.TaskInstance, len(taskInstances))
+	for i := range taskInstances {
+		// taskInstances[i] is *taskenginestorage.TaskInstance
+		// workflow.TaskInstance is a type alias, so we can directly convert
+		result[i] = (*workflow.TaskInstance)(taskInstances[i])
+	}
+	return result, nil
+}
+
+// RetryTask retries a failed task instance.
+// Note: Task Engine may not have a direct retry API, so this may need to be implemented
+// through other means (e.g., re-submitting the workflow or specific task).
+func (a *TaskEngineAdapterImpl) RetryTask(ctx context.Context, taskInstanceID string) error {
+	// TODO: Check if Task Engine provides a RetryTask API
+	// For now, return an error indicating it's not implemented
+	return fmt.Errorf("task retry not yet implemented in Task Engine")
 }

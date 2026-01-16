@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
+	"qdhub/internal/infrastructure/persistence/dao"
 )
 
 // WorkflowDefinitionRepositoryImpl implements workflow.WorkflowDefinitionRepository using Task Engine storage.
@@ -15,6 +18,7 @@ import (
 // and its child entities (WorkflowInstance) to maintain aggregate boundaries.
 type WorkflowDefinitionRepositoryImpl struct {
 	taskEngineRepo *WorkflowDefinitionRepositoryTaskEngineImpl
+	instanceDAO    *dao.WorkflowInstanceDAO
 }
 
 // NewWorkflowDefinitionRepository creates a new WorkflowDefinitionRepositoryImpl using Task Engine storage.
@@ -26,8 +30,12 @@ func NewWorkflowDefinitionRepository(db *persistence.DB) (*WorkflowDefinitionRep
 		return nil, fmt.Errorf("failed to create task engine repository: %w", err)
 	}
 
+	// Create DAO for storing qdhub-specific instance fields (trigger_type, trigger_params)
+	instanceDAO := dao.NewWorkflowInstanceDAO(db.DB)
+
 	return &WorkflowDefinitionRepositoryImpl{
 		taskEngineRepo: taskEngineRepo,
+		instanceDAO:    instanceDAO,
 	}, nil
 }
 
@@ -69,6 +77,62 @@ func (r *WorkflowDefinitionRepositoryImpl) List() ([]*workflow.WorkflowDefinitio
 // AddInstance adds a new WorkflowInstance to a WorkflowDefinition.
 func (r *WorkflowDefinitionRepositoryImpl) AddInstance(inst *workflow.WorkflowInstance) error {
 	return r.taskEngineRepo.AddInstance(inst)
+}
+
+// AddInstanceWithTriggerInfo adds a new WorkflowInstance with trigger information.
+// This method stores qdhub-specific fields (trigger_type, trigger_params) that are not
+// part of Task Engine's WorkflowInstance type.
+// The instance should already exist in Task Engine (created by SubmitWorkflow).
+func (r *WorkflowDefinitionRepositoryImpl) AddInstanceWithTriggerInfo(
+	inst *workflow.WorkflowInstance,
+	triggerType string,
+	triggerParams map[string]interface{},
+) error {
+	// Serialize trigger_params to JSON
+	triggerParamsJSON := "{}"
+	if triggerParams != nil {
+		paramsBytes, err := json.Marshal(triggerParams)
+		if err != nil {
+			return fmt.Errorf("failed to serialize trigger params: %w", err)
+		}
+		triggerParamsJSON = string(paramsBytes)
+	}
+
+	// Create a row with trigger information
+	row := &dao.WorkflowInstanceRow{
+		ID:               inst.ID,
+		WorkflowDefID:    inst.WorkflowID,
+		EngineInstanceID: inst.ID,
+		TriggerType:      triggerType,
+		TriggerParams:    triggerParamsJSON,
+		Status:           inst.Status,
+		Progress:         0.0,
+		StartedAt:        inst.StartTime,
+	}
+
+	if inst.EndTime != nil {
+		row.FinishedAt = sql.NullTime{Time: *inst.EndTime, Valid: true}
+	}
+
+	if inst.ErrorMessage != "" {
+		row.ErrorMessage = sql.NullString{String: inst.ErrorMessage, Valid: true}
+	}
+
+	// Use DAO to insert or update the record
+	// Note: Task Engine may have already created the instance, so we use INSERT OR REPLACE (SQLite)
+	// For other databases, this would need to be INSERT ... ON CONFLICT
+	query := `INSERT OR REPLACE INTO workflow_instances 
+		(id, workflow_def_id, engine_instance_id, trigger_type, trigger_params, status, progress, started_at, finished_at, error_message)
+		VALUES (:id, :workflow_def_id, :engine_instance_id, :trigger_type, :trigger_params, :status, :progress, :started_at, :finished_at, :error_message)`
+
+	db := r.instanceDAO.DB()
+	reboundQuery := db.Rebind(query)
+	_, err := db.NamedExec(reboundQuery, row)
+	if err != nil {
+		return fmt.Errorf("failed to store workflow instance with trigger info: %w", err)
+	}
+
+	return nil
 }
 
 // GetInstance retrieves a WorkflowInstance by ID.

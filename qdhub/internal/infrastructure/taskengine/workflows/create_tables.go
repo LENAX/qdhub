@@ -59,15 +59,32 @@ func (b *CreateTablesWorkflowBuilder) WithMaxTables(max int) *CreateTablesWorkfl
 // 1. CreateTables [模板任务] - 为每个 API 生成建表子任务
 //
 // 事务支持：启用 SAGA 事务，建表失败时自动删除已创建的表
+//
+// 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_id}），
+// 执行时通过 workflow.ReplaceParams() 替换为实际值
 func (b *CreateTablesWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
+
+	// 如果参数为空，使用占位符
+	dataSourceID := params.DataSourceID
+	if dataSourceID == "" {
+		dataSourceID = "${data_source_id}"
+	}
+	dataSourceName := params.DataSourceName
+	if dataSourceName == "" {
+		dataSourceName = "${data_source_name}"
+	}
+	targetDBPath := params.TargetDBPath
+	if targetDBPath == "" {
+		targetDBPath = "${target_db_path}"
+	}
 
 	// Task 1: 模板任务 - 批量创建数据表
 	createTablesTask, err := builder.NewTaskBuilder("CreateTables", "批量创建数据表（模板任务）", b.registry).
 		WithJobFunction("CreateTablesFromCatalog", map[string]interface{}{
-			"data_source_id":   params.DataSourceID,
-			"data_source_name": params.DataSourceName,
-			"target_db_path":   params.TargetDBPath,
+			"data_source_id":   dataSourceID,
+			"data_source_name": dataSourceName,
+			"target_db_path":   targetDBPath,
 			"max_tables":       params.MaxTables,
 		}).
 		WithTaskHandler(task.TaskStatusSuccess, "TableCreationSuccess").
