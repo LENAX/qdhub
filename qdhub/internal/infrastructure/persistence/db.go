@@ -5,32 +5,48 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
+
+	// Database drivers - imported for side effects
+	_ "github.com/go-sql-driver/mysql" // MySQL driver
+	_ "github.com/lib/pq"              // PostgreSQL driver
+	_ "github.com/mattn/go-sqlite3"    // SQLite driver
 )
 
 // DB wraps sqlx.DB and provides database connection management.
 type DB struct {
 	*sqlx.DB
-	dsn string // Store DSN for Task Engine integration
+	dsn     string  // Store DSN for Task Engine integration
+	dialect Dialect // Database dialect for DB-specific behaviors
 }
 
-// NewDB creates a new database connection.
+// NewDB creates a new SQLite database connection (for backward compatibility).
 func NewDB(dsn string) (*DB, error) {
-	db, err := sqlx.Connect("sqlite3", dsn)
+	return NewDBWithDialect(NewSQLiteDialect(), dsn)
+}
+
+// NewDBWithType creates a new database connection with the specified database type.
+func NewDBWithType(dbType DBType, dsn string) (*DB, error) {
+	return NewDBWithDialect(GetDialect(dbType), dsn)
+}
+
+// NewDBWithDialect creates a new database connection with the specified dialect.
+func NewDBWithDialect(dialect Dialect, dsn string) (*DB, error) {
+	db, err := sqlx.Connect(dialect.DriverName(), dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database (%s): %w", dialect.DriverName(), err)
 	}
 
-	// Enable foreign keys for SQLite
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	// Execute dialect-specific initialization
+	if err := dialect.OnConnect(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
 	// Set connection pool settings
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 
-	return &DB{DB: db, dsn: dsn}, nil
+	return &DB{DB: db, dsn: dsn, dialect: dialect}, nil
 }
 
 // Close closes the database connection.
@@ -68,6 +84,19 @@ func (db *DB) ExecInTx(fn func(*sqlx.Tx) error) error {
 // DSN returns the database connection string.
 func (db *DB) DSN() string {
 	return db.dsn
+}
+
+// Dialect returns the database dialect.
+func (db *DB) Dialect() Dialect {
+	return db.dialect
+}
+
+// DriverName returns the database driver name.
+func (db *DB) DriverName() string {
+	if db.dialect != nil {
+		return db.dialect.DriverName()
+	}
+	return "sqlite3" // default for backward compatibility
 }
 
 // Querier is an interface for database query operations.

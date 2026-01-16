@@ -276,6 +276,7 @@ func (r *DataSourceRepositoryImpl) FindByWithPagination(pagination shared.Pagina
 func (r *DataSourceRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
 	whereClause, args := buildWhereClause(conditions...)
 	query := fmt.Sprintf("SELECT COUNT(*) FROM data_sources%s", whereClause)
+	query = r.db.DB.Rebind(query)
 
 	var count int64
 	err := r.db.DB.Get(&count, query, args...)
@@ -300,6 +301,7 @@ func (r *DataSourceRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagi
 	limitClause := buildLimitClause(pagination)
 
 	query := fmt.Sprintf("SELECT * FROM data_sources%s%s%s", whereClause, orderClause, limitClause)
+	query = r.db.DB.Rebind(query)
 
 	var rows []dao.DataSourceRow
 	err := r.db.DB.Select(&rows, query, args...)

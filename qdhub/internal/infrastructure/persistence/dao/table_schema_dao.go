@@ -88,7 +88,7 @@ func (d *TableSchemaDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // GetByDataStore retrieves all table schemas for a data store.
 func (d *TableSchemaDAO) GetByDataStore(tx *sqlx.Tx, dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
-	query := `SELECT * FROM table_schemas WHERE data_store_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM table_schemas WHERE data_store_id = ?`)
 	var rows []*TableSchemaRow
 
 	var err error
@@ -115,7 +115,7 @@ func (d *TableSchemaDAO) GetByDataStore(tx *sqlx.Tx, dataStoreID shared.ID) ([]*
 
 // GetByAPIMetadata retrieves a table schema by API metadata ID.
 func (d *TableSchemaDAO) GetByAPIMetadata(tx *sqlx.Tx, apiMetadataID shared.ID) (*datastore.TableSchema, error) {
-	query := `SELECT * FROM table_schemas WHERE api_meta_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM table_schemas WHERE api_meta_id = ?`)
 	var row TableSchemaRow
 
 	var err error
@@ -137,7 +137,7 @@ func (d *TableSchemaDAO) GetByAPIMetadata(tx *sqlx.Tx, apiMetadataID shared.ID) 
 
 // DeleteByDataStore deletes all table schemas for a data store.
 func (d *TableSchemaDAO) DeleteByDataStore(tx *sqlx.Tx, dataStoreID shared.ID) error {
-	query := `DELETE FROM table_schemas WHERE data_store_id = ?`
+	query := d.DB().Rebind(`DELETE FROM table_schemas WHERE data_store_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, dataStoreID.String())

@@ -61,6 +61,8 @@ func (d *SQLBaseDAO[T]) getExecer(tx *sqlx.Tx) sqlx.Execer {
 // Get retrieves a record by ID using the default query.
 func (d *SQLBaseDAO[T]) Get(tx *sqlx.Tx, id string) (*T, error) {
 	query := fmt.Sprintf("SELECT * FROM %s WHERE %s = ?", d.tableName, d.idColumn)
+	// Rebind converts ? placeholders to database-specific format ($1 for Postgres, ? for MySQL/SQLite)
+	query = d.db.Rebind(query)
 	var entity T
 
 	var err error
@@ -82,6 +84,8 @@ func (d *SQLBaseDAO[T]) Get(tx *sqlx.Tx, id string) (*T, error) {
 // Delete removes a record by ID.
 func (d *SQLBaseDAO[T]) Delete(tx *sqlx.Tx, id string) error {
 	query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", d.tableName, d.idColumn)
+	// Rebind converts ? placeholders to database-specific format
+	query = d.db.Rebind(query)
 
 	var err error
 	if tx != nil {

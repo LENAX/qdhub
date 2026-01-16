@@ -81,7 +81,7 @@ func (d *TaskInstanceDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // GetByWorkflowInstance retrieves all task instances for a workflow instance.
 func (d *TaskInstanceDAO) GetByWorkflowInstance(tx *sqlx.Tx, workflowInstID shared.ID) ([]*qdhubworkflow.TaskInstance, error) {
-	query := `SELECT * FROM task_instances WHERE workflow_inst_id = ?`
+	query := d.DB().Rebind(`SELECT * FROM task_instances WHERE workflow_inst_id = ?`)
 	var rows []*TaskInstanceRow
 
 	var err error
@@ -104,7 +104,7 @@ func (d *TaskInstanceDAO) GetByWorkflowInstance(tx *sqlx.Tx, workflowInstID shar
 
 // DeleteByWorkflowInstance deletes all task instances for a workflow instance.
 func (d *TaskInstanceDAO) DeleteByWorkflowInstance(tx *sqlx.Tx, workflowInstID shared.ID) error {
-	query := `DELETE FROM task_instances WHERE workflow_inst_id = ?`
+	query := d.DB().Rebind(`DELETE FROM task_instances WHERE workflow_inst_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, workflowInstID.String())

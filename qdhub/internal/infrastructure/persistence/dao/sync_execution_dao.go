@@ -80,7 +80,7 @@ func (d *SyncExecutionDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 
 // GetBySyncJob retrieves all sync executions for a sync job.
 func (d *SyncExecutionDAO) GetBySyncJob(tx *sqlx.Tx, syncJobID shared.ID) ([]*sync.SyncExecution, error) {
-	query := `SELECT * FROM sync_executions WHERE sync_job_id = ? ORDER BY started_at DESC`
+	query := d.DB().Rebind(`SELECT * FROM sync_executions WHERE sync_job_id = ? ORDER BY started_at DESC`)
 	var rows []*SyncExecutionRow
 
 	var err error
@@ -103,7 +103,7 @@ func (d *SyncExecutionDAO) GetBySyncJob(tx *sqlx.Tx, syncJobID shared.ID) ([]*sy
 
 // DeleteBySyncJob deletes all sync executions for a sync job.
 func (d *SyncExecutionDAO) DeleteBySyncJob(tx *sqlx.Tx, syncJobID shared.ID) error {
-	query := `DELETE FROM sync_executions WHERE sync_job_id = ?`
+	query := d.DB().Rebind(`DELETE FROM sync_executions WHERE sync_job_id = ?`)
 	var err error
 	if tx != nil {
 		_, err = tx.Exec(query, syncJobID.String())
