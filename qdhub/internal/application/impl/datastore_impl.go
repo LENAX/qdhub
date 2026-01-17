@@ -9,6 +9,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/workflow"
 )
 
 // DataStoreApplicationServiceImpl implements DataStoreApplicationService.
@@ -23,6 +24,9 @@ type DataStoreApplicationServiceImpl struct {
 
 	// Adapter for executing DDL on target databases
 	quantDBAdapter QuantDBAdapter
+
+	// Workflow service for executing built-in workflows
+	workflowSvc contracts.WorkflowApplicationService
 }
 
 // QuantDBAdapter defines the interface for interacting with target databases.
@@ -44,6 +48,7 @@ func NewDataStoreApplicationService(
 	mappingRuleRepo datastore.DataTypeMappingRuleRepository,
 	dataSourceRepo metadata.DataSourceRepository,
 	quantDBAdapter QuantDBAdapter,
+	workflowSvc contracts.WorkflowApplicationService,
 ) contracts.DataStoreApplicationService {
 	return &DataStoreApplicationServiceImpl{
 		dataStoreRepo:      dataStoreRepo,
@@ -53,6 +58,7 @@ func NewDataStoreApplicationService(
 		schemaGenerator:    datastore.NewSchemaGenerator(),
 		typeMappingService: datastore.NewTypeMappingService(),
 		quantDBAdapter:     quantDBAdapter,
+		workflowSvc:        workflowSvc,
 	}
 }
 
@@ -310,6 +316,75 @@ func (s *DataStoreApplicationServiceImpl) CreateTable(ctx context.Context, schem
 	}
 
 	return nil
+}
+
+// CreateTablesForDatasource creates tables for all APIs of a data source in the data store.
+// This is an asynchronous operation that uses the built-in create_tables workflow.
+func (s *DataStoreApplicationServiceImpl) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
+	// Verify data source exists
+	dataSource, err := s.dataSourceRepo.Get(req.DataSourceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get data source: %w", err)
+	}
+	if dataSource == nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+
+	// Verify data store exists
+	dataStore, err := s.dataStoreRepo.Get(req.DataStoreID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get data store: %w", err)
+	}
+	if dataStore == nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+
+	// Get target database path
+	// Prefer StoragePath, fallback to DSN if StoragePath is empty
+	targetDBPath := dataStore.StoragePath
+	if targetDBPath == "" {
+		targetDBPath = dataStore.DSN
+	}
+	if targetDBPath == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "data store must have either StoragePath or DSN configured", nil)
+	}
+
+	// Get data source name (use Name field as data source type name)
+	// Note: DataSource.Name should be the type name like "tushare"
+	dataSourceName := dataSource.Name
+	if dataSourceName == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "data source name cannot be empty", nil)
+	}
+
+	// Prepare max tables parameter
+	maxTables := 0 // 0 means no limit
+	if req.MaxTables != nil && *req.MaxTables > 0 {
+		maxTables = *req.MaxTables
+	}
+
+	// Build workflow parameters
+	// Note: Using built-in workflow ID "builtin:create_tables"
+	// The workflow will use parameter placeholders that will be replaced at execution time
+	triggerParams := map[string]interface{}{
+		"data_source_id":   req.DataSourceID.String(),
+		"data_source_name": dataSourceName,
+		"target_db_path":  targetDBPath,
+		"max_tables":       maxTables,
+	}
+
+	// Execute built-in workflow using fixed ID
+	// According to the plan, built-in workflows have fixed IDs like "builtin:create_tables"
+	workflowDefID := shared.ID("builtin:create_tables")
+	instanceID, err := s.workflowSvc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
+		WorkflowDefID: workflowDefID,
+		TriggerType:   workflow.TriggerTypeManual,
+		TriggerParams: triggerParams,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to execute create_tables workflow: %w", err)
+	}
+
+	return instanceID, nil
 }
 
 // DropTable drops a table from the data store.

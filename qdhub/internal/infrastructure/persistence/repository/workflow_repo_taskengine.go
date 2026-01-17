@@ -32,6 +32,12 @@ func NewWorkflowDefinitionRepositoryTaskEngine(dsn string) (*WorkflowDefinitionR
 func (r *WorkflowDefinitionRepositoryTaskEngineImpl) Create(def *qdhubworkflow.WorkflowDefinition) error {
 	ctx := context.Background()
 
+	// If workflow doesn't have an ID yet, we need to set it before saving
+	// Task Engine's SaveWorkflow uses the workflow's GetID() method
+	// For built-in workflows, we want to use a fixed ID
+	// Note: Task Engine may generate an ID if workflow doesn't have one
+	// We'll rely on SaveWorkflow to handle ID assignment
+	
 	// Directly use Task Engine Workflow (embedded in WorkflowDefinition)
 	if err := r.aggregateRepo.SaveWorkflow(ctx, def.Workflow); err != nil {
 		return fmt.Errorf("failed to save workflow: %w", err)

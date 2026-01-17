@@ -49,6 +49,11 @@ type DataStoreApplicationService interface {
 	// CreateTable creates a table in the data store.
 	CreateTable(ctx context.Context, schemaID shared.ID) error
 
+	// CreateTablesForDatasource creates tables for all APIs of a data source in the data store.
+	// This is an asynchronous operation that uses the built-in create_tables workflow.
+	// Returns the workflow instance ID for tracking the execution status.
+	CreateTablesForDatasource(ctx context.Context, req CreateTablesForDatasourceRequest) (shared.ID, error)
+
 	// DropTable drops a table from the data store.
 	DropTable(ctx context.Context, schemaID shared.ID) error
 
@@ -108,6 +113,13 @@ type UpdateSchemaRequest struct {
 	Columns     *[]datastore.ColumnDef
 	PrimaryKeys *[]string
 	Indexes     *[]datastore.IndexDef
+}
+
+// CreateTablesForDatasourceRequest represents a request to create tables for a data source.
+type CreateTablesForDatasourceRequest struct {
+	DataSourceID shared.ID // 数据源 ID
+	DataStoreID  shared.ID // 数据存储 ID
+	MaxTables    *int      // 最大建表数量（可选，nil 或 0 表示不限制）
 }
 
 // CreateMappingRuleRequest represents a request to create a mapping rule.
