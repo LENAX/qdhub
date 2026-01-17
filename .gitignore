@@ -6,3 +6,6 @@ qdhub/coverage.out
 qdhub/coverage_all.out
 qdhub/coverage_all.out
 */bin/*
+*/*.db-shm
+*/*.db-wal
+qdhub/data/*

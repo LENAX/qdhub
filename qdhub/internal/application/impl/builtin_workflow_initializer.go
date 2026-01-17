@@ -115,10 +115,11 @@ func (i *BuiltInWorkflowInitializer) initializeWorkflow(ctx context.Context, met
 	// For now, we'll rely on the repository to handle ID assignment.
 	def.Workflow = wf
 
-	// 5. 注册到Task Engine
+	// 5. 注册到Task Engine（仅注册定义，不会执行）
 	if err := i.taskEngineAdapter.RegisterWorkflow(ctx, def); err != nil {
 		return fmt.Errorf("failed to register workflow with task engine: %w", err)
 	}
+	log.Printf("Registered workflow definition (not executed): %s", meta.ID)
 
 	// 6. 持久化到数据库
 	if err := i.workflowDefRepo.Create(def); err != nil {
@@ -163,8 +164,12 @@ func (i *BuiltInWorkflowInitializer) createWorkflowWithPlaceholders(meta workflo
 
 	case workflows.BuiltInWorkflowIDRealtimeDataSync:
 		// 实时同步：使用空参数触发占位符模式
-		// Build方法会检测到所有参数为空，自动使用占位符
+		// 注意：需要显式清空CheckpointTable（因为构造函数有默认值）
 		return i.workflowFactory.RealtimeDataSync().
+			WithDataSource("", "").  // 清空默认值
+			WithTargetDB("").        // 清空默认值
+			WithCheckpointTable(""). // 清空默认值（重要！）
+			WithAPIs().              // 空数组
 			WithMaxStocks(0).
 			Build()
 
