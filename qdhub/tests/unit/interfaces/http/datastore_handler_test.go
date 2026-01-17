@@ -131,6 +131,11 @@ func (m *MockDataStoreService) GetMappingRules(ctx context.Context, dataSourceTy
 	return args.Get(0).([]*datastore.DataTypeMappingRule), args.Error(1)
 }
 
+func (m *MockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(shared.ID), args.Error(1)
+}
+
 func setupDataStoreRouter(mockSvc *MockDataStoreService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

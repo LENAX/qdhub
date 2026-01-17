@@ -155,23 +155,16 @@ func (i *BuiltInWorkflowInitializer) createWorkflowWithPlaceholders(meta workflo
 			Build()
 
 	case workflows.BuiltInWorkflowIDBatchDataSync:
-		// 批量同步需要更多参数，使用占位符
-		// 注意：APINames是数组，这里使用空数组，执行时通过参数替换处理
+		// 批量同步：使用空参数触发占位符模式
+		// Build方法会检测到所有参数为空，自动使用占位符
 		return i.workflowFactory.BatchDataSync().
-			WithDataSource("${data_source_name}", "${token}").
-			WithTargetDB("${target_db_path}").
-			WithDateRange("${start_date}", "${end_date}"). // WithDateRange takes 2 parameters: startDate, endDate
-			WithAPIs().                                    // 空数组，执行时通过参数替换
 			WithMaxStocks(0).
 			Build()
 
 	case workflows.BuiltInWorkflowIDRealtimeDataSync:
-		// 实时同步使用占位符参数
+		// 实时同步：使用空参数触发占位符模式
+		// Build方法会检测到所有参数为空，自动使用占位符
 		return i.workflowFactory.RealtimeDataSync().
-			WithDataSource("${data_source_name}", "${token}").
-			WithTargetDB("${target_db_path}").
-			WithCheckpointTable("${checkpoint_table}").
-			WithAPIs(). // 空数组，执行时通过参数替换
 			WithMaxStocks(0).
 			Build()
 

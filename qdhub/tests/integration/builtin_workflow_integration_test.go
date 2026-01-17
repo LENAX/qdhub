@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
-	"github.com/LENAX/task-engine/pkg/core/workflow"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"

@@ -135,6 +135,11 @@ func (m *MockWorkflowService) RetryTask(ctx context.Context, taskInstanceID shar
 	return args.Error(0)
 }
 
+func (m *MockWorkflowService) ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
+	args := m.Called(ctx, name, req)
+	return args.Get(0).(shared.ID), args.Error(1)
+}
+
 func setupWorkflowRouter(mockSvc *MockWorkflowService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
