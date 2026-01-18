@@ -3,12 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -75,11 +75,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dbDSN = "./data/qdhub.db"
 	}
 
-	log.Printf("Starting QDHub server...")
-	log.Printf("  Host: %s", host)
-	log.Printf("  Port: %d", port)
-	log.Printf("  Mode: %s", mode)
-	log.Printf("  Database: %s (%s)", dbDriver, dbDSN)
+	logrus.Infof("Starting QDHub server...")
+	logrus.Infof("  Host: %s", host)
+	logrus.Infof("  Port: %d", port)
+	logrus.Infof("  Mode: %s", mode)
+	logrus.Infof("  Database: %s (%s)", dbDriver, dbDSN)
 
 	// Create container configuration
 	config := container.DefaultConfig()
@@ -100,7 +100,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ctr.Shutdown(shutdownCtx); err != nil {
-			log.Printf("Error during container shutdown: %v", err)
+			logrus.Errorf("Error during container shutdown: %v", err)
 		}
 	}()
 
@@ -120,9 +120,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	case err := <-errChan:
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
-		log.Printf("Received signal %v, shutting down...", sig)
+		logrus.Infof("Received signal %v, shutting down...", sig)
 	}
 
-	log.Println("Server stopped gracefully")
+	logrus.Info("Server stopped gracefully")
 	return nil
 }

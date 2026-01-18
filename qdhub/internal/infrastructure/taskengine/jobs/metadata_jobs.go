@@ -4,8 +4,9 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -163,11 +164,29 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 	catalogContent := tc.GetParamString("catalog_content")
 	if catalogContent == "" {
 		// Try to get from cached upstream result
+		// Task Engine stores upstream results as _cached_<TaskID> or _cached_<TaskName>
+		// First try by task name
 		upstream := tc.GetParam("_cached_FetchCatalog")
 		if upstream != nil {
 			if upstreamMap, ok := upstream.(map[string]interface{}); ok {
 				if content, ok := upstreamMap["catalog_content"].(string); ok {
 					catalogContent = content
+				}
+			}
+		}
+
+		// If not found, try to find from any _cached_ parameter
+		// Task Engine may use task ID instead of task name
+		if catalogContent == "" {
+			for key, val := range tc.Params {
+				if strings.HasPrefix(key, "_cached_") {
+					if upstreamMap, ok := val.(map[string]interface{}); ok {
+						if content, ok := upstreamMap["catalog_content"].(string); ok {
+							catalogContent = content
+							logrus.Printf("Found catalog_content from %s", key)
+							break
+						}
+					}
 				}
 			}
 		}
@@ -233,14 +252,43 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 func SaveCategoriesJob(tc *task.TaskContext) (interface{}, error) {
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
+	if dataSourceID == "" {
+		return nil, fmt.Errorf("data_source_id is required")
+	}
+
+	// Validate data source exists
+	repoInterface, ok := tc.GetDependency("MetadataRepo")
+	if !ok {
+		return nil, fmt.Errorf("MetadataRepo dependency not found")
+	}
+	repo := repoInterface.(metadata.Repository)
+
+	ctx := context.Background()
+	ds, err := repo.GetDataSource(ctx, shared.ID(dataSourceID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to check data source existence: %w", err)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("data source not found: %s", dataSourceID)
+	}
 
 	categoriesParam := tc.GetParam("categories")
 	if categoriesParam == nil {
-		// Try to get from cached upstream result
+		// Try to get from cached upstream result by task name first
 		upstream := tc.GetParam("_cached_ParseCatalog")
 		if upstream != nil {
 			if upstreamMap, ok := upstream.(map[string]interface{}); ok {
 				categoriesParam = upstreamMap["categories"]
+			}
+		}
+
+		// If not found, try to find from any _cached_ parameter
+		// Task Engine may use task ID instead of task name
+		if categoriesParam == nil {
+			categoryMaps := extractCategoriesFromUpstream(tc)
+			if categoryMaps != nil {
+				// Convert to interface{} for compatibility
+				categoriesParam = categoryMaps
 			}
 		}
 	}
@@ -249,12 +297,7 @@ func SaveCategoriesJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("categories is required")
 	}
 
-	// Get repository from dependencies
-	repoInterface, ok := tc.GetDependency("MetadataRepo")
-	if !ok {
-		return nil, fmt.Errorf("MetadataRepo dependency not found")
-	}
-	repo := repoInterface.(metadata.Repository)
+	// repo already obtained above for validation
 
 	// Convert categories from maps
 	categoryMaps, ok := categoriesParam.([]map[string]interface{})
@@ -297,11 +340,13 @@ func SaveCategoriesJob(tc *task.TaskContext) (interface{}, error) {
 		categories = append(categories, cat)
 	}
 
-	// Save categories
-	ctx := context.Background()
+	// Save categories (ctx already obtained above)
+	logrus.Debugf("SaveCategoriesJob: Attempting to save %d categories for data_source_id=%s", len(categories), dataSourceID)
 	if err := repo.SaveCategories(ctx, categories); err != nil {
+		logrus.Errorf("SaveCategoriesJob: Failed to save categories: %v", err)
 		return nil, fmt.Errorf("failed to save categories: %w", err)
 	}
+	logrus.Debugf("SaveCategoriesJob: Successfully saved %d categories", len(categories))
 
 	return map[string]interface{}{
 		"saved_count":    len(categories),
@@ -520,6 +565,121 @@ func SaveAPIMetadataJob(tc *task.TaskContext) (interface{}, error) {
 	}, nil
 }
 
+// SaveAPIMetadataBatchJob batch saves API metadata from all FetchAPIDetail sub-tasks.
+// Note: extractAPIMetadataFromUpstream is defined in table_jobs.go
+// Input params:
+//   - data_source_id: string - The data source ID (required, will be validated)
+//
+// Output:
+//   - saved_count: int - Number of API metadata saved
+func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
+	// Get parameters
+	dataSourceID := tc.GetParamString("data_source_id")
+	if dataSourceID == "" {
+		return nil, fmt.Errorf("data_source_id is required")
+	}
+
+	// Validate data source exists
+	repoInterface, ok := tc.GetDependency("MetadataRepo")
+	if !ok {
+		return nil, fmt.Errorf("MetadataRepo dependency not found")
+	}
+	repo := repoInterface.(metadata.Repository)
+
+	ctx := context.Background()
+	ds, err := repo.GetDataSource(ctx, shared.ID(dataSourceID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to check data source existence: %w", err)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("data source not found: %s", dataSourceID)
+	}
+
+	// Extract api_metadata from all upstream sub-tasks
+	// FetchAPIDetail sub-tasks call ParseAPIDetail, which returns api_metadata
+	apiMetadataMaps := extractAPIMetadataFromUpstream(tc)
+	if len(apiMetadataMaps) == 0 {
+		logrus.Warnf("SaveAPIMetadataBatchJob: No api_metadata found from upstream tasks")
+		return map[string]interface{}{
+			"saved_count": 0,
+			"message":     "No API metadata to save",
+		}, nil
+	}
+
+	logrus.Debugf("SaveAPIMetadataBatchJob: Found %d API metadata from upstream tasks", len(apiMetadataMaps))
+
+	// Convert maps to APIMetadata entities
+	apiMetadataList := make([]metadata.APIMetadata, 0, len(apiMetadataMaps))
+	for i, m := range apiMetadataMaps {
+		apiMetadata := &metadata.APIMetadata{
+			Status: shared.StatusActive,
+		}
+
+		if id, ok := m["id"].(string); ok {
+			apiMetadata.ID = shared.ID(id)
+		}
+		if dsID, ok := m["data_source_id"].(string); ok {
+			apiMetadata.DataSourceID = shared.ID(dsID)
+		} else {
+			// Fallback to the provided data_source_id
+			apiMetadata.DataSourceID = shared.ID(dataSourceID)
+		}
+		if name, ok := m["name"].(string); ok {
+			apiMetadata.Name = name
+		}
+		if displayName, ok := m["display_name"].(string); ok {
+			apiMetadata.DisplayName = displayName
+		}
+		if desc, ok := m["description"].(string); ok {
+			apiMetadata.Description = desc
+		}
+		if endpoint, ok := m["endpoint"].(string); ok {
+			apiMetadata.Endpoint = endpoint
+		}
+		if permission, ok := m["permission"].(string); ok {
+			apiMetadata.Permission = permission
+		}
+
+		// Parse JSON fields
+		if paramsJSON, ok := m["request_params"].(string); ok && paramsJSON != "" {
+			_ = apiMetadata.UnmarshalRequestParamsJSON(paramsJSON)
+		}
+		if fieldsJSON, ok := m["response_fields"].(string); ok && fieldsJSON != "" {
+			_ = apiMetadata.UnmarshalResponseFieldsJSON(fieldsJSON)
+		}
+		if rateLimitJSON, ok := m["rate_limit"].(string); ok && rateLimitJSON != "" {
+			_ = apiMetadata.UnmarshalRateLimitJSON(rateLimitJSON)
+		}
+
+		// Validate required fields
+		if apiMetadata.ID == "" || apiMetadata.Name == "" {
+			logrus.Warnf("SaveAPIMetadataBatchJob: Skipping invalid API metadata at index %d (missing ID or name)", i)
+			continue
+		}
+
+		apiMetadataList = append(apiMetadataList, *apiMetadata)
+	}
+
+	if len(apiMetadataList) == 0 {
+		return map[string]interface{}{
+			"saved_count": 0,
+			"message":     "No valid API metadata to save",
+		}, nil
+	}
+
+	// Batch save to repository
+	if err := repo.SaveAPIMetadataBatch(ctx, apiMetadataList); err != nil {
+		return nil, fmt.Errorf("failed to batch save API metadata: %w", err)
+	}
+
+	logrus.Debugf("SaveAPIMetadataBatchJob: Successfully saved %d API metadata", len(apiMetadataList))
+
+	return map[string]interface{}{
+		"saved_count":    len(apiMetadataList),
+		"data_source_id": dataSourceID,
+	}, nil
+}
+
 // NOTE: QueryDataJob 和 ValidateTokenJob 已移至 datasource_jobs.go
 
 // ==================== 模板任务 Job Functions ====================
@@ -537,7 +697,7 @@ func SaveAPIMetadataJob(tc *task.TaskContext) (interface{}, error) {
 //   - generated: int - Number of sub-tasks generated
 //   - sub_tasks: []map[string]interface{} - Information about generated sub-tasks
 func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateAPIDetailFetchSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Printf("📋 [GenerateAPIDetailFetchSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -562,7 +722,7 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 	// Extract API URLs from upstream task result
 	apiURLs := extractAPIURLsFromUpstream(tc)
 	if len(apiURLs) == 0 {
-		log.Printf("⚠️ [GenerateAPIDetailFetchSubTasks] 未找到 api_urls，Params keys: %v", getParamKeys(tc.Params))
+		logrus.Printf("⚠️ [GenerateAPIDetailFetchSubTasks] 未找到 api_urls，Params keys: %v", getParamKeys(tc.Params))
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -572,11 +732,11 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 
 	// Apply limit if specified
 	if maxAPICrawl > 0 && len(apiURLs) > maxAPICrawl {
-		log.Printf("📡 [GenerateAPIDetailFetchSubTasks] 限制爬取数量从 %d 到 %d", len(apiURLs), maxAPICrawl)
+		logrus.Printf("📡 [GenerateAPIDetailFetchSubTasks] 限制爬取数量从 %d 到 %d", len(apiURLs), maxAPICrawl)
 		apiURLs = apiURLs[:maxAPICrawl]
 	}
 
-	log.Printf("📡 [GenerateAPIDetailFetchSubTasks] 从上游任务获取到 %d 个 API URLs，开始生成子任务", len(apiURLs))
+	logrus.Printf("📡 [GenerateAPIDetailFetchSubTasks] 从上游任务获取到 %d 个 API URLs，开始生成子任务", len(apiURLs))
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -595,13 +755,13 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 			WithTaskHandler(task.TaskStatusFailed, "MetadataRefreshFailure").
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateAPIDetailFetchSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailFetchSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateAPIDetailFetchSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailFetchSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -610,10 +770,10 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 			"name":    subTaskName,
 			"api_url": apiURL,
 		})
-		log.Printf("✅ [GenerateAPIDetailFetchSubTasks] 子任务已添加: %s (url=%s)", subTaskName, apiURL)
+		logrus.Printf("✅ [GenerateAPIDetailFetchSubTasks] 子任务已添加: %s (url=%s)", subTaskName, apiURL)
 	}
 
-	log.Printf("✅ [GenerateAPIDetailFetchSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateAPIDetailFetchSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -633,7 +793,7 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 //   - status: string - Operation status
 //   - generated: int - Number of sub-tasks generated
 func GenerateAPIParseSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateAPIParseSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Printf("📋 [GenerateAPIParseSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -702,7 +862,7 @@ func GenerateAPIParseSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("[GenerateAPIParseSubTasks] failed to add sub-task: %w", err)
 	}
 
-	log.Printf("✅ [GenerateAPIParseSubTasks] 子任务已添加: %s", subTaskName)
+	logrus.Printf("✅ [GenerateAPIParseSubTasks] 子任务已添加: %s", subTaskName)
 
 	return map[string]interface{}{
 		"status":    "success",

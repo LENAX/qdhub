@@ -2,7 +2,7 @@
 package handlers
 
 import (
-	"log"
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/task"
 )
@@ -16,9 +16,9 @@ func TokenValidationSuccessHandler(tc *task.TaskContext) {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if valid, ok := resultMap["valid"].(bool); ok {
 				if valid {
-					log.Printf("[TokenValidation] ✅ Token is valid - TaskID: %s", tc.TaskID)
+					logrus.Printf("[TokenValidation] ✅ Token is valid - TaskID: %s", tc.TaskID)
 				} else {
-					log.Printf("[TokenValidation] ⚠️ Token is invalid - TaskID: %s", tc.TaskID)
+					logrus.Printf("[TokenValidation] ⚠️ Token is invalid - TaskID: %s", tc.TaskID)
 				}
 			}
 		}
@@ -28,7 +28,7 @@ func TokenValidationSuccessHandler(tc *task.TaskContext) {
 // TokenValidationFailureHandler handles failed token validation.
 func TokenValidationFailureHandler(tc *task.TaskContext) {
 	errMsg := tc.GetParamString("_error_message")
-	log.Printf("[TokenValidation] ❌ Validation failed - TaskID: %s, Error: %s",
+	logrus.Printf("[TokenValidation] ❌ Validation failed - TaskID: %s, Error: %s",
 		tc.TaskID, errMsg)
 }
 
@@ -36,14 +36,14 @@ func TokenValidationFailureHandler(tc *task.TaskContext) {
 
 // DataSourceConnectSuccessHandler handles successful data source connection.
 func DataSourceConnectSuccessHandler(tc *task.TaskContext) {
-	log.Printf("[DataSource] ✅ Connection succeeded - Task: %s, TaskID: %s",
+	logrus.Printf("[DataSource] ✅ Connection succeeded - Task: %s, TaskID: %s",
 		tc.TaskName, tc.TaskID)
 
 	result := tc.GetParam("_result_data")
 	if result != nil {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if dataSourceName, ok := resultMap["data_source_name"]; ok {
-				log.Printf("[DataSource] Connected to: %v", dataSourceName)
+				logrus.Printf("[DataSource] Connected to: %v", dataSourceName)
 			}
 		}
 	}
@@ -52,6 +52,6 @@ func DataSourceConnectSuccessHandler(tc *task.TaskContext) {
 // DataSourceConnectFailureHandler handles failed data source connection.
 func DataSourceConnectFailureHandler(tc *task.TaskContext) {
 	errMsg := tc.GetParamString("_error_message")
-	log.Printf("[DataSource] ❌ Connection failed - Task: %s, TaskID: %s, Error: %s",
+	logrus.Printf("[DataSource] ❌ Connection failed - Task: %s, TaskID: %s, Error: %s",
 		tc.TaskName, tc.TaskID, errMsg)
 }

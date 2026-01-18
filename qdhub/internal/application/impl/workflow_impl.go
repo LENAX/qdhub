@@ -467,14 +467,40 @@ func (s *WorkflowApplicationServiceImpl) RetryTask(ctx context.Context, taskInst
 
 // ExecuteBuiltInWorkflowByName executes a built-in workflow by its API name (shortcut).
 func (s *WorkflowApplicationServiceImpl) ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
-	// Look up workflow ID by name
-	workflowID, err := workflows.GetBuiltInWorkflowIDByName(name)
+	// Validate API name exists
+	_, err := workflows.GetBuiltInWorkflowMetaByName(name)
 	if err != nil {
 		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow not found: %s", name), nil)
 	}
 
-	// Use the found ID to execute
-	req.WorkflowDefID = shared.ID(workflowID)
+	// Map API name to workflow builder name (English name used in builder)
+	// The workflow name in DB is the English name from builder (e.g., "MetadataCrawl")
+	builderNameMap := map[string]string{
+		workflows.BuiltInWorkflowNameMetadataCrawl:    "MetadataCrawl",
+		workflows.BuiltInWorkflowNameCreateTables:     "CreateTables",
+		workflows.BuiltInWorkflowNameBatchDataSync:    "BatchDataSync",
+		workflows.BuiltInWorkflowNameRealtimeDataSync: "RealtimeDataSync",
+	}
+
+	workflowName, ok := builderNameMap[name]
+	if !ok {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow name mapping not found: %s", name), nil)
+	}
+
+	// Find workflow definition by English name (as stored by builder)
+	defs, err := s.workflowDefRepo.FindBy(shared.Eq("name", workflowName))
+	if err != nil {
+		return "", fmt.Errorf("failed to find workflow by name: %w", err)
+	}
+	if len(defs) == 0 {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow '%s' not found in database. Please ensure built-in workflows are initialized.", name), nil)
+	}
+	if len(defs) > 1 {
+		return "", fmt.Errorf("multiple workflows found with name '%s'", workflowName)
+	}
+
+	// Use the found workflow ID to execute
+	req.WorkflowDefID = shared.ID(defs[0].ID())
 	return s.ExecuteWorkflow(ctx, req)
 }
 

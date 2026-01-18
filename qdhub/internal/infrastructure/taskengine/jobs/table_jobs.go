@@ -5,8 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -40,7 +41,7 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("api_name and target_db_path are required")
 	}
 
-	log.Printf("🔨 [CreateTableFromMetadata] 开始创建表: %s", apiName)
+	logrus.Printf("🔨 [CreateTableFromMetadata] 开始创建表: %s", apiName)
 
 	// 获取字段定义
 	var fields []metadata.FieldMeta
@@ -82,7 +83,7 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 生成 DDL
 	ddl := generateTableDDL(apiName, fields)
-	log.Printf("📝 [CreateTableFromMetadata] DDL: %s", ddl)
+	logrus.Printf("📝 [CreateTableFromMetadata] DDL: %s", ddl)
 
 	// 执行建表
 	db, err := sql.Open("sqlite3", targetDBPath)
@@ -95,7 +96,7 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
-	log.Printf("✅ [CreateTableFromMetadata] 表创建成功: %s, 字段数=%d", apiName, len(fields))
+	logrus.Printf("✅ [CreateTableFromMetadata] 表创建成功: %s, 字段数=%d", apiName, len(fields))
 
 	return map[string]interface{}{
 		"table_name":     apiName,
@@ -116,7 +117,7 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 //   - status: string - 操作状态
 //   - generated: int - 生成的子任务数量
 func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [CreateTablesFromCatalog] Job Function 执行")
+	logrus.Printf("📋 [CreateTablesFromCatalog] Job Function 执行")
 
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxTables, _ := tc.GetParamInt("max_tables")
@@ -148,7 +149,7 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 		apiMetadataList = apiMetadataList[:maxTables]
 	}
 
-	log.Printf("📡 [CreateTablesFromCatalog] 为 %d 个 API 生成建表子任务", len(apiMetadataList))
+	logrus.Printf("📡 [CreateTablesFromCatalog] 为 %d 个 API 生成建表子任务", len(apiMetadataList))
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -172,18 +173,18 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 			WithCompensationFunction("CompensateCreateTable"). // SAGA 补偿
 			Build()
 		if err != nil {
-			log.Printf("❌ [CreateTablesFromCatalog] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [CreateTablesFromCatalog] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [CreateTablesFromCatalog] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [CreateTablesFromCatalog] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		generatedCount++
-		log.Printf("✅ [CreateTablesFromCatalog] 子任务已添加: %s", subTaskName)
+		logrus.Printf("✅ [CreateTablesFromCatalog] 子任务已添加: %s", subTaskName)
 	}
 
 	return map[string]interface{}{
@@ -209,7 +210,7 @@ func DropTableJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("table_name and target_db_path are required")
 	}
 
-	log.Printf("🗑️ [DropTable] 删除表: %s", tableName)
+	logrus.Printf("🗑️ [DropTable] 删除表: %s", tableName)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
@@ -222,7 +223,7 @@ func DropTableJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to drop table: %w", err)
 	}
 
-	log.Printf("✅ [DropTable] 表删除成功: %s", tableName)
+	logrus.Printf("✅ [DropTable] 表删除成功: %s", tableName)
 
 	return map[string]interface{}{
 		"dropped":    true,

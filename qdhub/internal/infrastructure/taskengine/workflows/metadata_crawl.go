@@ -134,7 +134,7 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// Task 5: 保存 API 元数据（等待所有子任务完成后执行）
 	saveMetadataTask, err := builder.NewTaskBuilder("SaveAllMetadata", "保存所有 API 元数据", b.registry).
-		WithJobFunction("SaveAPIMetadata", map[string]interface{}{
+		WithJobFunction("SaveAPIMetadataBatch", map[string]interface{}{
 			"data_source_id": dataSourceID,
 		}).
 		WithDependency("FetchAPIDetails"). // 依赖模板任务（会等待所有子任务完成）

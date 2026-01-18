@@ -3,21 +3,27 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/LENAX/task-engine/pkg/storage"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
 
+	"qdhub/internal/domain/shared"
 	qdhubworkflow "qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/persistence"
 )
 
 // WorkflowDefinitionRepositoryTaskEngineImpl implements workflow.WorkflowDefinitionRepository using Task Engine storage.
 type WorkflowDefinitionRepositoryTaskEngineImpl struct {
 	aggregateRepo storage.WorkflowAggregateRepository
+	db            *persistence.DB // Database connection for updating qdhub-specific fields
 }
 
 // NewWorkflowDefinitionRepositoryTaskEngine creates a new WorkflowDefinitionRepositoryTaskEngineImpl.
-func NewWorkflowDefinitionRepositoryTaskEngine(dsn string) (*WorkflowDefinitionRepositoryTaskEngineImpl, error) {
+func NewWorkflowDefinitionRepositoryTaskEngine(db *persistence.DB, dsn string) (*WorkflowDefinitionRepositoryTaskEngineImpl, error) {
 	repo, err := sqlite.NewWorkflowAggregateRepoFromDSN(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task engine repository: %w", err)
@@ -25,6 +31,7 @@ func NewWorkflowDefinitionRepositoryTaskEngine(dsn string) (*WorkflowDefinitionR
 
 	return &WorkflowDefinitionRepositoryTaskEngineImpl{
 		aggregateRepo: repo,
+		db:            db,
 	}, nil
 }
 
@@ -32,18 +39,58 @@ func NewWorkflowDefinitionRepositoryTaskEngine(dsn string) (*WorkflowDefinitionR
 func (r *WorkflowDefinitionRepositoryTaskEngineImpl) Create(def *qdhubworkflow.WorkflowDefinition) error {
 	ctx := context.Background()
 
-	// If workflow doesn't have an ID yet, we need to set it before saving
-	// Task Engine's SaveWorkflow uses the workflow's GetID() method
-	// For built-in workflows, we want to use a fixed ID
-	// Note: Task Engine may generate an ID if workflow doesn't have one
-	// We'll rely on SaveWorkflow to handle ID assignment
-	
 	// Directly use Task Engine Workflow (embedded in WorkflowDefinition)
 	if err := r.aggregateRepo.SaveWorkflow(ctx, def.Workflow); err != nil {
 		return fmt.Errorf("failed to save workflow: %w", err)
 	}
 
+	// Update qdhub-specific fields in workflow_definition table
+	// Note: Task Engine's SaveWorkflow saves to workflow_definition table,
+	// but doesn't update qdhub-specific fields (is_system, category, etc.)
+	query := `UPDATE workflow_definition SET
+		category = :category,
+		definition_yaml = :definition_yaml,
+		version = :version,
+		is_system = :is_system,
+		updated_at = :updated_at
+		WHERE id = :id`
+
+	args := map[string]interface{}{
+		"id":              def.ID(),
+		"category":        def.Category.String(),
+		"definition_yaml": def.DefinitionYAML,
+		"version":         def.Version,
+		"is_system":       r.boolToDBValue(def.IsSystem), // Convert boolean based on database type
+		"updated_at":      def.UpdatedAt.ToTime(),
+	}
+
+	if _, err := r.db.DB.NamedExec(query, args); err != nil {
+		return fmt.Errorf("failed to update qdhub-specific fields: %w", err)
+	}
+
 	return nil
+}
+
+// boolToDBValue converts boolean to database-appropriate value.
+// SQLite uses INTEGER (0/1), PostgreSQL/MySQL can use BOOLEAN or INTEGER.
+// We use INTEGER for compatibility across all databases.
+func (r *WorkflowDefinitionRepositoryTaskEngineImpl) boolToDBValue(b bool) interface{} {
+	// Use integer for cross-database compatibility
+	// SQLite: INTEGER (0/1)
+	// PostgreSQL: Can use INTEGER or BOOLEAN (both work)
+	// MySQL: Can use TINYINT(1) or BOOLEAN (both work)
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// intToBool converts database integer value to boolean.
+func intToBool(val sql.NullInt64) bool {
+	if !val.Valid {
+		return false
+	}
+	return val.Int64 != 0
 }
 
 // Get retrieves a workflow definition by ID with its aggregated entities.
@@ -59,16 +106,43 @@ func (r *WorkflowDefinitionRepositoryTaskEngineImpl) Get(id string) (*qdhubworkf
 		return nil, nil
 	}
 
-	// Wrap Task Engine Workflow in WorkflowDefinition
-	// Note: qdhub-specific fields (Category, DefinitionYAML, etc.) need to be loaded separately
-	// For now, we create a minimal WorkflowDefinition wrapper
-	def := &qdhubworkflow.WorkflowDefinition{
-		Workflow: teWorkflow,
-		// TODO: Load qdhub-specific fields from a separate table or extend the schema
+	// Load qdhub-specific fields from database
+	var category, definitionYAML sql.NullString
+	var version, isSystem sql.NullInt64
+	var updatedAt sql.NullTime
+
+	query := `SELECT category, definition_yaml, version, is_system, updated_at 
+		FROM workflow_definition WHERE id = ?`
+	err = r.db.DB.QueryRow(query, id).Scan(&category, &definitionYAML, &version, &isSystem, &updatedAt)
+
+	// Set defaults if fields don't exist or are null
+	defCategory := "custom"
+	if category.Valid {
+		defCategory = category.String
+	}
+	defYAML := ""
+	if definitionYAML.Valid {
+		defYAML = definitionYAML.String
+	}
+	defVersion := 1
+	if version.Valid {
+		defVersion = int(version.Int64)
+	}
+	defIsSystem := intToBool(isSystem)
+	defUpdatedAt := shared.Now()
+	if updatedAt.Valid {
+		defUpdatedAt = shared.Timestamp(updatedAt.Time)
 	}
 
-	// Note: Instances field is not part of Task Engine Workflow, so we don't populate it here
-	// If needed, it can be loaded separately using ListWorkflowInstances
+	// Wrap Task Engine Workflow in WorkflowDefinition
+	def := &qdhubworkflow.WorkflowDefinition{
+		Workflow:       teWorkflow,
+		Category:       qdhubworkflow.WfCategory(defCategory),
+		DefinitionYAML: defYAML,
+		Version:        defVersion,
+		IsSystem:       defIsSystem,
+		UpdatedAt:      defUpdatedAt,
+	}
 
 	return def, nil
 }
@@ -80,6 +154,28 @@ func (r *WorkflowDefinitionRepositoryTaskEngineImpl) Update(def *qdhubworkflow.W
 	// Directly use Task Engine Workflow
 	if err := r.aggregateRepo.SaveWorkflow(ctx, def.Workflow); err != nil {
 		return fmt.Errorf("failed to update workflow: %w", err)
+	}
+
+	// Update qdhub-specific fields
+	query := `UPDATE workflow_definition SET
+		category = :category,
+		definition_yaml = :definition_yaml,
+		version = :version,
+		is_system = :is_system,
+		updated_at = :updated_at
+		WHERE id = :id`
+
+	args := map[string]interface{}{
+		"id":              def.ID(),
+		"category":        def.Category.String(),
+		"definition_yaml": def.DefinitionYAML,
+		"version":         def.Version,
+		"is_system":       r.boolToDBValue(def.IsSystem),
+		"updated_at":      def.UpdatedAt.ToTime(),
+	}
+
+	if _, err := r.db.DB.NamedExec(query, args); err != nil {
+		return fmt.Errorf("failed to update qdhub-specific fields: %w", err)
 	}
 
 	return nil
@@ -105,12 +201,122 @@ func (r *WorkflowDefinitionRepositoryTaskEngineImpl) List() ([]*qdhubworkflow.Wo
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
 	}
 
+	// Load qdhub-specific fields for all workflows in batch
+	query := `SELECT id, category, definition_yaml, version, is_system, updated_at 
+		FROM workflow_definition WHERE id IN (`
+	ids := make([]string, 0, len(teWorkflows))
+	for _, teWorkflow := range teWorkflows {
+		ids = append(ids, teWorkflow.GetID())
+	}
+
+	// Build query with placeholders
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query += strings.Join(placeholders, ",") + ")"
+
+	rows, err := r.db.DB.Query(query, args...)
+	if err != nil {
+		// If query fails, return workflows without qdhub fields
+		result := make([]*qdhubworkflow.WorkflowDefinition, 0, len(teWorkflows))
+		for _, teWorkflow := range teWorkflows {
+			result = append(result, &qdhubworkflow.WorkflowDefinition{
+				Workflow:       teWorkflow,
+				Category:       qdhubworkflow.WfCategoryCustom,
+				DefinitionYAML: "",
+				Version:        1,
+				IsSystem:       false,
+				UpdatedAt:      shared.Now(),
+			})
+		}
+		return result, nil
+	}
+	defer rows.Close()
+
+	// Map qdhub fields by ID
+	qdhubFields := make(map[string]struct {
+		category       string
+		definitionYAML string
+		version        int
+		isSystem       bool
+		updatedAt      time.Time
+	})
+
+	for rows.Next() {
+		var id string
+		var category, definitionYAML sql.NullString
+		var version, isSystem sql.NullInt64
+		var updatedAt sql.NullTime
+
+		if err := rows.Scan(&id, &category, &definitionYAML, &version, &isSystem, &updatedAt); err != nil {
+			continue
+		}
+
+		defCategory := "custom"
+		if category.Valid {
+			defCategory = category.String
+		}
+		defYAML := ""
+		if definitionYAML.Valid {
+			defYAML = definitionYAML.String
+		}
+		defVersion := 1
+		if version.Valid {
+			defVersion = int(version.Int64)
+		}
+		defIsSystem := intToBool(isSystem)
+		defUpdatedAt := time.Now()
+		if updatedAt.Valid {
+			defUpdatedAt = updatedAt.Time
+		}
+
+		qdhubFields[id] = struct {
+			category       string
+			definitionYAML string
+			version        int
+			isSystem       bool
+			updatedAt      time.Time
+		}{
+			category:       defCategory,
+			definitionYAML: defYAML,
+			version:        defVersion,
+			isSystem:       defIsSystem,
+			updatedAt:      defUpdatedAt,
+		}
+	}
+
+	// Combine Task Engine workflows with qdhub fields
 	result := make([]*qdhubworkflow.WorkflowDefinition, 0, len(teWorkflows))
 	for _, teWorkflow := range teWorkflows {
-		// Wrap Task Engine Workflow in WorkflowDefinition
+		id := teWorkflow.GetID()
+		fields, exists := qdhubFields[id]
+		if !exists {
+			// Use defaults if fields don't exist
+			fields = struct {
+				category       string
+				definitionYAML string
+				version        int
+				isSystem       bool
+				updatedAt      time.Time
+			}{
+				category:       "custom",
+				definitionYAML: "",
+				version:        1,
+				isSystem:       false,
+				updatedAt:      time.Now(),
+			}
+		}
+
 		def := &qdhubworkflow.WorkflowDefinition{
-			Workflow: teWorkflow,
-			// TODO: Load qdhub-specific fields
+			Workflow:       teWorkflow,
+			Category:       qdhubworkflow.WfCategory(fields.category),
+			DefinitionYAML: fields.definitionYAML,
+			Version:        fields.version,
+			IsSystem:       fields.isSystem,
+			UpdatedAt:      shared.Timestamp(fields.updatedAt),
 		}
 		result = append(result, def)
 	}

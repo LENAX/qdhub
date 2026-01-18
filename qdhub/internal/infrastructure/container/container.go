@@ -10,6 +10,7 @@ import (
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
@@ -17,6 +18,8 @@ import (
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/scheduler"
@@ -42,9 +45,11 @@ type Container struct {
 	MetadataRepo    metadata.Repository
 
 	// Task Engine
-	TaskEngine        *engine.Engine
-	TaskEngineAdapter workflow.TaskEngineAdapter
-	WorkflowFactory   *workflows.WorkflowFactory
+	TaskEngine         *engine.Engine
+	TaskEngineAdapter  workflow.TaskEngineAdapter
+	WorkflowFactory    *workflows.WorkflowFactory
+	WorkflowExecutor   workflow.WorkflowExecutor // 领域服务：执行内建工作流
+	DataSourceRegistry *datasource.Registry
 
 	// Scheduler
 	CronCalculator sync.CronScheduleCalculator
@@ -105,7 +110,7 @@ func NewContainer(config Config) *Container {
 
 // Initialize initializes all dependencies in the correct order.
 func (c *Container) Initialize(ctx context.Context) error {
-	log.Println("Initializing dependency container...")
+	logrus.Info("Initializing dependency container...")
 
 	// Step 1: Initialize database
 	if err := c.initDatabase(); err != nil {
@@ -114,7 +119,7 @@ func (c *Container) Initialize(ctx context.Context) error {
 
 	// Step 2: Run migrations
 	if err := c.runMigrations(); err != nil {
-		log.Printf("Migration warning: %v", err)
+		logrus.Warnf("Migration warning: %v", err)
 	}
 
 	// Step 3: Initialize repositories
@@ -139,8 +144,8 @@ func (c *Container) Initialize(ctx context.Context) error {
 
 	// Step 7: Initialize built-in workflows
 	if err := c.initBuiltInWorkflows(ctx); err != nil {
-		log.Printf("Warning: failed to initialize built-in workflows: %v", err)
-		log.Printf("Built-in workflows can be initialized later")
+		logrus.Warnf("Warning: failed to initialize built-in workflows: %v", err)
+		logrus.Warn("Built-in workflows can be initialized later")
 	}
 
 	// Step 8: Initialize HTTP server
@@ -148,7 +153,7 @@ func (c *Container) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize HTTP server: %w", err)
 	}
 
-	log.Println("Dependency container initialized successfully")
+	logrus.Info("Dependency container initialized successfully")
 	return nil
 }
 
@@ -167,7 +172,7 @@ func (c *Container) initDatabase() error {
 	}
 
 	c.DB = db
-	log.Printf("Database initialized: %s (%s)", c.config.DBDriver, c.config.DBDSN)
+	logrus.Infof("Database initialized: %s (%s)", c.config.DBDriver, c.config.DBDSN)
 	return nil
 }
 
@@ -186,7 +191,7 @@ func (c *Container) runMigrations() error {
 		return fmt.Errorf("failed to run migration: %w", err)
 	}
 
-	log.Println("Database migrations applied successfully")
+	logrus.Info("Database migrations applied successfully")
 	return nil
 }
 
@@ -206,7 +211,7 @@ func (c *Container) initRepositories() error {
 	// Metadata repository (for task engine dependencies)
 	c.MetadataRepo = repository.NewMetadataRepository(c.DB)
 
-	log.Println("Repositories initialized")
+	logrus.Info("Repositories initialized")
 	return nil
 }
 
@@ -236,9 +241,19 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 
 	c.TaskEngine = eng
 
+	// Initialize DataSourceRegistry and register adapters
+	c.DataSourceRegistry = datasource.NewRegistry()
+
+	// Register Tushare adapter
+	tushareAdapter := tushare.NewAdapter()
+	if err := c.DataSourceRegistry.RegisterAdapter(tushareAdapter); err != nil {
+		return fmt.Errorf("failed to register tushare adapter: %w", err)
+	}
+	log.Println("Registered Tushare data source adapter")
+
 	// Initialize Task Engine (register job functions and handlers)
 	taskEngineDeps := &taskengine.Dependencies{
-		DataSourceRegistry: nil, // TODO: Initialize datasource registry if needed
+		DataSourceRegistry: c.DataSourceRegistry,
 		MetadataRepo:       c.MetadataRepo,
 	}
 	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
@@ -249,7 +264,11 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	c.TaskEngineAdapter = taskengine.NewTaskEngineAdapter(eng)
 	c.WorkflowFactory = taskengine.GetWorkflowFactory(eng)
 
-	log.Println("Task Engine initialized")
+	// Create WorkflowExecutor (domain service for executing built-in workflows)
+	// This avoids direct dependency between application services
+	c.WorkflowExecutor = taskengine.NewWorkflowExecutor(c.WorkflowRepo, c.TaskEngineAdapter)
+
+	logrus.Info("Task Engine initialized")
 	return nil
 }
 
@@ -259,17 +278,19 @@ func (c *Container) initScheduler() error {
 	c.JobScheduler = scheduler.NewCronScheduler(nil) // TODO: Add job trigger callback
 	c.JobScheduler.Start()
 
-	log.Println("Scheduler initialized")
+	logrus.Info("Scheduler initialized")
 	return nil
 }
 
 // initApplicationServices initializes all application services.
 func (c *Container) initApplicationServices() error {
-	// Metadata service (using nil for parser factory - TODO: implement if needed)
-	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, nil)
-
-	// Workflow service (needed for dataStoreSvc)
+	// Workflow service (needed for MetadataSvc and DataStoreSvc)
 	c.WorkflowSvc = impl.NewWorkflowApplicationService(c.WorkflowRepo, c.TaskEngineAdapter)
+
+	// Metadata service (using nil for parser factory - TODO: implement if needed)
+	// 注意：MetadataSvc 使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc（应用服务）
+	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
+	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, nil, c.WorkflowExecutor)
 
 	// DataStore service
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
@@ -289,7 +310,7 @@ func (c *Container) initApplicationServices() error {
 		c.JobScheduler,
 	)
 
-	log.Println("Application services initialized")
+	logrus.Info("Application services initialized")
 	return nil
 }
 
@@ -305,7 +326,7 @@ func (c *Container) initBuiltInWorkflows(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize built-in workflows: %w", err)
 	}
 
-	log.Println("Built-in workflows initialized")
+	logrus.Info("Built-in workflows initialized")
 	return nil
 }
 
@@ -327,18 +348,18 @@ func (c *Container) initHTTPServer() error {
 		c.WorkflowSvc,
 	)
 
-	log.Println("HTTP server initialized")
+	logrus.Info("HTTP server initialized")
 	return nil
 }
 
 // Shutdown gracefully shuts down all resources.
 func (c *Container) Shutdown(ctx context.Context) error {
-	log.Println("Shutting down dependency container...")
+	logrus.Info("Shutting down dependency container...")
 
 	// Shutdown HTTP server
 	if c.HTTPServer != nil {
 		if err := c.HTTPServer.Shutdown(ctx); err != nil {
-			log.Printf("Error shutting down HTTP server: %v", err)
+			logrus.Errorf("Error shutting down HTTP server: %v", err)
 		}
 	}
 
@@ -350,7 +371,7 @@ func (c *Container) Shutdown(ctx context.Context) error {
 		case <-stopCtx.Done():
 			// Scheduler stopped successfully
 		case <-ctx.Done():
-			log.Printf("Context cancelled while waiting for scheduler to stop")
+			logrus.Warn("Context cancelled while waiting for scheduler to stop")
 		}
 	}
 
@@ -362,10 +383,10 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	// Close database
 	if c.DB != nil {
 		if err := c.DB.Close(); err != nil {
-			log.Printf("Error closing database: %v", err)
+			logrus.Errorf("Error closing database: %v", err)
 		}
 	}
 
-	log.Println("Dependency container shut down")
+	logrus.Info("Dependency container shut down")
 	return nil
 }

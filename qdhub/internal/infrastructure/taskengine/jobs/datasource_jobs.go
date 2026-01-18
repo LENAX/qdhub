@@ -4,7 +4,8 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/task"
 
@@ -34,7 +35,7 @@ func QueryDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_name and api_name are required")
 	}
 
-	log.Printf("📡 [QueryData] 开始查询: %s/%s", dataSourceName, apiName)
+	logrus.Printf("📡 [QueryData] 开始查询: %s/%s", dataSourceName, apiName)
 
 	// Get query params
 	var params map[string]interface{}
@@ -70,7 +71,7 @@ func QueryDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to query data: %w", err)
 	}
 
-	log.Printf("✅ [QueryData] 查询成功: %s, 记录数=%d", apiName, len(result.Data))
+	logrus.Printf("✅ [QueryData] 查询成功: %s, 记录数=%d", apiName, len(result.Data))
 
 	return map[string]interface{}{
 		"data":     result.Data,
@@ -97,7 +98,7 @@ func ValidateTokenJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_name and token are required")
 	}
 
-	log.Printf("🔑 [ValidateToken] 开始验证: %s", dataSourceName)
+	logrus.Printf("🔑 [ValidateToken] 开始验证: %s", dataSourceName)
 
 	// Get registry from dependencies
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -121,9 +122,9 @@ func ValidateTokenJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	if valid {
-		log.Printf("✅ [ValidateToken] Token 有效: %s", dataSourceName)
+		logrus.Printf("✅ [ValidateToken] Token 有效: %s", dataSourceName)
 	} else {
-		log.Printf("⚠️ [ValidateToken] Token 无效: %s", dataSourceName)
+		logrus.Printf("⚠️ [ValidateToken] Token 无效: %s", dataSourceName)
 	}
 
 	return map[string]interface{}{
@@ -150,7 +151,7 @@ func TestConnectionJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_name is required")
 	}
 
-	log.Printf("🔌 [TestConnection] 测试连接: %s", dataSourceName)
+	logrus.Printf("🔌 [TestConnection] 测试连接: %s", dataSourceName)
 
 	// Get registry from dependencies
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -179,9 +180,9 @@ func TestConnectionJob(tc *task.TaskContext) (interface{}, error) {
 	_, err = client.ValidateToken(ctx)
 	if err != nil {
 		connected = false
-		log.Printf("⚠️ [TestConnection] 连接失败: %s, error=%v", dataSourceName, err)
+		logrus.Printf("⚠️ [TestConnection] 连接失败: %s, error=%v", dataSourceName, err)
 	} else {
-		log.Printf("✅ [TestConnection] 连接成功: %s", dataSourceName)
+		logrus.Printf("✅ [TestConnection] 连接成功: %s", dataSourceName)
 	}
 
 	return map[string]interface{}{

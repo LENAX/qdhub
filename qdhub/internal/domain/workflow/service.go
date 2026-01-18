@@ -52,6 +52,19 @@ type WorkflowStatus struct {
 
 // ==================== 外部依赖接口（领域定义，基础设施实现）====================
 
+// WorkflowExecutor defines the interface for executing built-in workflows.
+// This is a domain service interface that abstracts workflow execution.
+// Implementation: infrastructure/taskengine/
+//
+// Purpose: This interface allows domain services and application services
+// to execute workflows without directly depending on WorkflowApplicationService,
+// following the Dependency Inversion Principle.
+type WorkflowExecutor interface {
+	// ExecuteBuiltInWorkflow executes a built-in workflow by its API name.
+	// Returns the workflow instance ID.
+	ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error)
+}
+
 // TaskEngineAdapter defines the interface for Task Engine integration.
 // Implementation: infrastructure/taskengine/
 type TaskEngineAdapter interface {

@@ -25,7 +25,7 @@ type WorkflowDefinitionRepositoryImpl struct {
 func NewWorkflowDefinitionRepository(db *persistence.DB) (*WorkflowDefinitionRepositoryImpl, error) {
 	dsn := extractDSNFromDB(db)
 
-	taskEngineRepo, err := NewWorkflowDefinitionRepositoryTaskEngine(dsn)
+	taskEngineRepo, err := NewWorkflowDefinitionRepositoryTaskEngine(db, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task engine repository: %w", err)
 	}

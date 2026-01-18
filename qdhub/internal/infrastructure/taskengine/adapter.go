@@ -4,6 +4,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
 
@@ -26,21 +27,43 @@ func NewTaskEngineAdapter(eng *engine.Engine) workflow.TaskEngineAdapter {
 // SubmitWorkflow submits a workflow to Task Engine.
 // Uses Task Engine's native parameter replacement feature to replace placeholders
 // (e.g., ${param_name}) with actual values before submission.
+//
+// IMPORTANT: This method reloads the workflow definition from Task Engine storage
+// before parameter replacement to ensure we don't modify the original definition.
+// This prevents issues where ReplaceParams would mutate a shared/cached object.
 func (a *TaskEngineAdapterImpl) SubmitWorkflow(ctx context.Context, definition *workflow.WorkflowDefinition, params map[string]interface{}) (string, error) {
 	if definition == nil || definition.Workflow == nil {
 		return "", fmt.Errorf("workflow definition is nil")
 	}
 
+	// Get workflow ID from the definition
+	workflowID := definition.Workflow.GetID()
+	if workflowID == "" {
+		return "", fmt.Errorf("workflow ID is empty")
+	}
+
+	// Reload workflow from Task Engine storage to get a fresh copy
+	// This ensures we don't modify the original definition object
+	aggregateRepo := a.engine.GetAggregateRepo()
+	workflowCopy, err := aggregateRepo.GetWorkflowWithTasks(ctx, workflowID)
+	if err != nil {
+		return "", fmt.Errorf("failed to reload workflow for execution: %w", err)
+	}
+	if workflowCopy == nil {
+		return "", fmt.Errorf("workflow not found: %s", workflowID)
+	}
+
 	// Use Task Engine's native ReplaceParams method to replace placeholders
 	// This will replace placeholders in both Workflow-level and Task-level parameters
+	// We do this on the reloaded copy, not the original definition
 	if len(params) > 0 {
-		if err := definition.Workflow.ReplaceParams(params); err != nil {
+		if err := workflowCopy.ReplaceParams(params); err != nil {
 			return "", fmt.Errorf("failed to replace workflow parameters: %w", err)
 		}
 	}
 
-	// Submit workflow and get controller
-	controller, err := a.engine.SubmitWorkflow(ctx, definition.Workflow)
+	// Submit the reloaded workflow copy (with replaced parameters) to Task Engine
+	controller, err := a.engine.SubmitWorkflow(ctx, workflowCopy)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit workflow: %w", err)
 	}
@@ -90,15 +113,21 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
 	}
 
-	// Calculate progress
+	// Calculate progress and determine final status
+	// Note: Task Engine may use different case for status (e.g., "FAILED" vs "Failed")
 	completedTasks := 0
 	failedTasks := 0
+	runningTasks := 0
 	for _, task := range taskInstances {
-		switch task.Status {
-		case "Success", "Skipped":
+		// Normalize status to uppercase for comparison
+		status := strings.ToUpper(task.Status)
+		switch status {
+		case "SUCCESS", "SKIPPED":
 			completedTasks++
-		case "Failed":
+		case "FAILED":
 			failedTasks++
+		case "RUNNING", "PENDING":
+			runningTasks++
 		}
 	}
 
@@ -107,9 +136,29 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		progress = float64(completedTasks) / float64(len(taskInstances)) * 100
 	}
 
+	// Determine final status: if all tasks are done (completed or failed) and there are failures, mark as Failed
+	// Otherwise use the status from Task Engine
+	finalStatus := statusStr
+	if len(taskInstances) > 0 {
+		totalDone := completedTasks + failedTasks
+		if totalDone == len(taskInstances) {
+			// All tasks are done
+			if failedTasks > 0 {
+				// If any task failed, workflow should be Failed
+				finalStatus = "Failed"
+			} else {
+				// All tasks succeeded
+				finalStatus = "Success"
+			}
+		} else if failedTasks > 0 && runningTasks == 0 {
+			// Some tasks failed and no tasks are running, workflow should be Failed
+			finalStatus = "Failed"
+		}
+	}
+
 	status := &workflow.WorkflowStatus{
 		InstanceID:    instance.ID,
-		Status:        statusStr,
+		Status:        finalStatus,
 		Progress:      progress,
 		TaskCount:     len(taskInstances),
 		CompletedTask: completedTasks,

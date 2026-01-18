@@ -40,22 +40,23 @@ func NewMetadataRepository(db *persistence.DB) *MetadataRepositoryImpl {
 // Uses upsert logic: if category exists (by ID), update it; otherwise insert.
 func (r *MetadataRepositoryImpl) SaveCategories(ctx context.Context, categories []metadata.APICategory) error {
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		for _, cat := range categories {
+		for i, cat := range categories {
 			// Check if exists
 			existing, err := r.categoryDAO.GetByID(tx, cat.ID)
 			if err != nil {
-				return fmt.Errorf("failed to check category existence: %w", err)
+				return fmt.Errorf("failed to check category existence (index %d, id=%s): %w", i, cat.ID, err)
 			}
 
 			if existing != nil {
 				// Update
 				if err := r.categoryDAO.Update(tx, &cat); err != nil {
-					return fmt.Errorf("failed to update category: %w", err)
+					return fmt.Errorf("failed to update category (index %d, id=%s, name=%s): %w", i, cat.ID, cat.Name, err)
 				}
 			} else {
 				// Insert
 				if err := r.categoryDAO.Create(tx, &cat); err != nil {
-					return fmt.Errorf("failed to create category: %w", err)
+					return fmt.Errorf("failed to create category (index %d, id=%s, name=%s, data_source_id=%s, parent_id=%v): %w", 
+						i, cat.ID, cat.Name, cat.DataSourceID, cat.ParentID, err)
 				}
 			}
 		}

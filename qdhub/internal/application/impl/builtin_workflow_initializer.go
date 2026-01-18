@@ -62,10 +62,13 @@ func (i *BuiltInWorkflowInitializer) initializeWorkflow(ctx context.Context, met
 		return fmt.Errorf("failed to check existing workflow: %w", err)
 	}
 
-	// 2. 如果已存在，跳过创建（可以后续添加版本检查逻辑）
+	// 2. 如果已存在，先删除旧的工作流和任务定义，确保重新创建时数据一致
 	if existing != nil {
-		log.Printf("Built-in workflow %s already exists, skipping creation", meta.ID)
-		return nil
+		log.Printf("Built-in workflow %s already exists, deleting and recreating", meta.ID)
+		if err := i.workflowDefRepo.Delete(meta.ID); err != nil {
+			log.Printf("Warning: failed to delete existing workflow %s: %v", meta.ID, err)
+			// 继续执行，尝试覆盖
+		}
 	}
 
 	// 3. 使用占位符参数创建workflow
@@ -73,6 +76,9 @@ func (i *BuiltInWorkflowInitializer) initializeWorkflow(ctx context.Context, met
 	if err != nil {
 		return fmt.Errorf("failed to create workflow: %w", err)
 	}
+
+	// 3.1. 设置固定的 workflow ID（内建workflow使用固定ID）
+	wf.ID = meta.ID
 
 	// 4. 创建 WorkflowDefinition
 	// 将workflow序列化为YAML（可选，用于存储）
@@ -98,35 +104,35 @@ func (i *BuiltInWorkflowInitializer) initializeWorkflow(ctx context.Context, met
 		category = workflow.WfCategoryCustom
 	}
 
-	def := workflow.NewWorkflowDefinition(
-		meta.Name,
-		meta.Description,
-		category,
-		definitionYAML,
-		true, // IsSystem = true
-	)
+	// 直接使用创建的 workflow，不创建新的 WorkflowDefinition
+	// 这样可以确保 workflow 的 ID 和任务定义保持一致
+	def := &workflow.WorkflowDefinition{
+		Workflow:       wf,
+		Category:       category,
+		DefinitionYAML: definitionYAML,
+		Version:        1,
+		IsSystem:       true,
+		UpdatedAt:      shared.Now(),
+	}
 
-	// 设置workflow ID为固定ID
-	// Note: Task Engine Workflow's ID is typically set when the workflow is saved.
-	// We need to ensure the workflow has the correct ID before saving.
-	// The repository's SaveWorkflow method should use the workflow's GetID() method.
-	// If the workflow doesn't have an ID yet, we may need to set it through reflection
-	// or modify the repository to accept an ID parameter.
-	// For now, we'll rely on the repository to handle ID assignment.
-	def.Workflow = wf
+	// 注意：此时 workflow 的 ID 可能还没有设置为 meta.ID
+	// Task Engine 的 SaveWorkflow 会在保存时处理 ID
+	// 但我们需要确保保存后，workflow 的 ID 是 meta.ID
+	// 如果 workflow 已经有 ID 且不是 meta.ID，我们需要先设置它
 
-	// 5. 注册到Task Engine（仅注册定义，不会执行）
+	// 5. 先持久化到数据库（SaveWorkflow 会设置 workflow ID）
+	// 这样可以确保 workflow 和任务定义一起保存，保持一致性
+	if err := i.workflowDefRepo.Create(def); err != nil {
+		return fmt.Errorf("failed to persist workflow: %w", err)
+	}
+
+	// 6. 注册到Task Engine（在保存后注册，确保 ID 一致）
 	if err := i.taskEngineAdapter.RegisterWorkflow(ctx, def); err != nil {
+		// 如果注册失败，尝试删除已保存的工作流
+		_ = i.workflowDefRepo.Delete(meta.ID)
 		return fmt.Errorf("failed to register workflow with task engine: %w", err)
 	}
 	log.Printf("Registered workflow definition (not executed): %s", meta.ID)
-
-	// 6. 持久化到数据库
-	if err := i.workflowDefRepo.Create(def); err != nil {
-		// 尝试从Task Engine取消注册
-		_ = i.taskEngineAdapter.UnregisterWorkflow(ctx, meta.ID)
-		return fmt.Errorf("failed to persist workflow: %w", err)
-	}
 
 	// 7. 启用workflow
 	def.Enable()

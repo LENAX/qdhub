@@ -5,9 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -51,7 +52,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_name and api_name are required")
 	}
 
-	log.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
+	logrus.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
 
 	// 获取 DataSourceRegistry
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -87,7 +88,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to query %s: %w", apiName, err)
 	}
 
-	log.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
+	logrus.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
 
 	// 如果指定了目标数据库，保存数据
 	savedCount := 0
@@ -97,7 +98,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
-		log.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
+		logrus.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
 	}
 
 	// 提取特定字段用于下游任务（如 ts_codes）
@@ -130,7 +131,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - status: string - 操作状态
 //   - generated: int - 生成的子任务数量
 func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateDataSyncSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Printf("📋 [GenerateDataSyncSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
@@ -159,7 +160,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	// 从上游任务提取参数值列表
 	paramValues := extractParamValuesFromUpstream(tc, paramKey)
 	if len(paramValues) == 0 {
-		log.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
+		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -169,11 +170,11 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 应用数量限制
 	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
-		log.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
 		paramValues = paramValues[:maxSubTasks]
 	}
 
-	log.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
+	logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -210,13 +211,13 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			WithCompensationFunction("CompensateSyncData"). // SAGA 补偿
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateDataSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateDataSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -227,10 +228,10 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			"param_key": paramKey,
 			paramKey:    paramValue,
 		})
-		log.Printf("✅ [GenerateDataSyncSubTasks] 子任务已添加: %s", subTaskName)
+		logrus.Printf("✅ [GenerateDataSyncSubTasks] 子任务已添加: %s", subTaskName)
 	}
 
-	log.Printf("✅ [GenerateDataSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -260,7 +261,7 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("api_name, target_db_path and sync_batch_id are required")
 	}
 
-	log.Printf("🗑️ [DeleteSyncedData] 删除同步数据: %s, BatchID=%s", apiName, syncBatchID)
+	logrus.Printf("🗑️ [DeleteSyncedData] 删除同步数据: %s, BatchID=%s", apiName, syncBatchID)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
@@ -275,7 +276,7 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	affected, _ := result.RowsAffected()
-	log.Printf("✅ [DeleteSyncedData] 删除成功: %s, 记录数=%d", apiName, affected)
+	logrus.Printf("✅ [DeleteSyncedData] 删除成功: %s, 记录数=%d", apiName, affected)
 
 	return map[string]interface{}{
 		"deleted_count": affected,
@@ -311,7 +312,7 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		apiNames = convertToStringSlice(raw)
 	}
 
-	log.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
+	logrus.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
@@ -343,9 +344,9 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		if err == nil {
 			checkpoints[apiName] = lastSyncDate
 			hasCheckpoint = true
-			log.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
+			logrus.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
 		} else if err != sql.ErrNoRows {
-			log.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
+			logrus.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
 		}
 	}
 
@@ -379,7 +380,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 		exchange = "SSE"
 	}
 
-	log.Printf("📅 [FetchLatestTradingDate] 获取最新交易日: source=%s, exchange=%s", dataSourceName, exchange)
+	logrus.Printf("📅 [FetchLatestTradingDate] 获取最新交易日: source=%s, exchange=%s", dataSourceName, exchange)
 
 	// 获取 DataSourceRegistry
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -428,7 +429,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 	today := getTodayDateString()
 	isTradingDay := latestTradeDate == today
 
-	log.Printf("✅ [FetchLatestTradingDate] 最新交易日=%s, 今天是否交易日=%v", latestTradeDate, isTradingDay)
+	logrus.Printf("✅ [FetchLatestTradingDate] 最新交易日=%s, 今天是否交易日=%v", latestTradeDate, isTradingDay)
 
 	return map[string]interface{}{
 		"latest_trade_date": latestTradeDate,
@@ -453,7 +454,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 //   - status: string - 操作状态
 //   - generated: int - 生成的子任务数量
 func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateIncrementalSyncSubTasks] Job Function 执行")
+	logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] Job Function 执行")
 
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
@@ -494,7 +495,7 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 		startDate = cp // 从检查点开始
 	}
 
-	log.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",
+	logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",
 		apiName, startDate, latestTradeDate)
 
 	// 获取 Engine
@@ -508,13 +509,13 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 	// 从上游任务提取股票代码列表
 	paramValues := extractParamValuesFromUpstream(tc, paramKey)
 	if len(paramValues) == 0 {
-		log.Printf("⚠️ [GenerateIncrementalSyncSubTasks] 未找到 %s 列表，尝试从 stock_basic 获取", paramKey)
+		logrus.Printf("⚠️ [GenerateIncrementalSyncSubTasks] 未找到 %s 列表，尝试从 stock_basic 获取", paramKey)
 		// 可以尝试从其他来源获取
 	}
 
 	// 应用数量限制
 	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
-		log.Printf("📡 [GenerateIncrementalSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
+		logrus.Printf("📡 [GenerateIncrementalSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
 		paramValues = paramValues[:maxSubTasks]
 	}
 
@@ -554,13 +555,13 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 			WithCompensationFunction("CompensateSyncData").
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateIncrementalSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateIncrementalSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -573,10 +574,10 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 			"start_date": startDate,
 			"end_date":   latestTradeDate,
 		})
-		log.Printf("✅ [GenerateIncrementalSyncSubTasks] 子任务已添加: %s", subTaskName)
+		logrus.Printf("✅ [GenerateIncrementalSyncSubTasks] 子任务已添加: %s", subTaskName)
 	}
 
-	log.Printf("✅ [GenerateIncrementalSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateIncrementalSyncSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":            "success",
@@ -629,7 +630,7 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		latestTradeDate = getTodayDateString()
 	}
 
-	log.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
+	logrus.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
 		checkpointTable, latestTradeDate, apiNames)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
@@ -662,12 +663,12 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 
 	for _, apiName := range apiNames {
 		if _, err := db.Exec(upsertSQL, apiName, latestTradeDate); err != nil {
-			log.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
+			logrus.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
 			continue
 		}
 		updatedCount++
 		newCheckpoints[apiName] = latestTradeDate
-		log.Printf("✅ [UpdateSyncCheckpoint] %s: %s -> %s",
+		logrus.Printf("✅ [UpdateSyncCheckpoint] %s: %s -> %s",
 			apiName, oldCheckpoints[apiName], latestTradeDate)
 	}
 
@@ -840,7 +841,7 @@ func saveAPIDataWithBatch(dbPath, tableName string, data []map[string]interface{
 		}
 
 		if _, err := stmt.Exec(values...); err != nil {
-			log.Printf("⚠️ [saveAPIDataWithBatch] 插入失败: %v", err)
+			logrus.Printf("⚠️ [saveAPIDataWithBatch] 插入失败: %v", err)
 			continue
 		}
 		count++

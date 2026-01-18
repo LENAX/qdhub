@@ -4,7 +4,8 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"log"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/task"
 
@@ -19,7 +20,7 @@ import (
 // CompensateSaveCategoriesHandler 回滚分类保存操作
 // 当 SaveCategories 任务成功但后续任务失败时，删除已保存的分类
 func CompensateSaveCategoriesHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 SaveCategories - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 SaveCategories - TaskID: %s", tc.TaskID)
 
 	dataSourceID := tc.GetParamString("data_source_id")
 	if dataSourceID == "" {
@@ -34,14 +35,14 @@ func CompensateSaveCategoriesHandler(tc *task.TaskContext) {
 	}
 
 	if dataSourceID == "" {
-		log.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
 		return
 	}
 
 	// 获取 MetadataRepo
 	repoInterface, ok := tc.GetDependency("MetadataRepo")
 	if !ok {
-		log.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
 		return
 	}
 	repo := repoInterface.(metadata.Repository)
@@ -49,17 +50,17 @@ func CompensateSaveCategoriesHandler(tc *task.TaskContext) {
 	// 删除该数据源的所有分类
 	ctx := context.Background()
 	if err := repo.DeleteCategoriesByDataSource(ctx, shared.ID(dataSourceID)); err != nil {
-		log.Printf("[Compensate] ❌ 回滚分类失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 回滚分类失败: %v", err)
 		return
 	}
 
-	log.Printf("[Compensate] ✅ SaveCategories 回滚成功 - DataSourceID: %s", dataSourceID)
+	logrus.Printf("[Compensate] ✅ SaveCategories 回滚成功 - DataSourceID: %s", dataSourceID)
 }
 
 // CompensateSaveAPIMetadataHandler 回滚 API 元数据保存操作
 // 当 SaveAPIMetadata 任务成功但后续任务失败时，删除已保存的元数据
 func CompensateSaveAPIMetadataHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 SaveAPIMetadata - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 SaveAPIMetadata - TaskID: %s", tc.TaskID)
 
 	// 尝试从结果中获取 API ID
 	apiID := tc.GetParamString("api_id")
@@ -79,14 +80,14 @@ func CompensateSaveAPIMetadataHandler(tc *task.TaskContext) {
 	}
 
 	if apiID == "" {
-		log.Printf("[Compensate] ⚠️ api_id 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ api_id 未找到，无法回滚")
 		return
 	}
 
 	// 获取 MetadataRepo
 	repoInterface, ok := tc.GetDependency("MetadataRepo")
 	if !ok {
-		log.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
 		return
 	}
 	repo := repoInterface.(metadata.Repository)
@@ -94,17 +95,17 @@ func CompensateSaveAPIMetadataHandler(tc *task.TaskContext) {
 	// 删除 API 元数据
 	ctx := context.Background()
 	if err := repo.DeleteAPIMetadata(ctx, shared.ID(apiID)); err != nil {
-		log.Printf("[Compensate] ❌ 回滚 API 元数据失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 回滚 API 元数据失败: %v", err)
 		return
 	}
 
-	log.Printf("[Compensate] ✅ SaveAPIMetadata 回滚成功 - APIID: %s, APIName: %s", apiID, apiName)
+	logrus.Printf("[Compensate] ✅ SaveAPIMetadata 回滚成功 - APIID: %s, APIName: %s", apiID, apiName)
 }
 
 // CompensateSaveAPIMetadataBatchHandler 回滚批量 API 元数据保存操作
 // 当批量保存任务成功但后续任务失败时，删除该数据源的所有 API 元数据
 func CompensateSaveAPIMetadataBatchHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 SaveAPIMetadataBatch - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 SaveAPIMetadataBatch - TaskID: %s", tc.TaskID)
 
 	dataSourceID := tc.GetParamString("data_source_id")
 	if dataSourceID == "" {
@@ -119,14 +120,14 @@ func CompensateSaveAPIMetadataBatchHandler(tc *task.TaskContext) {
 	}
 
 	if dataSourceID == "" {
-		log.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
 		return
 	}
 
 	// 获取 MetadataRepo
 	repoInterface, ok := tc.GetDependency("MetadataRepo")
 	if !ok {
-		log.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ MetadataRepo 依赖未找到，无法回滚")
 		return
 	}
 	repo := repoInterface.(metadata.Repository)
@@ -134,17 +135,17 @@ func CompensateSaveAPIMetadataBatchHandler(tc *task.TaskContext) {
 	// 删除该数据源的所有 API 元数据
 	ctx := context.Background()
 	if err := repo.DeleteAPIMetadataByDataSource(ctx, shared.ID(dataSourceID)); err != nil {
-		log.Printf("[Compensate] ❌ 回滚 API 元数据失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 回滚 API 元数据失败: %v", err)
 		return
 	}
 
-	log.Printf("[Compensate] ✅ SaveAPIMetadataBatch 回滚成功 - DataSourceID: %s", dataSourceID)
+	logrus.Printf("[Compensate] ✅ SaveAPIMetadataBatch 回滚成功 - DataSourceID: %s", dataSourceID)
 }
 
 // CompensateCreateTableHandler 回滚建表操作
 // 当 CreateTable 任务成功但后续任务失败时，删除已创建的表
 func CompensateCreateTableHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 CreateTable - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 CreateTable - TaskID: %s", tc.TaskID)
 
 	tableName := tc.GetParamString("table_name")
 	targetDBPath := tc.GetParamString("target_db_path")
@@ -164,14 +165,14 @@ func CompensateCreateTableHandler(tc *task.TaskContext) {
 	}
 
 	if tableName == "" || targetDBPath == "" {
-		log.Printf("[Compensate] ⚠️ table_name 或 target_db_path 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ table_name 或 target_db_path 未找到，无法回滚")
 		return
 	}
 
 	// 打开数据库并删除表
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
-		log.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
 		return
 	}
 	defer db.Close()
@@ -179,17 +180,17 @@ func CompensateCreateTableHandler(tc *task.TaskContext) {
 	// 执行 DROP TABLE
 	dropSQL := `DROP TABLE IF EXISTS "` + tableName + `"`
 	if _, err := db.Exec(dropSQL); err != nil {
-		log.Printf("[Compensate] ❌ 删除表失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 删除表失败: %v", err)
 		return
 	}
 
-	log.Printf("[Compensate] ✅ CreateTable 回滚成功 - Table: %s", tableName)
+	logrus.Printf("[Compensate] ✅ CreateTable 回滚成功 - Table: %s", tableName)
 }
 
 // CompensateSyncDataHandler 回滚数据同步操作
 // 当 SyncData 任务成功但后续任务失败时，删除已同步的数据
 func CompensateSyncDataHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 SyncData - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 SyncData - TaskID: %s", tc.TaskID)
 
 	apiName := tc.GetParamString("api_name")
 	targetDBPath := tc.GetParamString("target_db_path")
@@ -215,14 +216,14 @@ func CompensateSyncDataHandler(tc *task.TaskContext) {
 	}
 
 	if apiName == "" || targetDBPath == "" {
-		log.Printf("[Compensate] ⚠️ api_name 或 target_db_path 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ api_name 或 target_db_path 未找到，无法回滚")
 		return
 	}
 
 	// 打开数据库
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
-		log.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
 		return
 	}
 	defer db.Close()
@@ -232,19 +233,19 @@ func CompensateSyncDataHandler(tc *task.TaskContext) {
 	result, err := db.Exec(deleteSQL, syncBatchID)
 	if err != nil {
 		// 表可能没有 sync_batch_id 字段
-		log.Printf("[Compensate] ⚠️ 无法按批次删除，sync_batch_id 字段可能不存在: %v", err)
-		log.Printf("[Compensate] 📝 需要手动回滚 - Table: %s, BatchID: %s", apiName, syncBatchID)
+		logrus.Printf("[Compensate] ⚠️ 无法按批次删除，sync_batch_id 字段可能不存在: %v", err)
+		logrus.Printf("[Compensate] 📝 需要手动回滚 - Table: %s, BatchID: %s", apiName, syncBatchID)
 		return
 	}
 
 	affected, _ := result.RowsAffected()
-	log.Printf("[Compensate] ✅ SyncData 回滚成功 - Table: %s, 删除记录数: %d", apiName, affected)
+	logrus.Printf("[Compensate] ✅ SyncData 回滚成功 - Table: %s, 删除记录数: %d", apiName, affected)
 }
 
 // CompensateUpdateCheckpointHandler 回滚检查点更新操作
 // 当 UpdateSyncCheckpoint 任务成功但后续任务失败时，恢复旧的检查点
 func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 开始回滚 UpdateSyncCheckpoint - TaskID: %s", tc.TaskID)
+	logrus.Printf("[Compensate] 🔄 开始回滚 UpdateSyncCheckpoint - TaskID: %s", tc.TaskID)
 
 	targetDBPath := tc.GetParamString("target_db_path")
 	checkpointTable := tc.GetParamString("checkpoint_table")
@@ -263,19 +264,19 @@ func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
 	}
 
 	if targetDBPath == "" || checkpointTable == "" {
-		log.Printf("[Compensate] ⚠️ target_db_path 或 checkpoint_table 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ target_db_path 或 checkpoint_table 未找到，无法回滚")
 		return
 	}
 
 	if len(oldCheckpoints) == 0 {
-		log.Printf("[Compensate] 📝 没有旧的检查点需要恢复")
+		logrus.Printf("[Compensate] 📝 没有旧的检查点需要恢复")
 		return
 	}
 
 	// 打开数据库并恢复旧检查点
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
-		log.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
 		return
 	}
 	defer db.Close()
@@ -289,13 +290,13 @@ func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
 
 		updateSQL := `UPDATE "` + checkpointTable + `" SET last_sync_date = ? WHERE api_name = ?`
 		if _, err := db.Exec(updateSQL, dateStr, apiName); err != nil {
-			log.Printf("[Compensate] ⚠️ 恢复检查点失败: %s, error=%v", apiName, err)
+			logrus.Printf("[Compensate] ⚠️ 恢复检查点失败: %s, error=%v", apiName, err)
 			continue
 		}
-		log.Printf("[Compensate] ✅ 检查点已恢复: %s -> %s", apiName, dateStr)
+		logrus.Printf("[Compensate] ✅ 检查点已恢复: %s -> %s", apiName, dateStr)
 	}
 
-	log.Printf("[Compensate] ✅ UpdateSyncCheckpoint 回滚完成")
+	logrus.Printf("[Compensate] ✅ UpdateSyncCheckpoint 回滚完成")
 }
 
 // ==================== 通用补偿 Handlers ====================
@@ -303,11 +304,11 @@ func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
 // CompensateGenericHandler 通用补偿处理器
 // 用于记录补偿操作日志，当没有特定补偿逻辑时使用
 func CompensateGenericHandler(tc *task.TaskContext) {
-	log.Printf("[Compensate] 🔄 通用补偿处理 - Task: %s, TaskID: %s, WorkflowInstanceID: %s",
+	logrus.Printf("[Compensate] 🔄 通用补偿处理 - Task: %s, TaskID: %s, WorkflowInstanceID: %s",
 		tc.TaskName, tc.TaskID, tc.WorkflowInstanceID)
 
 	// 记录原始任务参数，便于手动回滚
-	log.Printf("[Compensate] 📝 任务参数 keys: %v", getCompensationParamKeys(tc.Params))
+	logrus.Printf("[Compensate] 📝 任务参数 keys: %v", getCompensationParamKeys(tc.Params))
 }
 
 // getCompensationParamKeys 获取参数的 key 列表（用于日志）

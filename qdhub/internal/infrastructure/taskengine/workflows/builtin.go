@@ -64,12 +64,21 @@ func GetBuiltInWorkflows() []BuiltInWorkflowMeta {
 
 // GetBuiltInWorkflowIDByName 通过API名称获取固定ID
 func GetBuiltInWorkflowIDByName(apiName string) (string, error) {
+	meta, err := GetBuiltInWorkflowMetaByName(apiName)
+	if err != nil {
+		return "", err
+	}
+	return meta.ID, nil
+}
+
+// GetBuiltInWorkflowMetaByName 通过API名称获取元数据
+func GetBuiltInWorkflowMetaByName(apiName string) (*BuiltInWorkflowMeta, error) {
 	for _, meta := range GetBuiltInWorkflows() {
 		if meta.APIName == apiName {
-			return meta.ID, nil
+			return &meta, nil
 		}
 	}
-	return "", fmt.Errorf("built-in workflow not found: %s", apiName)
+	return nil, fmt.Errorf("built-in workflow not found: %s", apiName)
 }
 
 // IsBuiltInWorkflow 检查是否为内建workflow ID

@@ -29,7 +29,7 @@ func setupDAOTestDB(t *testing.T) (*persistence.DB, func()) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS data_sources (
 			id VARCHAR(64) PRIMARY KEY,
-			name VARCHAR(128) NOT NULL,
+			name VARCHAR(128) NOT NULL UNIQUE,
 			description TEXT,
 			base_url VARCHAR(512),
 			doc_url VARCHAR(512),
@@ -65,6 +65,7 @@ func setupDAOTestDB(t *testing.T) (*persistence.DB, func()) {
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name),
 			FOREIGN KEY (data_source_id) REFERENCES data_sources(id) ON DELETE CASCADE,
 			FOREIGN KEY (category_id) REFERENCES api_categories(id)
 		);

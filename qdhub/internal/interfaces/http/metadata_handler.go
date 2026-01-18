@@ -180,12 +180,12 @@ func (h *MetadataHandler) DeleteDataSource(c *gin.Context) {
 
 // RefreshMetadata handles POST /api/v1/datasources/:id/refresh
 // @Summary      Refresh metadata from data source
-// @Description  Parse and import API metadata from the data source documentation
+// @Description  Trigger metadata crawl workflow for the data source. The workflow will fetch documentation from the data source's DocURL and parse it.
 // @Tags         DataSources
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string            true  "Data source ID"
-// @Param        request  body      RefreshMetadataReq true "Document content to parse"
+// @Param        request  body      RefreshMetadataReq false "Request body (optional, workflow will fetch from DocURL)"
 // @Success      200      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
@@ -194,16 +194,16 @@ func (h *MetadataHandler) DeleteDataSource(c *gin.Context) {
 func (h *MetadataHandler) RefreshMetadata(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
+	// Request body is optional - workflow will fetch documentation from data source's DocURL
 	var req RefreshMetadataReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
+	_ = c.ShouldBindJSON(&req) // Ignore binding errors, as body is optional
 
+	// Note: DocContent and DocType are no longer used - workflow fetches from DocURL
+	// They are kept in the request for backward compatibility but will be ignored
 	result, err := h.metadataSvc.ParseAndImportMetadata(c.Request.Context(), contracts.ParseMetadataRequest{
 		DataSourceID: id,
-		DocContent:   req.DocContent,
-		DocType:      metadata.DocumentType(req.DocType),
+		DocContent:   req.DocContent,                     // Ignored - workflow fetches from DocURL
+		DocType:      metadata.DocumentType(req.DocType), // Ignored - workflow detects type
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -505,9 +505,10 @@ type UpdateDataSourceReq struct {
 }
 
 // RefreshMetadataReq represents the request body for refreshing metadata.
+// Note: These fields are optional and will be ignored - the workflow fetches documentation from the data source's DocURL.
 type RefreshMetadataReq struct {
-	DocContent string `json:"doc_content" binding:"required"`
-	DocType    string `json:"doc_type" binding:"required"`
+	DocContent string `json:"doc_content"` // Optional - workflow fetches from DocURL
+	DocType    string `json:"doc_type"`    // Optional - workflow detects type automatically
 }
 
 // CreateAPIMetadataReq represents the request body for creating API metadata.
