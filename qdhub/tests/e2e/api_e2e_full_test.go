@@ -149,11 +149,12 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	jobScheduler := newE2EJobScheduler()
 	ctx.JobScheduler = jobScheduler
+	workflowExecutor := newE2EWorkflowExecutor()
 
 	// 创建 application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	if cfg.Mode == "mock" {

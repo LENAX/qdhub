@@ -71,3 +71,90 @@ func (e *WorkflowExecutorImpl) ExecuteBuiltInWorkflow(ctx context.Context, name 
 
 	return shared.ID(instanceID), nil
 }
+
+// ExecuteMetadataCrawl executes the metadata_crawl built-in workflow.
+// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+func (e *WorkflowExecutorImpl) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	params := map[string]interface{}{
+		"data_source_id":   req.DataSourceID.String(),
+		"data_source_name": req.DataSourceName,
+		"max_api_crawl":    req.MaxAPICrawl, // 始终传递，0 表示不限制
+	}
+
+	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameMetadataCrawl, params)
+}
+
+// ExecuteCreateTables executes the create_tables built-in workflow.
+// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+func (e *WorkflowExecutorImpl) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	params := map[string]interface{}{
+		"data_source_id":   req.DataSourceID.String(),
+		"data_source_name": req.DataSourceName,
+		"target_db_path":   req.TargetDBPath,
+	}
+
+	// Only add max_tables if it's set (non-zero means limit)
+	if req.MaxTables > 0 {
+		params["max_tables"] = req.MaxTables
+	}
+
+	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameCreateTables, params)
+}
+
+// ExecuteBatchDataSync executes the batch_data_sync built-in workflow.
+// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	params := map[string]interface{}{
+		"data_source_name": req.DataSourceName,
+		"token":            req.Token,
+		"target_db_path":   req.TargetDBPath,
+		"start_date":       req.StartDate,
+		"end_date":         req.EndDate,
+		"api_names":        req.APINames,
+	}
+
+	// Add optional time parameters if set
+	if req.StartTime != "" {
+		params["start_time"] = req.StartTime
+	}
+	if req.EndTime != "" {
+		params["end_time"] = req.EndTime
+	}
+
+	// Only add max_stocks if it's set (non-zero means limit)
+	if req.MaxStocks > 0 {
+		params["max_stocks"] = req.MaxStocks
+	}
+
+	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameBatchDataSync, params)
+}
+
+// ExecuteRealtimeDataSync executes the realtime_data_sync built-in workflow.
+// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+func (e *WorkflowExecutorImpl) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	params := map[string]interface{}{
+		"data_source_name": req.DataSourceName,
+		"token":            req.Token,
+		"target_db_path":   req.TargetDBPath,
+		"api_names":        req.APINames,
+	}
+
+	// Set checkpoint table with default value
+	checkpointTable := req.CheckpointTable
+	if checkpointTable == "" {
+		checkpointTable = "sync_checkpoint"
+	}
+	params["checkpoint_table"] = checkpointTable
+
+	// Add optional cron expression if set
+	if req.CronExpr != "" {
+		params["cron_expr"] = req.CronExpr
+	}
+
+	// Only add max_stocks if it's set (non-zero means limit)
+	if req.MaxStocks > 0 {
+		params["max_stocks"] = req.MaxStocks
+	}
+
+	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameRealtimeDataSync, params)
+}

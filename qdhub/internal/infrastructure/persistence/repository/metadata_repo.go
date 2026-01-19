@@ -55,7 +55,7 @@ func (r *MetadataRepositoryImpl) SaveCategories(ctx context.Context, categories 
 			} else {
 				// Insert
 				if err := r.categoryDAO.Create(tx, &cat); err != nil {
-					return fmt.Errorf("failed to create category (index %d, id=%s, name=%s, data_source_id=%s, parent_id=%v): %w", 
+					return fmt.Errorf("failed to create category (index %d, id=%s, name=%s, data_source_id=%s, parent_id=%v): %w",
 						i, cat.ID, cat.Name, cat.DataSourceID, cat.ParentID, err)
 				}
 			}
@@ -104,17 +104,21 @@ func (r *MetadataRepositoryImpl) SaveAPIMetadata(ctx context.Context, meta *meta
 }
 
 // SaveAPIMetadataBatch batch saves API metadata.
+// Uses upsert logic based on (data_source_id, name) unique constraint:
+// - If metadata exists with same data_source_id and name, update it
+// - Otherwise insert new record
 func (r *MetadataRepositoryImpl) SaveAPIMetadataBatch(ctx context.Context, metas []metadata.APIMetadata) error {
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
 		for _, meta := range metas {
-			// Check if exists
-			existing, err := r.apiMetadataDAO.GetByID(tx, meta.ID)
+			// Check if exists by (data_source_id, name) unique constraint
+			existing, err := r.apiMetadataDAO.GetByDataSourceAndName(tx, meta.DataSourceID, meta.Name)
 			if err != nil {
 				return fmt.Errorf("failed to check API metadata existence: %w", err)
 			}
 
 			if existing != nil {
-				// Update
+				// Update: use existing ID to avoid creating duplicate
+				meta.ID = existing.ID
 				if err := r.apiMetadataDAO.Update(tx, &meta); err != nil {
 					return fmt.Errorf("failed to update API metadata: %w", err)
 				}
@@ -204,6 +208,20 @@ func (r *MetadataRepositoryImpl) GetDataSource(ctx context.Context, id shared.ID
 // GetToken returns a token by data source ID.
 func (r *MetadataRepositoryImpl) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) {
 	return r.tokenDAO.GetByDataSource(nil, dataSourceID)
+}
+
+// GetDataSourceByName returns a data source by name.
+// Used by compensation handlers to find data source ID when only name is available.
+func (r *MetadataRepositoryImpl) GetDataSourceByName(ctx context.Context, name string) (*metadata.DataSource, error) {
+	ds, err := r.dataSourceDAO.GetByName(nil, name)
+	if err != nil {
+		return nil, err
+	}
+	if ds == nil {
+		return nil, nil
+	}
+	// Note: Not loading aggregated entities for efficiency (only ID is needed for compensation)
+	return ds, nil
 }
 
 // ==================== 辅助方法 ====================

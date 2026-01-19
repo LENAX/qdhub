@@ -449,71 +449,31 @@ func (m *MockQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.Quan
 	return m.tableExists, nil
 }
 
-// MockWorkflowService is a simple mock implementation of contracts.WorkflowApplicationService.
-// Only used for testing DataStoreApplicationService, so most methods are no-ops.
-type MockWorkflowService struct{}
+// MockWorkflowExecutor is a simple mock implementation of workflow.WorkflowExecutor.
+// Only used for testing DataStoreApplicationService, so most methods return mock values.
+type MockWorkflowExecutor struct{}
 
-func NewMockWorkflowService() *MockWorkflowService {
-	return &MockWorkflowService{}
+func NewMockWorkflowExecutor() *MockWorkflowExecutor {
+	return &MockWorkflowExecutor{}
 }
 
-func (m *MockWorkflowService) ExecuteWorkflow(ctx context.Context, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
+func (m *MockWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
 	return shared.ID("mock-instance-id"), nil
 }
 
-// Other methods are not used in DataStoreApplicationService tests, so we provide minimal implementations
-func (m *MockWorkflowService) CreateWorkflowDefinition(ctx context.Context, req contracts.CreateWorkflowDefinitionRequest) (*workflow.WorkflowDefinition, error) {
-	return nil, nil
+func (m *MockWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
 }
-func (m *MockWorkflowService) GetWorkflowDefinition(ctx context.Context, id shared.ID) (*workflow.WorkflowDefinition, error) {
-	return nil, nil
+
+func (m *MockWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
 }
-func (m *MockWorkflowService) UpdateWorkflowDefinition(ctx context.Context, id shared.ID, req contracts.UpdateWorkflowDefinitionRequest) error {
-	return nil
+
+func (m *MockWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
 }
-func (m *MockWorkflowService) DeleteWorkflowDefinition(ctx context.Context, id shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) ListWorkflowDefinitions(ctx context.Context, category *workflow.WfCategory) ([]*workflow.WorkflowDefinition, error) {
-	return nil, nil
-}
-func (m *MockWorkflowService) EnableWorkflow(ctx context.Context, id shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) DisableWorkflow(ctx context.Context, id shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) GetWorkflowInstance(ctx context.Context, id shared.ID) (*workflow.WorkflowInstance, error) {
-	return nil, nil
-}
-func (m *MockWorkflowService) ListWorkflowInstances(ctx context.Context, workflowDefID shared.ID, status *workflow.WfInstStatus) ([]*workflow.WorkflowInstance, error) {
-	return nil, nil
-}
-func (m *MockWorkflowService) GetWorkflowStatus(ctx context.Context, instanceID shared.ID) (*workflow.WorkflowStatus, error) {
-	return nil, nil
-}
-func (m *MockWorkflowService) PauseWorkflow(ctx context.Context, instanceID shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) ResumeWorkflow(ctx context.Context, instanceID shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) CancelWorkflow(ctx context.Context, instanceID shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) SyncWithEngine(ctx context.Context, instanceID shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) SyncAllInstances(ctx context.Context) error {
-	return nil
-}
-func (m *MockWorkflowService) GetTaskInstances(ctx context.Context, workflowInstID shared.ID) ([]*workflow.TaskInstance, error) {
-	return nil, nil
-}
-func (m *MockWorkflowService) RetryTask(ctx context.Context, taskInstanceID shared.ID) error {
-	return nil
-}
-func (m *MockWorkflowService) ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
+
+func (m *MockWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
 	return shared.ID("mock-instance-id"), nil
 }
 
@@ -528,7 +488,7 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		req := contracts.CreateDataStoreRequest{
@@ -561,7 +521,7 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		req := contracts.CreateDataStoreRequest{
@@ -590,7 +550,7 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		result, err := svc.GetDataStore(ctx, ds.ID)
@@ -608,7 +568,7 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		_, err := svc.GetDataStore(ctx, shared.NewID())
@@ -630,7 +590,7 @@ func TestDataStoreApplicationService_UpdateDataStore(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		newName := "Updated Name"
@@ -658,7 +618,7 @@ func TestDataStoreApplicationService_UpdateDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		newName := "Updated Name"
@@ -683,7 +643,7 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.DeleteDataStore(ctx, ds.ID)
@@ -710,7 +670,7 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 		schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.DeleteDataStore(ctx, ds.ID)
@@ -725,7 +685,7 @@ func TestDataStoreApplicationService_DeleteDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.DeleteDataStore(ctx, shared.NewID())
@@ -749,7 +709,7 @@ func TestDataStoreApplicationService_ListDataStores(t *testing.T) {
 		dsRepo.Create(ds)
 	}
 
-	workflowSvc := NewMockWorkflowService()
+	workflowSvc := NewMockWorkflowExecutor()
 	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 	stores, err := svc.ListDataStores(ctx)
@@ -773,7 +733,7 @@ func TestDataStoreApplicationService_TestConnection(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.TestConnection(ctx, ds.ID)
@@ -792,7 +752,7 @@ func TestDataStoreApplicationService_TestConnection(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.TestConnection(ctx, ds.ID)
@@ -807,7 +767,7 @@ func TestDataStoreApplicationService_TestConnection(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.TestConnection(ctx, shared.NewID())
@@ -846,7 +806,7 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 		rule2 := datastore.NewDataTypeMappingRule("tushare", "float", "duckdb", "DOUBLE", 100, true)
 		ruleRepo.Create(rule2)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		schema, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
@@ -875,7 +835,7 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		_, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
@@ -897,7 +857,7 @@ func TestDataStoreApplicationService_GenerateTableSchema(t *testing.T) {
 		ds := datastore.NewQuantDataStore("Test", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/test.duckdb")
 		dsRepo.Create(ds)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		_, err := svc.GenerateTableSchema(ctx, contracts.GenerateSchemaRequest{
@@ -932,7 +892,7 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 		})
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.CreateTable(ctx, schema.ID)
@@ -962,7 +922,7 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 		})
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.CreateTable(ctx, schema.ID)
@@ -982,7 +942,7 @@ func TestDataStoreApplicationService_CreateTable(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.CreateTable(ctx, shared.NewID())
@@ -1008,7 +968,7 @@ func TestDataStoreApplicationService_DropTable(t *testing.T) {
 		schema.MarkCreated()
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.DropTable(ctx, schema.ID)
@@ -1028,7 +988,7 @@ func TestDataStoreApplicationService_DropTable(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.DropTable(ctx, shared.NewID())
@@ -1050,7 +1010,7 @@ func TestDataStoreApplicationService_GetTableSchema(t *testing.T) {
 		schema := datastore.NewTableSchema(shared.NewID(), shared.NewID(), "test_table")
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		result, err := svc.GetTableSchema(ctx, schema.ID)
@@ -1068,7 +1028,7 @@ func TestDataStoreApplicationService_GetTableSchema(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		_, err := svc.GetTableSchema(ctx, shared.NewID())
@@ -1091,7 +1051,7 @@ func TestDataStoreApplicationService_GetTableSchemaByAPI(t *testing.T) {
 		schema := datastore.NewTableSchema(shared.NewID(), apiID, "test_table")
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		result, err := svc.GetTableSchemaByAPI(ctx, apiID)
@@ -1109,7 +1069,7 @@ func TestDataStoreApplicationService_GetTableSchemaByAPI(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		_, err := svc.GetTableSchemaByAPI(ctx, shared.NewID())
@@ -1133,7 +1093,7 @@ func TestDataStoreApplicationService_ListTableSchemas(t *testing.T) {
 		dsRepo.AddSchema(schema)
 	}
 
-	workflowSvc := NewMockWorkflowService()
+	workflowSvc := NewMockWorkflowExecutor()
 	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 	schemas, err := svc.ListTableSchemas(ctx, dsID)
@@ -1157,7 +1117,7 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 		schema := datastore.NewTableSchema(shared.NewID(), shared.NewID(), "test_table")
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		newCols := []datastore.ColumnDef{
@@ -1186,7 +1146,7 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 		schema.MarkCreated()
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		newCols := []datastore.ColumnDef{
@@ -1206,7 +1166,7 @@ func TestDataStoreApplicationService_UpdateTableSchema(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		newCols := []datastore.ColumnDef{
@@ -1230,7 +1190,7 @@ func TestDataStoreApplicationService_CreateMappingRule(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		req := contracts.CreateMappingRuleRequest{
@@ -1268,7 +1228,7 @@ func TestDataStoreApplicationService_GetMappingRules(t *testing.T) {
 	rule2 := datastore.NewDataTypeMappingRule("tushare", "int", "duckdb", "INTEGER", 100, true)
 	ruleRepo.Create(rule2)
 
-	workflowSvc := NewMockWorkflowService()
+	workflowSvc := NewMockWorkflowExecutor()
 	svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 	rules, err := svc.GetMappingRules(ctx, "tushare", "duckdb")
@@ -1296,7 +1256,7 @@ func TestDataStoreApplicationService_SyncSchemaStatus(t *testing.T) {
 		schema := datastore.NewTableSchema(ds.ID, shared.NewID(), "test_table")
 		dsRepo.AddSchema(schema)
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.SyncSchemaStatus(ctx, ds.ID)
@@ -1316,7 +1276,7 @@ func TestDataStoreApplicationService_SyncSchemaStatus(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 		adapter := NewMockQuantDBAdapter()
 
-		workflowSvc := NewMockWorkflowService()
+		workflowSvc := NewMockWorkflowExecutor()
 		svc := impl.NewDataStoreApplicationService(dsRepo, ruleRepo, dataSourceRepo, adapter, workflowSvc)
 
 		err := svc.SyncSchemaStatus(ctx, shared.NewID())

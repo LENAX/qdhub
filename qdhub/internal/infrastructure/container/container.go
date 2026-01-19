@@ -22,6 +22,7 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -284,30 +285,35 @@ func (c *Container) initScheduler() error {
 
 // initApplicationServices initializes all application services.
 func (c *Container) initApplicationServices() error {
-	// Workflow service (needed for MetadataSvc and DataStoreSvc)
+	// Workflow service (for workflow management API)
 	c.WorkflowSvc = impl.NewWorkflowApplicationService(c.WorkflowRepo, c.TaskEngineAdapter)
 
-	// Metadata service (using nil for parser factory - TODO: implement if needed)
+	// Metadata service
 	// 注意：MetadataSvc 使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc（应用服务）
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
 	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, nil, c.WorkflowExecutor)
 
 	// DataStore service
+	// 注意：DataStoreSvc 现在使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
 		c.MappingRuleRepo,
 		c.DataSourceRepo,
-		nil, // TODO: QuantDB adapter
-		c.WorkflowSvc,
+		quantdb.NewQuantDBAdapter(),
+		c.WorkflowExecutor,
 	)
 
 	// Sync service
+	// 注意：SyncSvc 现在需要额外的 DataSourceRepo 和 WorkflowExecutor 用于
+	// SyncDataSource 和 SyncDataSourceRealtime 方法
 	c.SyncSvc = impl.NewSyncApplicationService(
 		c.SyncJobRepo,
 		c.WorkflowRepo,
-		nil, // TODO: Sync execution callback
+		c.TaskEngineAdapter,
 		c.CronCalculator,
 		c.JobScheduler,
+		c.DataSourceRepo,   // 新增：用于校验数据源和获取 token
+		c.WorkflowExecutor, // 新增：用于执行内建 workflow
 	)
 
 	logrus.Info("Application services initialized")

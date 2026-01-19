@@ -20,16 +20,15 @@ const (
 	DefaultDocURL = "https://tushare.pro/document/2"
 	// DefaultCrawlerTimeout is the default crawler timeout in seconds.
 	DefaultCrawlerTimeout = 30
-	// DefaultRateLimitPerMinute is the default rate limit for requests.
-	DefaultRateLimitPerMinute = 30
 )
 
 // Crawler implements datasource.Crawler for Tushare documentation.
+// Note: Rate limiting is handled by Task Engine's concurrency control,
+// not by the Crawler itself. This allows for true parallel execution
+// of sub-tasks while respecting overall system concurrency limits.
 type Crawler struct {
-	docURL             string
-	httpClient         *http.Client
-	rateLimitPerMinute int
-	lastRequestTime    time.Time
+	docURL     string
+	httpClient *http.Client
 }
 
 // CrawlerOption is a function that configures Crawler.
@@ -49,13 +48,6 @@ func WithCrawlerTimeout(timeout time.Duration) CrawlerOption {
 	}
 }
 
-// WithRateLimitPerMinute sets the rate limit.
-func WithRateLimitPerMinute(limit int) CrawlerOption {
-	return func(c *Crawler) {
-		c.rateLimitPerMinute = limit
-	}
-}
-
 // NewCrawler creates a new Tushare documentation crawler.
 func NewCrawler(opts ...CrawlerOption) *Crawler {
 	c := &Crawler{
@@ -63,7 +55,6 @@ func NewCrawler(opts ...CrawlerOption) *Crawler {
 		httpClient: &http.Client{
 			Timeout: DefaultCrawlerTimeout * time.Second,
 		},
-		rateLimitPerMinute: DefaultRateLimitPerMinute,
 	}
 
 	for _, opt := range opts {
@@ -80,11 +71,6 @@ func (c *Crawler) Name() string {
 
 // FetchCatalogPage fetches the catalog page content.
 func (c *Crawler) FetchCatalogPage(ctx context.Context, dataSourceID shared.ID) (string, metadata.DocumentType, error) {
-	// Apply rate limiting
-	if err := c.rateLimit(ctx); err != nil {
-		return "", "", err
-	}
-
 	// Fetch the main documentation page
 	content, err := c.fetchPage(ctx, c.docURL)
 	if err != nil {
@@ -96,11 +82,6 @@ func (c *Crawler) FetchCatalogPage(ctx context.Context, dataSourceID shared.ID) 
 
 // FetchAPIDetailPage fetches an API detail page content.
 func (c *Crawler) FetchAPIDetailPage(ctx context.Context, apiURL string) (string, metadata.DocumentType, error) {
-	// Apply rate limiting
-	if err := c.rateLimit(ctx); err != nil {
-		return "", "", err
-	}
-
 	// Resolve relative URL
 	fullURL, err := c.resolveURL(apiURL)
 	if err != nil {
@@ -172,28 +153,6 @@ func (c *Crawler) resolveURL(relativeURL string) (string, error) {
 	}
 
 	return base.ResolveReference(ref).String(), nil
-}
-
-// rateLimit applies rate limiting to requests.
-func (c *Crawler) rateLimit(ctx context.Context) error {
-	if c.rateLimitPerMinute <= 0 {
-		return nil
-	}
-
-	minInterval := time.Minute / time.Duration(c.rateLimitPerMinute)
-	elapsed := time.Since(c.lastRequestTime)
-
-	if elapsed < minInterval {
-		waitTime := minInterval - elapsed
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(waitTime):
-		}
-	}
-
-	c.lastRequestTime = time.Now()
-	return nil
 }
 
 // GetDocURL returns the documentation URL.

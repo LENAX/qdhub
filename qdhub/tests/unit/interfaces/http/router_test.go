@@ -161,6 +161,12 @@ func (m *FullMockSyncService) UpdateSchedule(ctx context.Context, jobID shared.I
 func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
 	return nil
 }
+func (m *FullMockSyncService) SyncDataSource(ctx context.Context, req contracts.SyncDataSourceRequest) (shared.ID, error) {
+	return "", nil
+}
+func (m *FullMockSyncService) SyncDataSourceRealtime(ctx context.Context, req contracts.SyncDataSourceRealtimeRequest) (shared.ID, error) {
+	return "", nil
+}
 
 // FullMockWorkflowService implements WorkflowApplicationService.
 type FullMockWorkflowService struct{}

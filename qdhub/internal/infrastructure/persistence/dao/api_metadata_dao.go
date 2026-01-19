@@ -157,6 +157,28 @@ func (d *APIMetadataDAO) DeleteByDataSource(tx *sqlx.Tx, dataSourceID shared.ID)
 	return nil
 }
 
+// GetByDataSourceAndName retrieves an API metadata by data source ID and name.
+// This is used to check for duplicates before insert (unique constraint: data_source_id, name).
+func (d *APIMetadataDAO) GetByDataSourceAndName(tx *sqlx.Tx, dataSourceID shared.ID, name string) (*metadata.APIMetadata, error) {
+	query := d.DB().Rebind(`SELECT * FROM api_metadata WHERE data_source_id = ? AND name = ?`)
+	var row APIMetadataRow
+
+	var err error
+	if tx != nil {
+		err = tx.Get(&row, query, dataSourceID.String(), name)
+	} else {
+		err = d.DB().Get(&row, query, dataSourceID.String(), name)
+	}
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get api metadata by data source and name: %w", err)
+	}
+	return d.toEntity(&row)
+}
+
 // toRow converts domain entity to database row.
 func (d *APIMetadataDAO) toRow(entity *metadata.APIMetadata) (*APIMetadataRow, error) {
 	requestParams, err := entity.MarshalRequestParamsJSON()

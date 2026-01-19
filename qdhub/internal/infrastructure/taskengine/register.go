@@ -39,6 +39,7 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"SaveCategories", jobs.SaveCategoriesJob, "保存 API 分类"},
 		{"FetchAPIDetail", jobs.FetchAPIDetailJob, "获取 API 详情页"},
 		{"ParseAPIDetail", jobs.ParseAPIDetailJob, "解析 API 详情"},
+		{"FetchAndParseAPIDetail", jobs.FetchAndParseAPIDetailJob, "获取并解析 API 详情（组合函数）"},
 		{"SaveAPIMetadata", jobs.SaveAPIMetadataJob, "保存 API 元数据"},
 		{"SaveAPIMetadataBatch", jobs.SaveAPIMetadataBatchJob, "批量保存 API 元数据"},
 		// 模板任务 Job Functions（元数据）

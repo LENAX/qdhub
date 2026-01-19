@@ -562,11 +562,20 @@ func TestDeleteDataSourceError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestRefreshMetadataInvalidBody(t *testing.T) {
+func TestRefreshMetadataWithOptionalBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
 	router := setupMetadataRouter(mockSvc)
 
-	// Missing required fields
+	// Request body is now optional - workflow fetches documentation from data source's DocURL
+	// Even with partial body, the service should be called
+	mockSvc.On("ParseAndImportMetadata", mock.Anything, mock.MatchedBy(func(req contracts.ParseMetadataRequest) bool {
+		return req.DataSourceID == "ds-1"
+	})).Return(&contracts.ParseMetadataResult{
+		CategoriesCreated: 0,
+		APIsCreated:       0,
+		APIsUpdated:       0,
+	}, nil)
+
 	body := map[string]interface{}{
 		"doc_type": "html",
 	}
@@ -576,7 +585,9 @@ func TestRefreshMetadataInvalidBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	// Now expects success since body is optional (workflow fetches from DocURL)
+	assert.Equal(t, http.StatusOK, w.Code)
+	mockSvc.AssertExpectations(t)
 }
 
 func TestRefreshMetadataError(t *testing.T) {

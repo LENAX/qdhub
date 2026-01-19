@@ -148,9 +148,15 @@ func (s *MetadataApplicationServiceImpl) ListDataSources(ctx context.Context) ([
 // ==================== API Metadata Management ====================
 
 // ParseAndImportMetadata parses documentation and imports metadata.
-// This method now uses the built-in metadata crawl workflow to perform the operation.
+// This method uses the built-in metadata_crawl workflow to perform the operation.
+//
+// Pre-conditions validated:
+//   - Data source must exist (validated using req.DataSourceID)
+//
+// The same DataSourceID is used for both validation and workflow execution
+// to ensure consistency.
 func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Context, req contracts.ParseMetadataRequest) (*contracts.ParseMetadataResult, error) {
-	// 1. 验证数据源是否存在
+	// 1. 验证数据源是否存在（前置条件校验）
 	ds, err := s.dataSourceRepo.Get(req.DataSourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get data source: %w", err)
@@ -164,23 +170,14 @@ func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Cont
 		return nil, fmt.Errorf("workflow executor is not available")
 	}
 
-	// 3. 准备工作流参数
-	// data_source_name 使用数据源的 Name 字段（假设用户创建数据源时使用适配器名称，如 "tushare"）
-	// 如果后续需要更精确的适配器名称，可以在 DataSource 实体中添加 adapter_name 字段
-	workflowParams := map[string]interface{}{
-		"data_source_id":   req.DataSourceID.String(),
-		"data_source_name": ds.Name, // 使用数据源名称作为适配器名称
-	}
-
-	// 如果请求中指定了最大爬取数量，则使用该值（可选参数）
-	// 注意：ParseMetadataRequest 目前没有 MaxAPICrawl 字段，可以后续扩展
-
-	// 4. 执行内建的 metadata_crawl workflow（通过领域服务接口）
-	instanceID, err := s.workflowExecutor.ExecuteBuiltInWorkflow(
-		ctx,
-		"metadata_crawl", // 内建工作流的 API 名称
-		workflowParams,
-	)
+	// 3. 执行内建的 metadata_crawl workflow
+	// 使用类型安全的 ExecuteMetadataCrawl 方法
+	// 注意：req.DataSourceID 既用于上面的校验，也用于 workflow 执行，确保一致性
+	instanceID, err := s.workflowExecutor.ExecuteMetadataCrawl(ctx, workflow.MetadataCrawlRequest{
+		DataSourceID:   req.DataSourceID, // 与校验时使用的 ID 一致
+		DataSourceName: ds.Name,          // 从校验通过的数据源获取名称
+		MaxAPICrawl:    req.MaxAPICrawl,  // 使用请求中的爬取数量限制
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute metadata crawl workflow: %w", err)
 	}
@@ -188,19 +185,15 @@ func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Cont
 	// 记录 workflow instance ID，方便用户查询执行状态
 	logrus.Infof("Metadata crawl workflow started for data source %s, instance ID: %s", req.DataSourceID, instanceID)
 
-	// 5. 返回结果
-	// 由于 workflow 是异步执行的，我们返回 workflow instance ID
+	// 4. 返回结果
+	// 由于 workflow 是异步执行的，这些字段暂时无法立即获取
 	// 用户可以通过查询 workflow instance 状态来获取执行结果
 	result := &contracts.ParseMetadataResult{
-		// 注意：由于 workflow 是异步的，这些字段暂时无法立即获取
-		// 可以通过查询 workflow instance 状态来获取实际结果
+		InstanceID:        instanceID, // 返回 workflow instance ID，方便用户跟踪执行状态
 		CategoriesCreated: 0,
 		APIsCreated:       0,
 		APIsUpdated:       0,
 	}
-
-	// 如果需要在结果中包含 workflow instance ID，可以扩展 ParseMetadataResult
-	// 或者创建一个新的返回类型
 
 	return result, nil
 }

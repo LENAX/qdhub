@@ -2,6 +2,8 @@
 package workflows
 
 import (
+	"fmt"
+
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/workflow"
@@ -114,9 +116,13 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	// Task 4: 模板任务 - 动态生成 API 详情爬取子任务
-	maxAPICrawl := params.MaxAPICrawl
-	// 注意：max_api_crawl 是整数类型，如果为0且需要占位符，需要特殊处理
-	// 这里如果为0，保持0（表示不限制），如果需要占位符，应该在调用时传入特殊值
+	// max_api_crawl 使用占位符，执行时通过 ReplaceParams 替换
+	// 默认值为 0（不限制），可在执行时通过 params 覆盖
+	maxAPICrawl := "${max_api_crawl}"
+	if params.MaxAPICrawl > 0 {
+		// 如果构建时指定了值，使用具体值而非占位符
+		maxAPICrawl = fmt.Sprintf("%d", params.MaxAPICrawl)
+	}
 	fetchAPIDetailsTask, err := builder.NewTaskBuilder("FetchAPIDetails", "爬取 API 详情（模板任务）", b.registry).
 		WithJobFunction("GenerateAPIDetailFetchSubTasks", map[string]interface{}{
 			"data_source_id":   dataSourceID,

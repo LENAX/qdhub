@@ -80,6 +80,12 @@ func TestTaskEngineAdapter_SubmitWorkflow(t *testing.T) {
 	t.Run("Valid workflow", func(t *testing.T) {
 		def := workflow.NewWorkflowDefinition("TestWorkflow", "Test", workflow.WfCategorySync, "yaml: test", false)
 
+		// Must register workflow before submitting
+		err := adapter.RegisterWorkflow(ctx, def)
+		if err != nil {
+			t.Fatalf("RegisterWorkflow failed: %v", err)
+		}
+
 		instanceID, err := adapter.SubmitWorkflow(ctx, def, map[string]interface{}{
 			"param1": "value1",
 			"param2": 123,
@@ -148,8 +154,13 @@ func TestTaskEngineAdapter_InstanceControl(t *testing.T) {
 
 	adapter := taskengine.NewTaskEngineAdapter(eng)
 
-	// Create and submit a workflow first
+	// Create and register workflow first
 	def := workflow.NewWorkflowDefinition("TestWorkflow", "Test", workflow.WfCategorySync, "yaml: test", false)
+	if err := adapter.RegisterWorkflow(ctx, def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+
+	// Then submit the workflow
 	instanceID, err := adapter.SubmitWorkflow(ctx, def, nil)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow failed: %v", err)
@@ -186,8 +197,13 @@ func TestTaskEngineAdapter_GetInstanceStatus(t *testing.T) {
 
 	adapter := taskengine.NewTaskEngineAdapter(eng)
 
-	// Create and submit a workflow
+	// Create and register workflow first
 	def := workflow.NewWorkflowDefinition("TestWorkflow", "Test", workflow.WfCategorySync, "yaml: test", false)
+	if err := adapter.RegisterWorkflow(ctx, def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+
+	// Then submit the workflow
 	instanceID, err := adapter.SubmitWorkflow(ctx, def, nil)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow failed: %v", err)

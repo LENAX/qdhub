@@ -311,34 +311,18 @@ func extractFieldsFromUpstream(tc *task.TaskContext) []metadata.FieldMeta {
 	return nil
 }
 
-// extractAPIMetadataFromUpstream 从上游任务提取 API 元数据列表
+// extractAPIMetadataFromUpstream 从子任务结果中提取 API 元数据列表
+// 使用 Task Engine v1.0.6+ 的子任务结果聚合 API
 func extractAPIMetadataFromUpstream(tc *task.TaskContext) []map[string]interface{} {
-	var result []map[string]interface{}
-
-	for key, val := range tc.Params {
-		if !strings.HasPrefix(key, "_cached_") {
-			continue
-		}
-
-		// 检查是否有 api_metadata 列表
-		if resultMap, ok := val.(map[string]interface{}); ok {
-			if apiList, ok := resultMap["api_metadata_list"].([]interface{}); ok {
-				for _, item := range apiList {
-					if m, ok := item.(map[string]interface{}); ok {
-						result = append(result, m)
-					}
-				}
-				return result
-			}
-
-			// 单个 API metadata
-			if apiMeta, ok := resultMap["api_metadata"].(map[string]interface{}); ok {
-				result = append(result, apiMeta)
-			}
-		}
+	// 使用 ExtractMapsFromSubTasks 直接提取 api_metadata 字段
+	// Task Engine 会自动聚合模板任务的子任务结果
+	apiMetadataMaps := tc.ExtractMapsFromSubTasks("api_metadata")
+	if len(apiMetadataMaps) > 0 {
+		logrus.Debugf("extractAPIMetadataFromUpstream: 提取到 %d 个 api_metadata", len(apiMetadataMaps))
+		return apiMetadataMaps
 	}
 
-	return result
+	return nil
 }
 
 // convertToFieldMeta 将接口类型转换为 FieldMeta 切片

@@ -137,6 +137,41 @@ func (m *e2eTaskEngineAdapter) GetInstanceStatus(ctx context.Context, instanceID
 	}, nil
 }
 
+func (m *e2eTaskEngineAdapter) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	return []*workflow.TaskInstance{}, nil
+}
+
+func (m *e2eTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceID string) error {
+	return nil
+}
+
+// e2eWorkflowExecutor implements workflow.WorkflowExecutor for e2e tests.
+type e2eWorkflowExecutor struct{}
+
+func newE2EWorkflowExecutor() *e2eWorkflowExecutor {
+	return &e2eWorkflowExecutor{}
+}
+
+func (e *e2eWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (e *e2eWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (e *e2eWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (e *e2eWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (e *e2eWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
 // e2eJobScheduler is a mock scheduler for e2e tests.
 type e2eJobScheduler struct {
 	scheduledJobs map[string]string
@@ -224,10 +259,13 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	jobScheduler := newE2EJobScheduler()
 
+	// Create adapters
+	workflowExecutor := newE2EWorkflowExecutor()
+
 	// Create application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server

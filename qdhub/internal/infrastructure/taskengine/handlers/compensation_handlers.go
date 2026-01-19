@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -11,31 +12,96 @@ import (
 
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/infrastructure/datasource"
 )
 
 // ==================== SAGA 补偿函数 ====================
 // 补偿函数用于在事务失败时执行回滚操作
 // 它们是 Task Handler，通过 WithCompensationFunction 关联到 Task
 
-// CompensateSaveCategoriesHandler 回滚分类保存操作
-// 当 SaveCategories 任务成功但后续任务失败时，删除已保存的分类
-func CompensateSaveCategoriesHandler(tc *task.TaskContext) {
-	logrus.Printf("[Compensate] 🔄 开始回滚 SaveCategories - TaskID: %s", tc.TaskID)
-
+// extractDataSourceID 从 TaskContext 中提取 data_source_id
+// 尝试多种方式查找：直接参数 -> _result_data -> _cached_ 上游结果 -> 通过 data_source_name 查找
+func extractDataSourceID(tc *task.TaskContext) string {
+	// 1. 直接从参数获取
 	dataSourceID := tc.GetParamString("data_source_id")
-	if dataSourceID == "" {
-		// 尝试从 _result_data 获取
-		if result := tc.GetParam("_result_data"); result != nil {
-			if resultMap, ok := result.(map[string]interface{}); ok {
-				if id, ok := resultMap["data_source_id"].(string); ok {
-					dataSourceID = id
+	if dataSourceID != "" {
+		return dataSourceID
+	}
+
+	// 2. 从 _result_data 获取（任务执行结果）
+	if result := tc.GetParam("_result_data"); result != nil {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			if id, ok := resultMap["data_source_id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+
+	// 3. 从 _cached_ 上游任务结果获取
+	for key, val := range tc.Params {
+		if !strings.HasPrefix(key, "_cached_") {
+			continue
+		}
+		if resultMap, ok := val.(map[string]interface{}); ok {
+			if id, ok := resultMap["data_source_id"].(string); ok && id != "" {
+				logrus.Debugf("[extractDataSourceID] 从 %s 获取到 data_source_id=%s", key, id)
+				return id
+			}
+		}
+	}
+
+	// 4. 尝试通过 data_source_name 从 Registry 查找
+	dataSourceName := tc.GetParamString("data_source_name")
+	if dataSourceName == "" {
+		// 也尝试从 _cached_ 获取 name
+		for key, val := range tc.Params {
+			if !strings.HasPrefix(key, "_cached_") {
+				continue
+			}
+			if resultMap, ok := val.(map[string]interface{}); ok {
+				if name, ok := resultMap["data_source_name"].(string); ok && name != "" {
+					dataSourceName = name
+					break
 				}
 			}
 		}
 	}
 
+	if dataSourceName != "" {
+		// 尝试从 DataSourceRegistry 获取适配器信息
+		if registryInterface, ok := tc.GetDependency("DataSourceRegistry"); ok {
+			if registry, ok := registryInterface.(*datasource.Registry); ok {
+				// 获取适配器以验证数据源存在
+				if _, err := registry.GetAdapter(dataSourceName); err == nil {
+					logrus.Debugf("[extractDataSourceID] 通过 data_source_name=%s 找到数据源，但无法获取 ID", dataSourceName)
+					// 注意：Registry 只存储适配器，不存储 ID 映射
+					// 这里需要通过 MetadataRepo 查找
+					if repoInterface, ok := tc.GetDependency("MetadataRepo"); ok {
+						if repo, ok := repoInterface.(metadata.Repository); ok {
+							// 尝试获取数据源（需要 Repository 支持按名称查找）
+							ctx := context.Background()
+							if ds, err := repo.GetDataSourceByName(ctx, dataSourceName); err == nil && ds != nil {
+								logrus.Debugf("[extractDataSourceID] 通过 data_source_name=%s 查找到 ID=%s", dataSourceName, ds.ID)
+								return ds.ID.String()
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// CompensateSaveCategoriesHandler 回滚分类保存操作
+// 当 SaveCategories 任务成功但后续任务失败时，删除已保存的分类
+func CompensateSaveCategoriesHandler(tc *task.TaskContext) {
+	logrus.Printf("[Compensate] 🔄 开始回滚 SaveCategories - TaskID: %s", tc.TaskID)
+
+	dataSourceID := extractDataSourceID(tc)
 	if dataSourceID == "" {
-		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚。可用参数: %v", getCompensationParamKeys(tc.Params))
 		return
 	}
 
@@ -107,20 +173,9 @@ func CompensateSaveAPIMetadataHandler(tc *task.TaskContext) {
 func CompensateSaveAPIMetadataBatchHandler(tc *task.TaskContext) {
 	logrus.Printf("[Compensate] 🔄 开始回滚 SaveAPIMetadataBatch - TaskID: %s", tc.TaskID)
 
-	dataSourceID := tc.GetParamString("data_source_id")
+	dataSourceID := extractDataSourceID(tc)
 	if dataSourceID == "" {
-		// 尝试从 _result_data 获取
-		if result := tc.GetParam("_result_data"); result != nil {
-			if resultMap, ok := result.(map[string]interface{}); ok {
-				if id, ok := resultMap["data_source_id"].(string); ok {
-					dataSourceID = id
-				}
-			}
-		}
-	}
-
-	if dataSourceID == "" {
-		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚")
+		logrus.Printf("[Compensate] ⚠️ data_source_id 未找到，无法回滚。可用参数: %v", getCompensationParamKeys(tc.Params))
 		return
 	}
 

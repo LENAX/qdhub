@@ -3,7 +3,7 @@ module qdhub
 go 1.24.2
 
 require (
-	github.com/LENAX/task-engine v1.0.5
+	github.com/LENAX/task-engine v1.0.6
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1

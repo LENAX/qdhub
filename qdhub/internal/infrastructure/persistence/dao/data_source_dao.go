@@ -93,6 +93,27 @@ func (d *DataSourceDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 	return d.Delete(tx, id.String())
 }
 
+// GetByName retrieves a data source by name.
+func (d *DataSourceDAO) GetByName(tx *sqlx.Tx, name string) (*metadata.DataSource, error) {
+	query := d.DB().Rebind(`SELECT * FROM data_sources WHERE name = ?`)
+	var row DataSourceRow
+
+	var err error
+	if tx != nil {
+		err = tx.Get(&row, query, name)
+	} else {
+		err = d.DB().Get(&row, query, name)
+	}
+
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get data source by name: %w", err)
+	}
+	return d.toEntity(&row), nil
+}
+
 // toRow converts domain entity to database row.
 func (d *DataSourceDAO) toRow(entity *metadata.DataSource) *DataSourceRow {
 	return &DataSourceRow{

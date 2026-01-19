@@ -68,6 +68,24 @@ type SyncApplicationService interface {
 	// HandleExecutionCallback handles execution result callback from workflow.
 	// This is called by workflow engine when sync execution completes.
 	HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error
+
+	// ==================== Built-in Workflow Execution ====================
+
+	// SyncDataSource executes the batch_data_sync built-in workflow.
+	// This is a convenience method that:
+	//   1. Validates data source exists
+	//   2. Retrieves token for the data source
+	//   3. Executes the batch data sync workflow
+	// Returns the workflow instance ID for tracking.
+	SyncDataSource(ctx context.Context, req SyncDataSourceRequest) (shared.ID, error)
+
+	// SyncDataSourceRealtime executes the realtime_data_sync built-in workflow.
+	// This is a convenience method that:
+	//   1. Validates data source exists
+	//   2. Retrieves token for the data source
+	//   3. Executes the realtime data sync workflow with checkpoint support
+	// Returns the workflow instance ID for tracking.
+	SyncDataSourceRealtime(ctx context.Context, req SyncDataSourceRealtimeRequest) (shared.ID, error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -101,4 +119,26 @@ type ExecutionCallbackRequest struct {
 	Success      bool
 	RecordCount  int64
 	ErrorMessage *string
+}
+
+// SyncDataSourceRequest represents a request to sync data source using batch workflow.
+type SyncDataSourceRequest struct {
+	DataSourceID shared.ID // 数据源 ID（必填，用于校验和获取 token）
+	TargetDBPath string    // 目标数据库路径（必填）
+	StartDate    string    // 开始日期（必填，格式: "20251201"）
+	EndDate      string    // 结束日期（必填，格式: "20251231"）
+	StartTime    string    // 开始时间（可选，格式: "09:30:00"）
+	EndTime      string    // 结束时间（可选，格式: "15:00:00"）
+	APINames     []string  // 需要同步的 API 列表（必填）
+	MaxStocks    int       // 最大股票数量（可选，0表示不限制）
+}
+
+// SyncDataSourceRealtimeRequest represents a request to sync data source using realtime workflow.
+type SyncDataSourceRealtimeRequest struct {
+	DataSourceID    shared.ID // 数据源 ID（必填，用于校验和获取 token）
+	TargetDBPath    string    // 目标数据库路径（必填）
+	CheckpointTable string    // 检查点表名（可选，默认: "sync_checkpoint"）
+	APINames        []string  // 需要同步的 API 列表（必填）
+	MaxStocks       int       // 最大股票数量（可选，0表示不限制）
+	CronExpr        string    // Cron 表达式（可选）
 }

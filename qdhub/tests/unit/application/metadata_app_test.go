@@ -9,7 +9,35 @@ import (
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/workflow"
 )
+
+// MockMetaWorkflowExecutor is a mock implementation of workflow.WorkflowExecutor.
+type MockMetaWorkflowExecutor struct{}
+
+func NewMockMetaWorkflowExecutor() *MockMetaWorkflowExecutor {
+	return &MockMetaWorkflowExecutor{}
+}
+
+func (m *MockMetaWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
+func (m *MockMetaWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
+func (m *MockMetaWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
+func (m *MockMetaWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
+func (m *MockMetaWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
 
 // ==================== Mock Implementations ====================
 
@@ -260,7 +288,7 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -286,7 +314,7 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 		dsRepo.createErr = errors.New("create error")
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -312,7 +340,7 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		result, err := svc.GetDataSource(ctx, ds.ID)
 		if err != nil {
@@ -327,7 +355,7 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		_, err := svc.GetDataSource(ctx, shared.NewID())
 		if err == nil {
@@ -346,7 +374,7 @@ func TestMetadataApplicationService_UpdateDataSource(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		newName := "Tushare Pro"
 		newDesc := "Updated description"
@@ -368,7 +396,7 @@ func TestMetadataApplicationService_UpdateDataSource(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		newName := "Updated"
 		err := svc.UpdateDataSource(ctx, shared.NewID(), contracts.UpdateDataSourceRequest{
@@ -390,7 +418,7 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteDataSource(ctx, ds.ID)
 		if err != nil {
@@ -420,7 +448,7 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 		token := metadata.NewToken(ds.ID, "test-token", nil)
 		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteDataSource(ctx, ds.ID)
 		if err != nil {
@@ -438,7 +466,7 @@ func TestMetadataApplicationService_DeleteDataSource(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteDataSource(ctx, shared.NewID())
 		if err == nil {
@@ -459,7 +487,7 @@ func TestMetadataApplicationService_ListDataSources(t *testing.T) {
 		dsRepo.Create(ds)
 	}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 	sources, err := svc.ListDataSources(ctx)
 	if err != nil {
@@ -480,7 +508,7 @@ func TestMetadataApplicationService_CreateAPIMetadata(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		req := contracts.CreateAPIMetadataRequest{
 			DataSourceID: ds.ID,
@@ -521,7 +549,7 @@ func TestMetadataApplicationService_CreateAPIMetadata(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		req := contracts.CreateAPIMetadataRequest{
 			DataSourceID: shared.NewID(),
@@ -548,7 +576,7 @@ func TestMetadataApplicationService_GetAPIMetadata(t *testing.T) {
 		api := metadata.NewAPIMetadata(shared.NewID(), "daily", "日线行情", "日线数据", "/api/daily")
 		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		result, err := svc.GetAPIMetadata(ctx, api.ID)
 		if err != nil {
@@ -563,7 +591,7 @@ func TestMetadataApplicationService_GetAPIMetadata(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		_, err := svc.GetAPIMetadata(ctx, shared.NewID())
 		if err == nil {
@@ -586,7 +614,7 @@ func TestMetadataApplicationService_UpdateAPIMetadata(t *testing.T) {
 		})
 		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		newDisplayName := "每日行情"
 		newDesc := "更新后的描述"
@@ -608,7 +636,7 @@ func TestMetadataApplicationService_UpdateAPIMetadata(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		newDisplayName := "更新"
 		err := svc.UpdateAPIMetadata(ctx, shared.NewID(), contracts.UpdateAPIMetadataRequest{
@@ -630,7 +658,7 @@ func TestMetadataApplicationService_DeleteAPIMetadata(t *testing.T) {
 		api := metadata.NewAPIMetadata(shared.NewID(), "daily", "日线行情", "日线数据", "/api/daily")
 		dsRepo.AddAPIMetadata(api)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteAPIMetadata(ctx, api.ID)
 		if err != nil {
@@ -647,7 +675,7 @@ func TestMetadataApplicationService_DeleteAPIMetadata(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteAPIMetadata(ctx, shared.NewID())
 		if err == nil {
@@ -668,7 +696,7 @@ func TestMetadataApplicationService_ListAPIMetadataByDataSource(t *testing.T) {
 		dsRepo.AddAPIMetadata(api)
 	}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 	apis, err := svc.ListAPIMetadataByDataSource(ctx, dsID)
 	if err != nil {
@@ -682,23 +710,17 @@ func TestMetadataApplicationService_ListAPIMetadataByDataSource(t *testing.T) {
 func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("Success", func(t *testing.T) {
+	t.Run("Success - triggers async workflow", func(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
-
-		mockParser := &MockDocumentParser{
-			categories: []metadata.APICategory{
-				{ID: shared.NewID(), Name: "股票数据", Description: "股票相关数据"},
-				{ID: shared.NewID(), Name: "期货数据", Description: "期货相关数据"},
-			},
-			apiURLs: []string{"/api/daily", "/api/weekly"},
-		}
-		parserFactory := &MockDocumentParserFactory{parser: mockParser}
+		parserFactory := NewMockDocumentParserFactory()
 
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
+		// ParseAndImportMetadata now triggers an async workflow instead of synchronous parsing.
+		// The result will have zeros because the actual parsing happens asynchronously.
 		result, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
 			DataSourceID: ds.ID,
 			DocContent:   "<html>...</html>",
@@ -707,8 +729,16 @@ func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseAndImportMetadata failed: %v", err)
 		}
-		if result.CategoriesCreated != 2 {
-			t.Errorf("Expected 2 categories created, got %d", result.CategoriesCreated)
+		if result == nil {
+			t.Fatal("Expected result to be non-nil")
+		}
+		// Since the workflow is async, the result fields are initially 0
+		// The actual counts will be updated after workflow completion
+		if result.CategoriesCreated != 0 {
+			t.Errorf("Expected 0 categories created (async workflow), got %d", result.CategoriesCreated)
+		}
+		if result.APIsCreated != 0 {
+			t.Errorf("Expected 0 APIs created (async workflow), got %d", result.APIsCreated)
 		}
 	})
 
@@ -716,7 +746,7 @@ func TestMetadataApplicationService_ParseAndImportMetadata(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		_, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
 			DataSourceID: shared.NewID(),
@@ -739,7 +769,7 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 		ds := metadata.NewDataSource("Tushare", "Desc", "https://api.tushare.pro", "https://doc.tushare.pro")
 		dsRepo.Create(ds)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: ds.ID,
@@ -769,7 +799,7 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 		existingToken := metadata.NewToken(ds.ID, "old-token", nil)
 		dsRepo.SetToken(existingToken)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: ds.ID,
@@ -789,7 +819,7 @@ func TestMetadataApplicationService_SaveToken(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
 			DataSourceID: shared.NewID(),
@@ -812,7 +842,7 @@ func TestMetadataApplicationService_GetToken(t *testing.T) {
 		token := metadata.NewToken(dsID, "test-token", nil)
 		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		result, err := svc.GetToken(ctx, dsID)
 		if err != nil {
@@ -827,7 +857,7 @@ func TestMetadataApplicationService_GetToken(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		_, err := svc.GetToken(ctx, shared.NewID())
 		if err == nil {
@@ -847,7 +877,7 @@ func TestMetadataApplicationService_DeleteToken(t *testing.T) {
 		token := metadata.NewToken(dsID, "test-token", nil)
 		dsRepo.SetToken(token)
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteToken(ctx, dsID)
 		if err != nil {
@@ -864,7 +894,7 @@ func TestMetadataApplicationService_DeleteToken(t *testing.T) {
 		dsRepo := NewMockMetaDataSourceRepository()
 		parserFactory := NewMockDocumentParserFactory()
 
-		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+		svc := impl.NewMetadataApplicationService(dsRepo, parserFactory, NewMockMetaWorkflowExecutor())
 
 		err := svc.DeleteToken(ctx, shared.NewID())
 		if err == nil {
