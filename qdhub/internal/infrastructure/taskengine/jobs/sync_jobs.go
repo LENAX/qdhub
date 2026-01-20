@@ -14,6 +14,7 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/core/task"
 
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/infrastructure/datasource"
 )
 
@@ -36,6 +37,8 @@ import (
 //   - fields: []string - 返回的字段列表
 //   - sync_batch_id: string - 同步批次 ID
 func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
@@ -82,7 +85,6 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	// 调用 API
-	ctx := context.Background()
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s: %w", apiName, err)
@@ -91,13 +93,32 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	logrus.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
 
 	// 如果指定了目标数据库，保存数据
-	savedCount := 0
+	var savedCount int64
 	var fields []string
 	if targetDBPath != "" && len(result.Data) > 0 {
-		savedCount, fields, err = saveAPIDataWithBatch(targetDBPath, apiName, result.Data, syncBatchID)
+		// 获取 QuantDB Adapter（通过依赖注入）
+		if tc.GetRegistry() == nil {
+			return nil, fmt.Errorf("QuantDB dependency not found (Registry is nil)")
+		}
+		quantDBInterface, ok := tc.GetDependency("QuantDB")
+		if !ok {
+			return nil, fmt.Errorf("QuantDB dependency not found")
+		}
+		quantDB := quantDBInterface.(datastore.QuantDB)
+
+		// 使用 QuantDB 的 BulkInsertWithBatchID 保存数据
+		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
+
+		// 提取字段列表
+		if len(result.Data) > 0 {
+			for key := range result.Data[0] {
+				fields = append(fields, key)
+			}
+		}
+
 		logrus.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
 	}
 
@@ -782,74 +803,3 @@ func convertToStringSlice(raw interface{}) []string {
 	return nil
 }
 
-// saveAPIDataWithBatch 保存 API 数据到数据库（带批次 ID）
-func saveAPIDataWithBatch(dbPath, tableName string, data []map[string]interface{}, syncBatchID string) (int, []string, error) {
-	if len(data) == 0 {
-		return 0, nil, nil
-	}
-
-	// 打开数据库
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// 从第一条数据获取字段列表
-	var fields []string
-	for key := range data[0] {
-		fields = append(fields, key)
-	}
-	// 添加 sync_batch_id 字段
-	fields = append(fields, "sync_batch_id")
-
-	// 构建 INSERT 语句
-	placeholders := make([]string, len(fields))
-	quotedFields := make([]string, len(fields))
-	for i, f := range fields {
-		placeholders[i] = "?"
-		quotedFields[i] = fmt.Sprintf("\"%s\"", f)
-	}
-
-	query := fmt.Sprintf("INSERT OR REPLACE INTO \"%s\" (%s) VALUES (%s)",
-		tableName,
-		strings.Join(quotedFields, ", "),
-		strings.Join(placeholders, ", "))
-
-	// 批量插入
-	tx, err := db.Begin()
-	if err != nil {
-		return 0, fields, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return 0, fields, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-
-	count := 0
-	for _, row := range data {
-		values := make([]interface{}, len(fields))
-		for i, f := range fields {
-			if f == "sync_batch_id" {
-				values[i] = syncBatchID
-			} else {
-				values[i] = row[f]
-			}
-		}
-
-		if _, err := stmt.Exec(values...); err != nil {
-			logrus.Printf("⚠️ [saveAPIDataWithBatch] 插入失败: %v", err)
-			continue
-		}
-		count++
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fields, fmt.Errorf("failed to commit: %w", err)
-	}
-
-	return count, fields, nil
-}

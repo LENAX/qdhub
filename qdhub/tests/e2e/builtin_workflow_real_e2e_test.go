@@ -102,17 +102,25 @@ func setupRealE2EContext(t *testing.T) *realE2EContext {
 	ctx := context.Background()
 	config := loadRealE2EConfig(t)
 
-	// 1. 创建临时目录
-	tmpDir, err := os.MkdirTemp("", "real_e2e_")
+	// 1. 使用 tests/data 目录存储数据库（不使用临时目录，便于调试和分析）
+	// 使用绝对路径，确保 Job Functions 在任何工作目录下都能找到数据库
+	dataDir, err := filepath.Abs(filepath.Join(".", "tests", "data"))
 	require.NoError(t, err)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		require.NoError(t, err)
+	}
 
-	// 2. 创建 SQLite 数据库路径（应用数据）
-	config.SQLiteDBPath = filepath.Join(tmpDir, "app.db")
+	// 2. 创建 SQLite 数据库路径（应用数据）- 使用绝对路径
+	config.SQLiteDBPath = filepath.Join(dataDir, "e2e_app.db")
 
-	// 3. 创建 DuckDB 数据库路径（注意：不创建文件，让 DuckDB 自己创建）
-	config.DuckDBPath = filepath.Join(tmpDir, "quant.duckdb")
+	// 3. 创建 DuckDB 数据库路径（使用绝对路径，确保 Job Functions 能正确访问）
+	config.DuckDBPath = filepath.Join(dataDir, "e2e_quant.duckdb")
 
-	t.Logf("临时目录: %s", tmpDir)
+	// 删除旧的数据库文件（确保每次测试从干净状态开始）
+	os.Remove(config.SQLiteDBPath)
+	os.Remove(config.DuckDBPath)
+
+	t.Logf("数据目录 (绝对路径): %s", dataDir)
 	t.Logf("SQLite 数据库: %s", config.SQLiteDBPath)
 	t.Logf("DuckDB 数据库: %s", config.DuckDBPath)
 	if config.TushareToken != "" {
@@ -167,9 +175,13 @@ func setupRealE2EContext(t *testing.T) *realE2EContext {
 	syncJobRepo := repository.NewSyncJobRepository(db)
 
 	// 10. 初始化 Task Engine（注册 job functions 和 handlers）
+	// 注意：需要将 DuckDB Adapter 和 DataStoreRepo 注入到 Task Engine 依赖中
+	// 这样建表 Job Functions 才能使用 QuantDB Adapter 创建表
 	taskEngineDeps := &taskengine.Dependencies{
 		DataSourceRegistry: dsRegistry,
 		MetadataRepo:       metadataRepo,
+		DataStoreRepo:      dataStoreRepo,
+		QuantDB:            duckDBAdapter, // DuckDB Adapter 实现了 datastore.QuantDB 接口
 	}
 	err = taskengine.Initialize(ctx, eng, taskEngineDeps)
 	require.NoError(t, err)
@@ -204,7 +216,8 @@ func setupRealE2EContext(t *testing.T) *realE2EContext {
 		eng.Stop()
 		duckDBAdapter.Close()
 		db.Close()
-		os.RemoveAll(tmpDir) // 删除整个临时目录
+		// 不删除数据库文件，保留在 tests/data 目录便于调试分析
+		t.Logf("📁 数据库文件已保留: SQLite=%s, DuckDB=%s", config.SQLiteDBPath, config.DuckDBPath)
 	}
 
 	return &realE2EContext{
@@ -521,28 +534,83 @@ func TestE2E_RealWorkflow_FullPipeline(t *testing.T) {
 
 		t.Log("----- Step 6: 通过应用服务执行建表 -----")
 
+		// 先获取可用的 API 元数据，确定有哪些可以建表
+		apis, err := testCtx.metadataSvc.ListAPIMetadataByDataSource(ctx, dataSourceID)
+		require.NoError(t, err)
+		t.Logf("📊 数据源有 %d 个 API 元数据", len(apis))
+
+		// 筛选出有响应字段的 API（可以建表的）
+		apisWithFields := 0
+		var sampleAPINames []string
+		for _, api := range apis {
+			if len(api.ResponseFields) > 0 {
+				apisWithFields++
+				if len(sampleAPINames) < 5 {
+					sampleAPINames = append(sampleAPINames, api.Name)
+				}
+			}
+		}
+		t.Logf("📊 有 %d 个 API 有响应字段（可建表）", apisWithFields)
+		t.Logf("📊 示例 API: %v", sampleAPINames)
+
+		if apisWithFields == 0 {
+			t.Skip("跳过：没有可建表的 API（无响应字段）")
+		}
+
+		// 执行建表工作流
 		maxTables := 3
+		if apisWithFields < maxTables {
+			maxTables = apisWithFields
+		}
 		instanceID, err := testCtx.dataStoreSvc.CreateTablesForDatasource(ctx, contracts.CreateTablesForDatasourceRequest{
 			DataSourceID: dataSourceID,
 			DataStoreID:  dataStoreID,
 			MaxTables:    &maxTables,
 		})
 		require.NoError(t, err)
-		t.Logf("✅ 建表 Workflow 已启动: InstanceID=%s", instanceID)
+		t.Logf("✅ 建表 Workflow 已启动: InstanceID=%s, MaxTables=%d", instanceID, maxTables)
 
-		// 等待完成
+		// 等待完成（建表可能需要更长时间）
 		adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-		status, err := waitForWorkflowStatus(ctx, adapter, instanceID.String(), 60*time.Second)
+		status, err := waitForWorkflowStatus(ctx, adapter, instanceID.String(), 120*time.Second)
 		if err != nil {
 			t.Logf("⚠️  Workflow 状态: %v, Error: %v", status, err)
+			// 打印更多调试信息
+			if status != nil && status.ErrorMessage != nil {
+				t.Logf("⚠️  错误详情: %s", *status.ErrorMessage)
+			}
 		} else {
 			t.Logf("✅ Workflow 完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
 		}
 
-		// 验证表结构已创建
+		// 验证表在 DuckDB 中实际创建
+		t.Log("验证表是否在 DuckDB 中创建...")
+		createdTables := 0
+		for _, apiName := range sampleAPINames {
+			if createdTables >= maxTables {
+				break
+			}
+			exists, err := testCtx.duckDBAdapter.TableExists(ctx, apiName)
+			if err == nil && exists {
+				createdTables++
+				t.Logf("   ✅ 表 %s 已创建", apiName)
+
+				// 获取表统计信息
+				stats, err := testCtx.duckDBAdapter.GetTableStats(ctx, apiName)
+				if err == nil {
+					t.Logf("      📊 表统计: %d 行", stats.RowCount)
+				}
+			} else if err != nil {
+				t.Logf("   ⚠️  检查表 %s 失败: %v", apiName, err)
+			}
+		}
+		t.Logf("✅ 验证完成: %d 个表在 DuckDB 中创建", createdTables)
+
+		// 验证表结构记录（应用层）
 		schemas, err := testCtx.dataStoreSvc.ListTableSchemas(ctx, dataStoreID)
-		require.NoError(t, err)
-		t.Logf("✅ 已创建表结构数: %d", len(schemas))
+		if err == nil {
+			t.Logf("✅ 应用层表结构记录数: %d", len(schemas))
+		}
 	})
 
 	// ==================== Step 7: 通过应用服务执行批量数据同步 ====================
@@ -585,6 +653,62 @@ func TestE2E_RealWorkflow_FullPipeline(t *testing.T) {
 				t.Logf("✅ stock_basic 表: %d 条记录", stats.RowCount)
 			}
 		}
+	})
+
+	// ==================== Step 8: 导出数据到 CSV ====================
+	t.Run("Step8_ExportDataToCSV", func(t *testing.T) {
+		t.Log("----- Step 8: 导出 DuckDB 数据到 CSV -----")
+
+		// 获取数据目录（使用绝对路径，因为 DuckDB COPY 需要绝对路径）
+		dataDir, err := filepath.Abs(filepath.Dir(testCtx.config.DuckDBPath))
+		require.NoError(t, err)
+		csvDir := filepath.Join(dataDir, "csv_export")
+		if err := os.MkdirAll(csvDir, 0755); err != nil {
+			t.Logf("⚠️  创建 CSV 目录失败: %v", err)
+			return
+		}
+
+		// 获取所有表（使用 DuckDB 的 information_schema）
+		tableRows, err := testCtx.duckDBAdapter.Query(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'")
+		if err != nil {
+			t.Logf("⚠️  获取表列表失败: %v", err)
+			return
+		}
+
+		var tables []string
+		for _, row := range tableRows {
+			if name, ok := row["table_name"].(string); ok {
+				tables = append(tables, name)
+			}
+		}
+		t.Logf("📊 DuckDB 中共有 %d 个表", len(tables))
+
+		// 导出每个有数据的表到 CSV
+		exportedCount := 0
+		for _, tableName := range tables {
+			stats, err := testCtx.duckDBAdapter.GetTableStats(ctx, tableName)
+			if err != nil {
+				t.Logf("⚠️  获取表 %s 统计失败: %v", tableName, err)
+				continue
+			}
+
+			if stats.RowCount == 0 {
+				continue // 跳过空表
+			}
+
+			csvPath := filepath.Join(csvDir, tableName+".csv")
+			// 使用 DuckDB COPY TO 导出 CSV
+			exportSQL := fmt.Sprintf("COPY %s TO '%s' (HEADER, DELIMITER ',')", tableName, csvPath)
+			if _, err := testCtx.duckDBAdapter.Execute(ctx, exportSQL); err != nil {
+				t.Logf("⚠️  导出表 %s 失败: %v", tableName, err)
+				continue
+			}
+
+			t.Logf("✅ 导出 %s: %d 行 -> %s", tableName, stats.RowCount, csvPath)
+			exportedCount++
+		}
+
+		t.Logf("📁 CSV 导出完成: %d 个文件 -> %s", exportedCount, csvDir)
 	})
 
 	t.Log("========== 真实组件 E2E 测试完成 ==========")

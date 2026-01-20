@@ -9,3 +9,5 @@ qdhub/coverage_all.out
 */*.db-shm
 */*.db-wal
 qdhub/data/*
+qdhub/tests/e2e/data/*
+qdhub/tests/data/*
