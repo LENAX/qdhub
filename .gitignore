@@ -11,3 +11,4 @@ qdhub/coverage_all.out
 qdhub/data/*
 qdhub/tests/e2e/data/*
 qdhub/tests/data/*
+qdhub/tests/e2e/tests/data/e2e_app.db
