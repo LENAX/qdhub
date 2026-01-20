@@ -102,9 +102,10 @@ func setupRealE2EContext(t *testing.T) *realE2EContext {
 	ctx := context.Background()
 	config := loadRealE2EConfig(t)
 
-	// 1. 使用 tests/data 目录存储数据库（不使用临时目录，便于调试和分析）
+	// 1. 使用 tests/e2e/data 目录存储数据库（不使用临时目录，便于调试和分析）
 	// 使用绝对路径，确保 Job Functions 在任何工作目录下都能找到数据库
-	dataDir, err := filepath.Abs(filepath.Join(".", "tests", "data"))
+	// 注意：测试从 tests/e2e 目录运行，所以 data 目录在当前目录下
+	dataDir, err := filepath.Abs(filepath.Join(".", "data"))
 	require.NoError(t, err)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		require.NoError(t, err)

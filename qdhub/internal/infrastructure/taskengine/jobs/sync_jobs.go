@@ -30,6 +30,12 @@ import (
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - sync_batch_id: string - 同步批次 ID（用于回滚，默认为 WorkflowInstanceID）
+//   - upstream_params: map[string]UpstreamParamConfig - 上游参数映射配置（可选）
+//     格式: {"param_name": {"task_name": "TaskA", "field": "field_name", "extracted_field": "cal_dates"}}
+//     - task_name: 上游任务名称
+//     - field: 上游结果中的字段名（直接字段）
+//     - extracted_field: 上游结果 extracted_data 中的字段名（用于获取 cal_dates, ts_codes 等列表）
+//     - select: 选择策略，"first" | "last" | "all"，默认 "last"（取最新值）
 //
 // Output:
 //   - count: int - 保存的记录数
@@ -81,6 +87,19 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	if paramsRaw != nil {
 		if p, ok := paramsRaw.(map[string]interface{}); ok {
 			params = p
+		}
+	}
+	if params == nil {
+		params = make(map[string]interface{})
+	}
+
+	// 处理上游参数映射：从上游任务结果中获取参数值
+	upstreamParams := resolveUpstreamParams(tc)
+	for paramName, paramValue := range upstreamParams {
+		// 上游参数优先级低于直接传入的 params（允许覆盖）
+		if _, exists := params[paramName]; !exists {
+			params[paramName] = paramValue
+			logrus.Printf("📥 [SyncAPIData] 从上游任务获取参数: %s=%v", paramName, paramValue)
 		}
 	}
 
@@ -143,6 +162,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - data_source_name: string - 数据源名称
 //   - api_name: string - 要调用的 API 名称
 //   - param_key: string - 参数键名（如 "ts_code"）
+//   - upstream_task: string - 上游任务名称（可选，用于明确指定从哪个任务获取参数列表）
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - max_sub_tasks: int - 最大子任务数量（0=不限制）
@@ -158,6 +178,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
 	paramKey := tc.GetParamString("param_key")
+	upstreamTask := tc.GetParamString("upstream_task") // 新增：明确指定上游任务
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
@@ -179,7 +200,16 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	taskRegistry := eng.GetRegistry()
 
 	// 从上游任务提取参数值列表
-	paramValues := extractParamValuesFromUpstream(tc, paramKey)
+	var paramValues []string
+	if upstreamTask != "" {
+		// 使用新 API：从指定的上游任务获取
+		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, paramKey)
+		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个", upstreamTask, paramKey, len(paramValues))
+	} else {
+		// 兼容旧逻辑：遍历所有上游任务
+		paramValues = extractParamValuesFromUpstream(tc, paramKey)
+	}
+
 	if len(paramValues) == 0 {
 		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
 		return map[string]interface{}{
@@ -703,6 +733,140 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 
 // ==================== 辅助函数 ====================
 
+// UpstreamParamConfig 上游参数配置
+// 用于配置如何从上游任务结果中获取参数值
+type UpstreamParamConfig struct {
+	TaskName       string // 上游任务名称
+	Field          string // 上游结果中的直接字段名
+	ExtractedField string // extracted_data 中的字段名（如 "cal_dates", "ts_codes"）
+	Select         string // 选择策略: "first" | "last" | "all"，默认 "last"
+}
+
+// resolveUpstreamParams 解析上游参数映射配置，从上游任务结果中获取参数值
+// upstream_params 配置格式:
+//
+//	{
+//	  "trade_date": {"task_name": "FetchTradeCal", "extracted_field": "cal_dates", "select": "last"},
+//	  "ts_code": {"task_name": "FetchStockBasic", "extracted_field": "ts_codes", "select": "first"}
+//	}
+func resolveUpstreamParams(tc *task.TaskContext) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	upstreamParamsRaw := tc.GetParam("upstream_params")
+	if upstreamParamsRaw == nil {
+		return result
+	}
+
+	upstreamParams, ok := upstreamParamsRaw.(map[string]interface{})
+	if !ok {
+		logrus.Printf("⚠️ [resolveUpstreamParams] upstream_params 格式错误，期望 map[string]interface{}")
+		return result
+	}
+
+	for paramName, configRaw := range upstreamParams {
+		config, ok := configRaw.(map[string]interface{})
+		if !ok {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 参数 %s 配置格式错误", paramName)
+			continue
+		}
+
+		// 解析配置
+		taskName, _ := config["task_name"].(string)
+		field, _ := config["field"].(string)
+		extractedField, _ := config["extracted_field"].(string)
+		selectStrategy, _ := config["select"].(string)
+		if selectStrategy == "" {
+			selectStrategy = "last" // 默认取最后一个（最新值）
+		}
+
+		if taskName == "" {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 参数 %s 缺少 task_name", paramName)
+			continue
+		}
+
+		// 使用新 API 获取上游任务结果
+		upstreamResult := tc.GetUpstreamResult(taskName)
+		if upstreamResult == nil {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 未找到上游任务 %s 的结果", taskName)
+			continue
+		}
+
+		var value interface{}
+
+		// 优先从 extracted_data 获取
+		if extractedField != "" {
+			if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+				if vals, ok := extracted[extractedField]; ok {
+					value = selectFromSlice(vals, selectStrategy)
+				}
+			}
+		}
+
+		// 如果 extracted_data 没有，尝试直接获取字段
+		if value == nil && field != "" {
+			if fieldVal, ok := upstreamResult[field]; ok {
+				value = selectFromSlice(fieldVal, selectStrategy)
+			}
+		}
+
+		// 如果还没有，尝试从 extracted_data 的复数形式获取
+		if value == nil && extractedField == "" && field != "" {
+			pluralField := field + "s"
+			if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+				if vals, ok := extracted[pluralField]; ok {
+					value = selectFromSlice(vals, selectStrategy)
+				}
+			}
+		}
+
+		if value != nil {
+			result[paramName] = value
+			logrus.Printf("✅ [resolveUpstreamParams] 解析参数 %s=%v (from %s)", paramName, value, taskName)
+		} else {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 无法从任务 %s 获取参数 %s", taskName, paramName)
+		}
+	}
+
+	return result
+}
+
+// selectFromSlice 根据策略从切片中选择值
+// "first" - 返回第一个值
+// "last" - 返回最后一个值
+// "all" - 返回整个切片
+func selectFromSlice(val interface{}, strategy string) interface{} {
+	// 如果不是切片类型，直接返回
+	switch v := val.(type) {
+	case []string:
+		if len(v) == 0 {
+			return nil
+		}
+		switch strategy {
+		case "first":
+			return v[0]
+		case "all":
+			return v
+		default: // "last"
+			return v[len(v)-1]
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		switch strategy {
+		case "first":
+			return v[0]
+		case "all":
+			return v
+		default: // "last"
+			return v[len(v)-1]
+		}
+	default:
+		// 非切片类型，直接返回
+		return val
+	}
+}
+
 // getTodayDateString 获取今天的日期字符串（格式: "20251201"）
 func getTodayDateString() string {
 	return getRecentDateString(0)
@@ -725,7 +889,36 @@ func getParamKeys(params map[string]interface{}) []string {
 	return keys
 }
 
-// extractParamValuesFromUpstream 从上游任务结果中提取参数值列表
+// extractParamValuesFromSpecificUpstream 从指定上游任务结果中提取参数值列表（使用新 API）
+func extractParamValuesFromSpecificUpstream(tc *task.TaskContext, taskName, paramKey string) []string {
+	upstreamResult := tc.GetUpstreamResult(taskName)
+	if upstreamResult == nil {
+		return nil
+	}
+
+	// 优先从 extracted_data 获取（复数形式）
+	pluralKey := paramKey + "s"
+	if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+		if vals, ok := extracted[pluralKey]; ok {
+			return convertToStringSlice(vals)
+		}
+		if vals, ok := extracted[paramKey]; ok {
+			return convertToStringSlice(vals)
+		}
+	}
+
+	// 直接检查字段
+	if vals, ok := upstreamResult[pluralKey]; ok {
+		return convertToStringSlice(vals)
+	}
+	if vals, ok := upstreamResult[paramKey]; ok {
+		return convertToStringSlice(vals)
+	}
+
+	return nil
+}
+
+// extractParamValuesFromUpstream 从上游任务结果中提取参数值列表（遍历所有上游任务）
 func extractParamValuesFromUpstream(tc *task.TaskContext, paramKey string) []string {
 	var values []string
 
