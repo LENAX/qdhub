@@ -14,6 +14,9 @@ import (
 	"qdhub/internal/infrastructure/scheduler"
 )
 
+// Note: MockDataSourceRepository and MockWorkflowExecutor are defined in datastore_app_test.go
+// and reused here since we're in the same test package (application_test).
+
 // ==================== Mock Implementations ====================
 
 // MockSyncJobRepository is a mock implementation of sync.SyncJobRepository.
@@ -299,6 +302,14 @@ func (m *MockTaskEngineAdapter) UnregisterWorkflow(ctx context.Context, definiti
 	return nil
 }
 
+func (m *MockTaskEngineAdapter) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	return []*workflow.TaskInstance{}, nil
+}
+
+func (m *MockTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceID string) error {
+	return nil
+}
+
 // MockJobScheduler is a mock implementation of sync.JobScheduler.
 type MockJobScheduler struct {
 	scheduledJobs map[string]string // jobID -> cronExpr
@@ -342,7 +353,9 @@ func (m *MockJobScheduler) GetNextRunTime(jobID string) *time.Time {
 func newTestSyncService(syncJobRepo *MockSyncJobRepository, wfDefRepo *MockWorkflowDefinitionRepository, adapter *MockTaskEngineAdapter) contracts.SyncApplicationService {
 	cronCalc := scheduler.NewCronSchedulerCalculatorAdapter()
 	jobSched := NewMockJobScheduler()
-	return impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter, cronCalc, jobSched)
+	dataSourceRepo := NewMockDataSourceRepository() // Reuse from datastore_app_test.go
+	workflowExecutor := NewMockWorkflowExecutor()   // Reuse from datastore_app_test.go
+	return impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter, cronCalc, jobSched, dataSourceRepo, workflowExecutor)
 }
 
 // ==================== Test Cases ====================

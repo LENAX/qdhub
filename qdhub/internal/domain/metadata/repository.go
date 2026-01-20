@@ -102,6 +102,10 @@ type Repository interface {
 	// GetDataSource returns a data source by ID.
 	GetDataSource(ctx context.Context, id shared.ID) (*DataSource, error)
 
+	// GetDataSourceByName returns a data source by name.
+	// Used by compensation handlers to find data source ID when only name is available.
+	GetDataSourceByName(ctx context.Context, name string) (*DataSource, error)
+
 	// GetToken returns a token by data source ID.
 	GetToken(ctx context.Context, dataSourceID shared.ID) (*Token, error)
 

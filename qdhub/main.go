@@ -8,6 +8,9 @@ import (
 )
 
 func main() {
+	// Initialize logger
+	InitLogger()
+
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
 	}

@@ -16,7 +16,7 @@
 -- Data Sources table
 CREATE TABLE IF NOT EXISTS data_sources (
     id          VARCHAR(64) PRIMARY KEY,
-    name        VARCHAR(128) NOT NULL,
+    name        VARCHAR(128) NOT NULL UNIQUE,
     description TEXT,
     base_url    VARCHAR(512),
     doc_url     VARCHAR(512),

@@ -3,8 +3,8 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
 
@@ -25,30 +25,45 @@ func NewTaskEngineAdapter(eng *engine.Engine) workflow.TaskEngineAdapter {
 }
 
 // SubmitWorkflow submits a workflow to Task Engine.
+// Uses Task Engine's native parameter replacement feature to replace placeholders
+// (e.g., ${param_name}) with actual values before submission.
+//
+// IMPORTANT: This method reloads the workflow definition from Task Engine storage
+// before parameter replacement to ensure we don't modify the original definition.
+// This prevents issues where ReplaceParams would mutate a shared/cached object.
 func (a *TaskEngineAdapterImpl) SubmitWorkflow(ctx context.Context, definition *workflow.WorkflowDefinition, params map[string]interface{}) (string, error) {
 	if definition == nil || definition.Workflow == nil {
 		return "", fmt.Errorf("workflow definition is nil")
 	}
 
-	// Set workflow parameters (serialize non-string values to JSON)
-	for key, value := range params {
-		var strValue string
-		switch v := value.(type) {
-		case string:
-			strValue = v
-		default:
-			// Serialize complex types to JSON
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return "", fmt.Errorf("failed to serialize parameter %s: %w", key, err)
-			}
-			strValue = string(jsonBytes)
-		}
-		definition.Workflow.SetParam(key, strValue)
+	// Get workflow ID from the definition
+	workflowID := definition.Workflow.GetID()
+	if workflowID == "" {
+		return "", fmt.Errorf("workflow ID is empty")
 	}
 
-	// Submit workflow and get controller
-	controller, err := a.engine.SubmitWorkflow(ctx, definition.Workflow)
+	// Reload workflow from Task Engine storage to get a fresh copy
+	// This ensures we don't modify the original definition object
+	aggregateRepo := a.engine.GetAggregateRepo()
+	workflowCopy, err := aggregateRepo.GetWorkflowWithTasks(ctx, workflowID)
+	if err != nil {
+		return "", fmt.Errorf("failed to reload workflow for execution: %w", err)
+	}
+	if workflowCopy == nil {
+		return "", fmt.Errorf("workflow not found: %s", workflowID)
+	}
+
+	// Use Task Engine's native ReplaceParams method to replace placeholders
+	// This will replace placeholders in both Workflow-level and Task-level parameters
+	// We do this on the reloaded copy, not the original definition
+	if len(params) > 0 {
+		if err := workflowCopy.ReplaceParams(params); err != nil {
+			return "", fmt.Errorf("failed to replace workflow parameters: %w", err)
+		}
+	}
+
+	// Submit the reloaded workflow copy (with replaced parameters) to Task Engine
+	controller, err := a.engine.SubmitWorkflow(ctx, workflowCopy)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit workflow: %w", err)
 	}
@@ -98,15 +113,21 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
 	}
 
-	// Calculate progress
+	// Calculate progress and determine final status
+	// Note: Task Engine may use different case for status (e.g., "FAILED" vs "Failed")
 	completedTasks := 0
 	failedTasks := 0
+	runningTasks := 0
 	for _, task := range taskInstances {
-		switch task.Status {
-		case "Success", "Skipped":
+		// Normalize status to uppercase for comparison
+		status := strings.ToUpper(task.Status)
+		switch status {
+		case "SUCCESS", "SKIPPED":
 			completedTasks++
-		case "Failed":
+		case "FAILED":
 			failedTasks++
+		case "RUNNING", "PENDING":
+			runningTasks++
 		}
 	}
 
@@ -115,9 +136,29 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		progress = float64(completedTasks) / float64(len(taskInstances)) * 100
 	}
 
+	// Determine final status: if all tasks are done (completed or failed) and there are failures, mark as Failed
+	// Otherwise use the status from Task Engine
+	finalStatus := statusStr
+	if len(taskInstances) > 0 {
+		totalDone := completedTasks + failedTasks
+		if totalDone == len(taskInstances) {
+			// All tasks are done
+			if failedTasks > 0 {
+				// If any task failed, workflow should be Failed
+				finalStatus = "Failed"
+			} else {
+				// All tasks succeeded
+				finalStatus = "Success"
+			}
+		} else if failedTasks > 0 && runningTasks == 0 {
+			// Some tasks failed and no tasks are running, workflow should be Failed
+			finalStatus = "Failed"
+		}
+	}
+
 	status := &workflow.WorkflowStatus{
 		InstanceID:    instance.ID,
-		Status:        statusStr,
+		Status:        finalStatus,
 		Progress:      progress,
 		TaskCount:     len(taskInstances),
 		CompletedTask: completedTasks,
@@ -156,4 +197,33 @@ func (a *TaskEngineAdapterImpl) UnregisterWorkflow(ctx context.Context, definiti
 	// Task Engine doesn't have explicit unregister
 	// Workflows are managed through the storage layer
 	return nil
+}
+
+// GetTaskInstances retrieves all task instances for a workflow instance.
+func (a *TaskEngineAdapterImpl) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	aggregateRepo := a.engine.GetAggregateRepo()
+	_, taskInstances, err := aggregateRepo.GetWorkflowInstanceWithTasks(ctx, engineInstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task instances: %w", err)
+	}
+
+	// Convert to workflow.TaskInstance (which is a type alias for taskenginestorage.TaskInstance)
+	// taskInstances is []*taskenginestorage.TaskInstance (slice of pointers)
+	// workflow.TaskInstance is a type alias, so we can directly convert
+	result := make([]*workflow.TaskInstance, len(taskInstances))
+	for i := range taskInstances {
+		// taskInstances[i] is *taskenginestorage.TaskInstance
+		// workflow.TaskInstance is a type alias, so we can directly convert
+		result[i] = (*workflow.TaskInstance)(taskInstances[i])
+	}
+	return result, nil
+}
+
+// RetryTask retries a failed task instance.
+// Note: Task Engine may not have a direct retry API, so this may need to be implemented
+// through other means (e.g., re-submitting the workflow or specific task).
+func (a *TaskEngineAdapterImpl) RetryTask(ctx context.Context, taskInstanceID string) error {
+	// TODO: Check if Task Engine provides a RetryTask API
+	// For now, return an error indicating it's not implemented
+	return fmt.Errorf("task retry not yet implemented in Task Engine")
 }

@@ -5,14 +5,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/core/task"
 
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/infrastructure/datasource"
 )
 
@@ -28,6 +30,12 @@ import (
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - sync_batch_id: string - 同步批次 ID（用于回滚，默认为 WorkflowInstanceID）
+//   - upstream_params: map[string]UpstreamParamConfig - 上游参数映射配置（可选）
+//     格式: {"param_name": {"task_name": "TaskA", "field": "field_name", "extracted_field": "cal_dates"}}
+//     - task_name: 上游任务名称
+//     - field: 上游结果中的字段名（直接字段）
+//     - extracted_field: 上游结果 extracted_data 中的字段名（用于获取 cal_dates, ts_codes 等列表）
+//     - select: 选择策略，"first" | "last" | "all"，默认 "last"（取最新值）
 //
 // Output:
 //   - count: int - 保存的记录数
@@ -35,6 +43,8 @@ import (
 //   - fields: []string - 返回的字段列表
 //   - sync_batch_id: string - 同步批次 ID
 func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
@@ -51,7 +61,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_name and api_name are required")
 	}
 
-	log.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
+	logrus.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
 
 	// 获取 DataSourceRegistry
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -79,25 +89,56 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			params = p
 		}
 	}
+	if params == nil {
+		params = make(map[string]interface{})
+	}
+
+	// 处理上游参数映射：从上游任务结果中获取参数值
+	upstreamParams := resolveUpstreamParams(tc)
+	for paramName, paramValue := range upstreamParams {
+		// 上游参数优先级低于直接传入的 params（允许覆盖）
+		if _, exists := params[paramName]; !exists {
+			params[paramName] = paramValue
+			logrus.Printf("📥 [SyncAPIData] 从上游任务获取参数: %s=%v", paramName, paramValue)
+		}
+	}
 
 	// 调用 API
-	ctx := context.Background()
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s: %w", apiName, err)
 	}
 
-	log.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
+	logrus.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
 
 	// 如果指定了目标数据库，保存数据
-	savedCount := 0
+	var savedCount int64
 	var fields []string
 	if targetDBPath != "" && len(result.Data) > 0 {
-		savedCount, fields, err = saveAPIDataWithBatch(targetDBPath, apiName, result.Data, syncBatchID)
+		// 获取 QuantDB Adapter（通过依赖注入）
+		if tc.GetRegistry() == nil {
+			return nil, fmt.Errorf("QuantDB dependency not found (Registry is nil)")
+		}
+		quantDBInterface, ok := tc.GetDependency("QuantDB")
+		if !ok {
+			return nil, fmt.Errorf("QuantDB dependency not found")
+		}
+		quantDB := quantDBInterface.(datastore.QuantDB)
+
+		// 使用 QuantDB 的 BulkInsertWithBatchID 保存数据
+		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
-		log.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
+
+		// 提取字段列表
+		if len(result.Data) > 0 {
+			for key := range result.Data[0] {
+				fields = append(fields, key)
+			}
+		}
+
+		logrus.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
 	}
 
 	// 提取特定字段用于下游任务（如 ts_codes）
@@ -121,6 +162,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - data_source_name: string - 数据源名称
 //   - api_name: string - 要调用的 API 名称
 //   - param_key: string - 参数键名（如 "ts_code"）
+//   - upstream_task: string - 上游任务名称（可选，用于明确指定从哪个任务获取参数列表）
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - max_sub_tasks: int - 最大子任务数量（0=不限制）
@@ -130,12 +172,13 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - status: string - 操作状态
 //   - generated: int - 生成的子任务数量
 func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateDataSyncSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Printf("📋 [GenerateDataSyncSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
 	paramKey := tc.GetParamString("param_key")
+	upstreamTask := tc.GetParamString("upstream_task") // 新增：明确指定上游任务
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
@@ -157,9 +200,18 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	taskRegistry := eng.GetRegistry()
 
 	// 从上游任务提取参数值列表
-	paramValues := extractParamValuesFromUpstream(tc, paramKey)
+	var paramValues []string
+	if upstreamTask != "" {
+		// 使用新 API：从指定的上游任务获取
+		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, paramKey)
+		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个", upstreamTask, paramKey, len(paramValues))
+	} else {
+		// 兼容旧逻辑：遍历所有上游任务
+		paramValues = extractParamValuesFromUpstream(tc, paramKey)
+	}
+
 	if len(paramValues) == 0 {
-		log.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
+		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -169,11 +221,11 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 应用数量限制
 	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
-		log.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
 		paramValues = paramValues[:maxSubTasks]
 	}
 
-	log.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
+	logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -210,13 +262,13 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			WithCompensationFunction("CompensateSyncData"). // SAGA 补偿
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateDataSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateDataSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -227,10 +279,10 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			"param_key": paramKey,
 			paramKey:    paramValue,
 		})
-		log.Printf("✅ [GenerateDataSyncSubTasks] 子任务已添加: %s", subTaskName)
+		logrus.Printf("✅ [GenerateDataSyncSubTasks] 子任务已添加: %s", subTaskName)
 	}
 
-	log.Printf("✅ [GenerateDataSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -260,7 +312,7 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("api_name, target_db_path and sync_batch_id are required")
 	}
 
-	log.Printf("🗑️ [DeleteSyncedData] 删除同步数据: %s, BatchID=%s", apiName, syncBatchID)
+	logrus.Printf("🗑️ [DeleteSyncedData] 删除同步数据: %s, BatchID=%s", apiName, syncBatchID)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
@@ -275,7 +327,7 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	affected, _ := result.RowsAffected()
-	log.Printf("✅ [DeleteSyncedData] 删除成功: %s, 记录数=%d", apiName, affected)
+	logrus.Printf("✅ [DeleteSyncedData] 删除成功: %s, 记录数=%d", apiName, affected)
 
 	return map[string]interface{}{
 		"deleted_count": affected,
@@ -311,7 +363,7 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		apiNames = convertToStringSlice(raw)
 	}
 
-	log.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
+	logrus.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
 	if err != nil {
@@ -343,9 +395,9 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		if err == nil {
 			checkpoints[apiName] = lastSyncDate
 			hasCheckpoint = true
-			log.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
+			logrus.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
 		} else if err != sql.ErrNoRows {
-			log.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
+			logrus.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
 		}
 	}
 
@@ -379,7 +431,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 		exchange = "SSE"
 	}
 
-	log.Printf("📅 [FetchLatestTradingDate] 获取最新交易日: source=%s, exchange=%s", dataSourceName, exchange)
+	logrus.Printf("📅 [FetchLatestTradingDate] 获取最新交易日: source=%s, exchange=%s", dataSourceName, exchange)
 
 	// 获取 DataSourceRegistry
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
@@ -428,7 +480,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 	today := getTodayDateString()
 	isTradingDay := latestTradeDate == today
 
-	log.Printf("✅ [FetchLatestTradingDate] 最新交易日=%s, 今天是否交易日=%v", latestTradeDate, isTradingDay)
+	logrus.Printf("✅ [FetchLatestTradingDate] 最新交易日=%s, 今天是否交易日=%v", latestTradeDate, isTradingDay)
 
 	return map[string]interface{}{
 		"latest_trade_date": latestTradeDate,
@@ -453,7 +505,7 @@ func FetchLatestTradingDateJob(tc *task.TaskContext) (interface{}, error) {
 //   - status: string - 操作状态
 //   - generated: int - 生成的子任务数量
 func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [GenerateIncrementalSyncSubTasks] Job Function 执行")
+	logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] Job Function 执行")
 
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
@@ -494,7 +546,7 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 		startDate = cp // 从检查点开始
 	}
 
-	log.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",
+	logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",
 		apiName, startDate, latestTradeDate)
 
 	// 获取 Engine
@@ -508,13 +560,13 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 	// 从上游任务提取股票代码列表
 	paramValues := extractParamValuesFromUpstream(tc, paramKey)
 	if len(paramValues) == 0 {
-		log.Printf("⚠️ [GenerateIncrementalSyncSubTasks] 未找到 %s 列表，尝试从 stock_basic 获取", paramKey)
+		logrus.Printf("⚠️ [GenerateIncrementalSyncSubTasks] 未找到 %s 列表，尝试从 stock_basic 获取", paramKey)
 		// 可以尝试从其他来源获取
 	}
 
 	// 应用数量限制
 	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
-		log.Printf("📡 [GenerateIncrementalSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
+		logrus.Printf("📡 [GenerateIncrementalSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
 		paramValues = paramValues[:maxSubTasks]
 	}
 
@@ -554,13 +606,13 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 			WithCompensationFunction("CompensateSyncData").
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateIncrementalSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateIncrementalSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateIncrementalSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -573,10 +625,10 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 			"start_date": startDate,
 			"end_date":   latestTradeDate,
 		})
-		log.Printf("✅ [GenerateIncrementalSyncSubTasks] 子任务已添加: %s", subTaskName)
+		logrus.Printf("✅ [GenerateIncrementalSyncSubTasks] 子任务已添加: %s", subTaskName)
 	}
 
-	log.Printf("✅ [GenerateIncrementalSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateIncrementalSyncSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":            "success",
@@ -629,7 +681,7 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		latestTradeDate = getTodayDateString()
 	}
 
-	log.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
+	logrus.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
 		checkpointTable, latestTradeDate, apiNames)
 
 	db, err := sql.Open("sqlite3", targetDBPath)
@@ -662,12 +714,12 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 
 	for _, apiName := range apiNames {
 		if _, err := db.Exec(upsertSQL, apiName, latestTradeDate); err != nil {
-			log.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
+			logrus.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
 			continue
 		}
 		updatedCount++
 		newCheckpoints[apiName] = latestTradeDate
-		log.Printf("✅ [UpdateSyncCheckpoint] %s: %s -> %s",
+		logrus.Printf("✅ [UpdateSyncCheckpoint] %s: %s -> %s",
 			apiName, oldCheckpoints[apiName], latestTradeDate)
 	}
 
@@ -680,6 +732,140 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 }
 
 // ==================== 辅助函数 ====================
+
+// UpstreamParamConfig 上游参数配置
+// 用于配置如何从上游任务结果中获取参数值
+type UpstreamParamConfig struct {
+	TaskName       string // 上游任务名称
+	Field          string // 上游结果中的直接字段名
+	ExtractedField string // extracted_data 中的字段名（如 "cal_dates", "ts_codes"）
+	Select         string // 选择策略: "first" | "last" | "all"，默认 "last"
+}
+
+// resolveUpstreamParams 解析上游参数映射配置，从上游任务结果中获取参数值
+// upstream_params 配置格式:
+//
+//	{
+//	  "trade_date": {"task_name": "FetchTradeCal", "extracted_field": "cal_dates", "select": "last"},
+//	  "ts_code": {"task_name": "FetchStockBasic", "extracted_field": "ts_codes", "select": "first"}
+//	}
+func resolveUpstreamParams(tc *task.TaskContext) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	upstreamParamsRaw := tc.GetParam("upstream_params")
+	if upstreamParamsRaw == nil {
+		return result
+	}
+
+	upstreamParams, ok := upstreamParamsRaw.(map[string]interface{})
+	if !ok {
+		logrus.Printf("⚠️ [resolveUpstreamParams] upstream_params 格式错误，期望 map[string]interface{}")
+		return result
+	}
+
+	for paramName, configRaw := range upstreamParams {
+		config, ok := configRaw.(map[string]interface{})
+		if !ok {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 参数 %s 配置格式错误", paramName)
+			continue
+		}
+
+		// 解析配置
+		taskName, _ := config["task_name"].(string)
+		field, _ := config["field"].(string)
+		extractedField, _ := config["extracted_field"].(string)
+		selectStrategy, _ := config["select"].(string)
+		if selectStrategy == "" {
+			selectStrategy = "last" // 默认取最后一个（最新值）
+		}
+
+		if taskName == "" {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 参数 %s 缺少 task_name", paramName)
+			continue
+		}
+
+		// 使用新 API 获取上游任务结果
+		upstreamResult := tc.GetUpstreamResult(taskName)
+		if upstreamResult == nil {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 未找到上游任务 %s 的结果", taskName)
+			continue
+		}
+
+		var value interface{}
+
+		// 优先从 extracted_data 获取
+		if extractedField != "" {
+			if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+				if vals, ok := extracted[extractedField]; ok {
+					value = selectFromSlice(vals, selectStrategy)
+				}
+			}
+		}
+
+		// 如果 extracted_data 没有，尝试直接获取字段
+		if value == nil && field != "" {
+			if fieldVal, ok := upstreamResult[field]; ok {
+				value = selectFromSlice(fieldVal, selectStrategy)
+			}
+		}
+
+		// 如果还没有，尝试从 extracted_data 的复数形式获取
+		if value == nil && extractedField == "" && field != "" {
+			pluralField := field + "s"
+			if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+				if vals, ok := extracted[pluralField]; ok {
+					value = selectFromSlice(vals, selectStrategy)
+				}
+			}
+		}
+
+		if value != nil {
+			result[paramName] = value
+			logrus.Printf("✅ [resolveUpstreamParams] 解析参数 %s=%v (from %s)", paramName, value, taskName)
+		} else {
+			logrus.Printf("⚠️ [resolveUpstreamParams] 无法从任务 %s 获取参数 %s", taskName, paramName)
+		}
+	}
+
+	return result
+}
+
+// selectFromSlice 根据策略从切片中选择值
+// "first" - 返回第一个值
+// "last" - 返回最后一个值
+// "all" - 返回整个切片
+func selectFromSlice(val interface{}, strategy string) interface{} {
+	// 如果不是切片类型，直接返回
+	switch v := val.(type) {
+	case []string:
+		if len(v) == 0 {
+			return nil
+		}
+		switch strategy {
+		case "first":
+			return v[0]
+		case "all":
+			return v
+		default: // "last"
+			return v[len(v)-1]
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		switch strategy {
+		case "first":
+			return v[0]
+		case "all":
+			return v
+		default: // "last"
+			return v[len(v)-1]
+		}
+	default:
+		// 非切片类型，直接返回
+		return val
+	}
+}
 
 // getTodayDateString 获取今天的日期字符串（格式: "20251201"）
 func getTodayDateString() string {
@@ -703,7 +889,36 @@ func getParamKeys(params map[string]interface{}) []string {
 	return keys
 }
 
-// extractParamValuesFromUpstream 从上游任务结果中提取参数值列表
+// extractParamValuesFromSpecificUpstream 从指定上游任务结果中提取参数值列表（使用新 API）
+func extractParamValuesFromSpecificUpstream(tc *task.TaskContext, taskName, paramKey string) []string {
+	upstreamResult := tc.GetUpstreamResult(taskName)
+	if upstreamResult == nil {
+		return nil
+	}
+
+	// 优先从 extracted_data 获取（复数形式）
+	pluralKey := paramKey + "s"
+	if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+		if vals, ok := extracted[pluralKey]; ok {
+			return convertToStringSlice(vals)
+		}
+		if vals, ok := extracted[paramKey]; ok {
+			return convertToStringSlice(vals)
+		}
+	}
+
+	// 直接检查字段
+	if vals, ok := upstreamResult[pluralKey]; ok {
+		return convertToStringSlice(vals)
+	}
+	if vals, ok := upstreamResult[paramKey]; ok {
+		return convertToStringSlice(vals)
+	}
+
+	return nil
+}
+
+// extractParamValuesFromUpstream 从上游任务结果中提取参数值列表（遍历所有上游任务）
 func extractParamValuesFromUpstream(tc *task.TaskContext, paramKey string) []string {
 	var values []string
 
@@ -781,74 +996,3 @@ func convertToStringSlice(raw interface{}) []string {
 	return nil
 }
 
-// saveAPIDataWithBatch 保存 API 数据到数据库（带批次 ID）
-func saveAPIDataWithBatch(dbPath, tableName string, data []map[string]interface{}, syncBatchID string) (int, []string, error) {
-	if len(data) == 0 {
-		return 0, nil, nil
-	}
-
-	// 打开数据库
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return 0, nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// 从第一条数据获取字段列表
-	var fields []string
-	for key := range data[0] {
-		fields = append(fields, key)
-	}
-	// 添加 sync_batch_id 字段
-	fields = append(fields, "sync_batch_id")
-
-	// 构建 INSERT 语句
-	placeholders := make([]string, len(fields))
-	quotedFields := make([]string, len(fields))
-	for i, f := range fields {
-		placeholders[i] = "?"
-		quotedFields[i] = fmt.Sprintf("\"%s\"", f)
-	}
-
-	query := fmt.Sprintf("INSERT OR REPLACE INTO \"%s\" (%s) VALUES (%s)",
-		tableName,
-		strings.Join(quotedFields, ", "),
-		strings.Join(placeholders, ", "))
-
-	// 批量插入
-	tx, err := db.Begin()
-	if err != nil {
-		return 0, fields, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return 0, fields, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-
-	count := 0
-	for _, row := range data {
-		values := make([]interface{}, len(fields))
-		for i, f := range fields {
-			if f == "sync_batch_id" {
-				values[i] = syncBatchID
-			} else {
-				values[i] = row[f]
-			}
-		}
-
-		if _, err := stmt.Exec(values...); err != nil {
-			log.Printf("⚠️ [saveAPIDataWithBatch] 插入失败: %v", err)
-			continue
-		}
-		count++
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fields, fmt.Errorf("failed to commit: %w", err)
-	}
-
-	return count, fields, nil
-}

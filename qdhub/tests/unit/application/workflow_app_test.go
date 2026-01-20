@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/LENAX/task-engine/pkg/core/workflow"
+
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/workflow"
+	qdhubworkflow "qdhub/internal/domain/workflow"
 )
 
 // ==================== Test Cases for WorkflowApplicationService ====================
@@ -25,7 +27,7 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
-			Category:       workflow.WfCategorySync,
+			Category:       qdhubworkflow.WfCategorySync,
 			DefinitionYAML: "name: test\ntasks: []",
 			IsSystem:       false,
 		}
@@ -51,7 +53,7 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
-			Category:       workflow.WfCategorySync,
+			Category:       qdhubworkflow.WfCategorySync,
 			DefinitionYAML: "", // Empty YAML
 			IsSystem:       false,
 		}
@@ -72,7 +74,7 @@ func TestWorkflowApplicationService_CreateWorkflowDefinition(t *testing.T) {
 		req := contracts.CreateWorkflowDefinitionRequest{
 			Name:           "Test Workflow",
 			Description:    "A test workflow",
-			Category:       workflow.WfCategorySync,
+			Category:       qdhubworkflow.WfCategorySync,
 			DefinitionYAML: "name: test\ntasks: []",
 			IsSystem:       false,
 		}
@@ -91,7 +93,7 @@ func TestWorkflowApplicationService_GetWorkflowDefinition(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -125,7 +127,7 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -148,7 +150,7 @@ func TestWorkflowApplicationService_UpdateWorkflowDefinition(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		// Create a running instance
@@ -190,7 +192,7 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -210,7 +212,7 @@ func TestWorkflowApplicationService_DeleteWorkflowDefinition(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		// Create a running instance
@@ -248,7 +250,7 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 
 		// Create multiple definitions
 		for i := 0; i < 3; i++ {
-			def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+			def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 			wfDefRepo.Create(def)
 		}
 
@@ -268,15 +270,15 @@ func TestWorkflowApplicationService_ListWorkflowDefinitions(t *testing.T) {
 		adapter := NewMockTaskEngineAdapter()
 
 		// Create definitions with different categories
-		syncDef := workflow.NewWorkflowDefinition("Sync", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		syncDef := qdhubworkflow.NewWorkflowDefinition("Sync", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(syncDef)
 
-		metaDef := workflow.NewWorkflowDefinition("Meta", "Desc", workflow.WfCategoryMetadata, "yaml: test", false)
+		metaDef := qdhubworkflow.NewWorkflowDefinition("Meta", "Desc", qdhubworkflow.WfCategoryMetadata, "yaml: test", false)
 		wfDefRepo.Create(metaDef)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		syncCategory := workflow.WfCategorySync
+		syncCategory := qdhubworkflow.WfCategorySync
 		defs, err := svc.ListWorkflowDefinitions(ctx, &syncCategory)
 		if err != nil {
 			t.Fatalf("ListWorkflowDefinitions failed: %v", err)
@@ -294,7 +296,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		wfDefRepo.Create(def)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -314,7 +316,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
@@ -335,7 +337,7 @@ func TestWorkflowApplicationService_EnableDisableWorkflow(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
@@ -372,7 +374,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
@@ -380,7 +382,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 		instID, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
-			TriggerType:   workflow.TriggerTypeManual,
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
 			TriggerParams: map[string]interface{}{"key": "value"},
 		})
 		if err != nil {
@@ -395,7 +397,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		// Explicitly disable the workflow
 		def.Disable()
 		wfDefRepo.Create(def)
@@ -404,7 +406,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
-			TriggerType:   workflow.TriggerTypeManual,
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
 		})
 		if err == nil {
 			t.Fatal("Expected error when executing disabled workflow")
@@ -416,7 +418,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 		adapter := NewMockTaskEngineAdapter()
 		adapter.submitErr = errors.New("task engine error")
 
-		def := workflow.NewWorkflowDefinition("Test", "Desc", workflow.WfCategorySync, "yaml: test", false)
+		def := qdhubworkflow.NewWorkflowDefinition("Test", "Desc", qdhubworkflow.WfCategorySync, "yaml: test", false)
 		def.Enable()
 		wfDefRepo.Create(def)
 
@@ -424,7 +426,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.ID(def.ID()),
-			TriggerType:   workflow.TriggerTypeManual,
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
 		})
 		if err == nil {
 			t.Fatal("Expected error when task engine fails")
@@ -439,7 +441,7 @@ func TestWorkflowApplicationService_ExecuteWorkflow(t *testing.T) {
 
 		_, err := svc.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
 			WorkflowDefID: shared.NewID(),
-			TriggerType:   workflow.TriggerTypeManual,
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
 		})
 		if err == nil {
 			t.Fatal("Expected error for non-existent workflow definition")
@@ -524,7 +526,7 @@ func TestWorkflowApplicationService_ListWorkflowInstances(t *testing.T) {
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
 
-		runningStatus := workflow.WfInstStatusRunning
+		runningStatus := qdhubworkflow.WfInstStatusRunning
 		instances, err := svc.ListWorkflowInstances(ctx, shared.ID(wfID), &runningStatus)
 		if err != nil {
 			t.Fatalf("ListWorkflowInstances failed: %v", err)
@@ -546,7 +548,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		// Note: getWorkflowInstance uses GetInstancesByDef(instanceID), so WorkflowID should match instanceID
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		inst.Status = string(qdhubworkflow.WfInstStatusRunning) // "running"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -564,7 +566,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		instID := "test-instance-id"
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusSuccess) // "success"
+		inst.Status = string(qdhubworkflow.WfInstStatusSuccess) // "success"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -582,7 +584,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		instID := "test-instance-id"
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusPaused) // "paused"
+		inst.Status = string(qdhubworkflow.WfInstStatusPaused) // "paused"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -600,7 +602,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		instID := "test-instance-id"
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		inst.Status = string(qdhubworkflow.WfInstStatusRunning) // "running"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -618,7 +620,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		instID := "test-instance-id"
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusRunning) // "running"
+		inst.Status = string(qdhubworkflow.WfInstStatusRunning) // "running"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -636,7 +638,7 @@ func TestWorkflowApplicationService_InstanceControl(t *testing.T) {
 		instID := "test-instance-id"
 		inst := workflow.NewWorkflowInstance(instID)
 		inst.ID = instID
-		inst.Status = string(workflow.WfInstStatusSuccess) // "success"
+		inst.Status = string(qdhubworkflow.WfInstStatusSuccess) // "success"
 		wfDefRepo.AddInstance(inst)
 
 		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
@@ -653,7 +655,7 @@ func TestWorkflowApplicationService_GetWorkflowStatus(t *testing.T) {
 
 	wfDefRepo := NewMockWorkflowDefinitionRepository()
 	adapter := NewMockTaskEngineAdapter()
-	adapter.instanceStatus = &workflow.WorkflowStatus{
+	adapter.instanceStatus = &qdhubworkflow.WorkflowStatus{
 		InstanceID:    "test-id",
 		Status:        "Running",
 		Progress:      75.0,
@@ -679,7 +681,7 @@ func TestWorkflowApplicationService_SyncWithEngine(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		wfDefRepo := NewMockWorkflowDefinitionRepository()
 		adapter := NewMockTaskEngineAdapter()
-		adapter.instanceStatus = &workflow.WorkflowStatus{
+		adapter.instanceStatus = &qdhubworkflow.WorkflowStatus{
 			InstanceID: "test-id",
 			Status:     "Success",
 		}
@@ -713,4 +715,105 @@ func TestWorkflowApplicationService_SyncWithEngine(t *testing.T) {
 			t.Fatal("Expected error for non-existent instance")
 		}
 	})
+}
+
+func TestWorkflowApplicationService_ExecuteBuiltInWorkflowByName(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Success", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+		adapter.instanceID = "test-instance-id"
+
+		// Create a built-in workflow definition
+		def := qdhubworkflow.NewWorkflowDefinition(
+			"元数据爬取",
+			"从数据源爬取API文档并保存元数据",
+			qdhubworkflow.WfCategoryMetadata,
+			`{"type":"built-in","workflow_id":"builtin:metadata_crawl"}`,
+			true,
+		)
+		wfDefRepo.Create(def)
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		req := contracts.ExecuteWorkflowRequest{
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
+			TriggerParams: map[string]interface{}{"data_source_id": "test-id"},
+		}
+
+		instanceID, err := svc.ExecuteBuiltInWorkflowByName(ctx, "metadata_crawl", req)
+		if err != nil {
+			t.Fatalf("ExecuteBuiltInWorkflowByName failed: %v", err)
+		}
+		if instanceID.String() != adapter.instanceID {
+			t.Errorf("Expected instance ID %s, got %s", adapter.instanceID, instanceID.String())
+		}
+	})
+
+	t.Run("Workflow not found", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		req := contracts.ExecuteWorkflowRequest{
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
+			TriggerParams: map[string]interface{}{},
+		}
+
+		_, err := svc.ExecuteBuiltInWorkflowByName(ctx, "non_existent_workflow", req)
+		if err == nil {
+			t.Fatal("Expected error for non-existent workflow")
+		}
+	})
+
+	t.Run("Workflow definition not found in repository", func(t *testing.T) {
+		wfDefRepo := NewMockWorkflowDefinitionRepository()
+		adapter := NewMockTaskEngineAdapter()
+
+		svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+		req := contracts.ExecuteWorkflowRequest{
+			TriggerType:   qdhubworkflow.TriggerTypeManual,
+			TriggerParams: map[string]interface{}{},
+		}
+
+		// metadata_crawl exists in built-in workflows but not in repository
+		_, err := svc.ExecuteBuiltInWorkflowByName(ctx, "metadata_crawl", req)
+		if err == nil {
+			t.Fatal("Expected error when workflow definition not found in repository")
+		}
+	})
+}
+
+func TestWorkflowApplicationService_GetTaskInstances(t *testing.T) {
+	ctx := context.Background()
+
+	wfDefRepo := NewMockWorkflowDefinitionRepository()
+	adapter := NewMockTaskEngineAdapter()
+
+	svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+	taskInstances, err := svc.GetTaskInstances(ctx, shared.ID("test-instance-id"))
+	if err != nil {
+		t.Fatalf("GetTaskInstances failed: %v", err)
+	}
+	if taskInstances == nil {
+		t.Fatal("Expected task instances to be non-nil")
+	}
+}
+
+func TestWorkflowApplicationService_RetryTask(t *testing.T) {
+	ctx := context.Background()
+
+	wfDefRepo := NewMockWorkflowDefinitionRepository()
+	adapter := NewMockTaskEngineAdapter()
+
+	svc := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
+
+	err := svc.RetryTask(ctx, shared.ID("test-task-id"))
+	if err != nil {
+		t.Fatalf("RetryTask failed: %v", err)
+	}
 }

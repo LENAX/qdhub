@@ -6,3 +6,12 @@ qdhub/coverage.out
 qdhub/coverage_all.out
 qdhub/coverage_all.out
 */bin/*
+*/*.db-shm
+*/*.db-wal
+qdhub/data/*
+qdhub/tests/e2e/data/*
+qdhub/tests/data/*
+qdhub/tests/e2e/tests/data/e2e_app.db
+qdhub/tests/e2e/tests/data/e2e_app.db-shm
+
+qdhub/tests/e2e/tests/data/*

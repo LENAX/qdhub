@@ -92,7 +92,7 @@ func getTestCases(t *testing.T) []dbTestCase {
 	sqlitePostgresTables := []string{
 		`CREATE TABLE IF NOT EXISTS data_sources (
 			id VARCHAR(64) PRIMARY KEY,
-			name VARCHAR(128) NOT NULL,
+			name VARCHAR(128) NOT NULL UNIQUE,
 			description TEXT,
 			base_url VARCHAR(512),
 			doc_url VARCHAR(512),
@@ -124,7 +124,8 @@ func getTestCases(t *testing.T) []dbTestCase {
 			permission VARCHAR(64),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS tokens (
 			id VARCHAR(64) PRIMARY KEY,
@@ -139,7 +140,7 @@ func getTestCases(t *testing.T) []dbTestCase {
 	mysqlTables := []string{
 		`CREATE TABLE IF NOT EXISTS data_sources (
 			id VARCHAR(64) PRIMARY KEY,
-			name VARCHAR(128) NOT NULL,
+			name VARCHAR(128) NOT NULL UNIQUE,
 			description TEXT,
 			base_url VARCHAR(512),
 			doc_url VARCHAR(512),
@@ -171,7 +172,8 @@ func getTestCases(t *testing.T) []dbTestCase {
 			permission VARCHAR(64),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		)`,
 		`CREATE TABLE IF NOT EXISTS tokens (
 			id VARCHAR(64) PRIMARY KEY,

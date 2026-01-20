@@ -104,6 +104,16 @@ func (m *MockSyncService) HandleExecutionCallback(ctx context.Context, req contr
 	return args.Error(0)
 }
 
+func (m *MockSyncService) SyncDataSource(ctx context.Context, req contracts.SyncDataSourceRequest) (shared.ID, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(shared.ID), args.Error(1)
+}
+
+func (m *MockSyncService) SyncDataSourceRealtime(ctx context.Context, req contracts.SyncDataSourceRealtimeRequest) (shared.ID, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(shared.ID), args.Error(1)
+}
+
 func setupSyncRouter(mockSvc *MockSyncService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

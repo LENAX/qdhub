@@ -20,17 +20,30 @@ var (
 	ErrEmptyEndDate        = errors.New("end_date is required")
 )
 
+// APISyncConfig API 同步配置
+// 定义单个 API 的同步方式和参数来源
+type APISyncConfig struct {
+	APIName        string                 // API 名称（必填）
+	SyncMode       string                 // 同步模式: "direct" | "template"，默认根据 ParamKey 自动判断
+	ParamKey       string                 // 模板任务的参数键名（如 "ts_code"），为空则使用 direct 模式
+	UpstreamTask   string                 // 上游任务名称（用于获取参数列表或参数值）
+	UpstreamParams map[string]interface{} // 上游参数映射配置（用于 direct 模式）
+	ExtraParams    map[string]interface{} // 额外固定参数
+	Dependencies   []string               // 依赖的任务列表（可选，默认自动推断）
+}
+
 // BatchDataSyncParams 批量数据同步工作流参数
 type BatchDataSyncParams struct {
-	DataSourceName string   // 数据源名称（必填）
-	Token          string   // API Token（必填）
-	TargetDBPath   string   // 目标数据库路径（必填）
-	StartDate      string   // 开始日期（必填，格式: "20251201"）
-	EndDate        string   // 结束日期（必填，格式: "20251231"）
-	StartTime      string   // 开始时间（可选，格式: "09:30:00"）
-	EndTime        string   // 结束时间（可选，格式: "15:00:00"）
-	APINames       []string // 需要同步的 API 列表（必填，不能为空）
-	MaxStocks      int      // 最大股票数量（用于限制子任务，0=不限制）
+	DataSourceName string          // 数据源名称（必填）
+	Token          string          // API Token（必填）
+	TargetDBPath   string          // 目标数据库路径（必填）
+	StartDate      string          // 开始日期（必填，格式: "20251201"）
+	EndDate        string          // 结束日期（必填，格式: "20251231"）
+	StartTime      string          // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string          // 结束时间（可选，格式: "15:00:00"）
+	APINames       []string        // 需要同步的 API 列表（简单模式，兼容旧用法）
+	APIConfigs     []APISyncConfig // API 同步配置（高级模式，优先使用）
+	MaxStocks      int             // 最大股票数量（用于限制子任务，0=不限制）
 }
 
 // Validate 验证参数
@@ -50,7 +63,8 @@ func (p *BatchDataSyncParams) Validate() error {
 	if p.EndDate == "" {
 		return ErrEmptyEndDate
 	}
-	if len(p.APINames) == 0 {
+	// APIConfigs 或 APINames 至少有一个不为空
+	if len(p.APINames) == 0 && len(p.APIConfigs) == 0 {
 		return ErrEmptyAPINames
 	}
 	return nil
@@ -144,6 +158,46 @@ func (b *BatchDataSyncWorkflowBuilder) WithMaxStocks(max int) *BatchDataSyncWork
 	return b
 }
 
+// WithAPIConfigs 设置 API 同步配置（高级模式）
+// 使用此方法可以精确控制每个 API 的同步方式、参数来源等
+func (b *BatchDataSyncWorkflowBuilder) WithAPIConfigs(configs ...APISyncConfig) *BatchDataSyncWorkflowBuilder {
+	b.params.APIConfigs = configs
+	return b
+}
+
+// AddAPIConfig 添加单个 API 同步配置
+func (b *BatchDataSyncWorkflowBuilder) AddAPIConfig(config APISyncConfig) *BatchDataSyncWorkflowBuilder {
+	b.params.APIConfigs = append(b.params.APIConfigs, config)
+	return b
+}
+
+// AddDirectSyncAPI 添加直接同步的 API（非模板任务）
+// 适用于不需要按 ts_code 拆分的 API，如 trade_cal, top_list 等
+func (b *BatchDataSyncWorkflowBuilder) AddDirectSyncAPI(apiName string, upstreamTask string, upstreamParams map[string]interface{}, dependencies ...string) *BatchDataSyncWorkflowBuilder {
+	config := APISyncConfig{
+		APIName:        apiName,
+		SyncMode:       "direct",
+		UpstreamTask:   upstreamTask,
+		UpstreamParams: upstreamParams,
+		Dependencies:   dependencies,
+	}
+	return b.AddAPIConfig(config)
+}
+
+// AddTemplateSyncAPI 添加模板同步的 API（按参数拆分子任务）
+// 适用于需要按 ts_code 拆分的 API，如 daily, adj_factor 等
+func (b *BatchDataSyncWorkflowBuilder) AddTemplateSyncAPI(apiName, paramKey, upstreamTask string, extraParams map[string]interface{}, dependencies ...string) *BatchDataSyncWorkflowBuilder {
+	config := APISyncConfig{
+		APIName:      apiName,
+		SyncMode:     "template",
+		ParamKey:     paramKey,
+		UpstreamTask: upstreamTask,
+		ExtraParams:  extraParams,
+		Dependencies: dependencies,
+	}
+	return b.AddAPIConfig(config)
+}
+
 // Build 构建批量数据同步工作流
 //
 // 工作流结构：
@@ -151,43 +205,77 @@ func (b *BatchDataSyncWorkflowBuilder) WithMaxStocks(max int) *BatchDataSyncWork
 //   - FetchTradeCal - 获取交易日历
 //   - FetchStockBasic - 获取股票基础信息
 //
-// Level 1（依赖 Level 0，并行执行模板任务）：
-//   - Sync_{api_name} [模板任务] - 根据 APINames 动态生成
-//   - SyncTopList - 同步龙虎榜（非模板，直接执行）
+// Level 1（依赖 Level 0，根据 APIConfigs 或 APINames 动态生成）：
+//   - 模板任务：按 ts_code 拆分的 API（如 daily, adj_factor）
+//   - 直接任务：不需要拆分的 API（如 top_list, index_daily）
 //
 // 事务支持：启用 SAGA 事务，同步失败时按 sync_batch_id 回滚数据
 //
-// 返回错误：
-//   - ErrEmptyAPINames: api_names 不能为空
-//   - ErrEmptyDataSourceName: data_source_name 必填
-//   - ErrEmptyToken: token 必填
-//   - ErrEmptyTargetDBPath: target_db_path 必填
-//   - ErrEmptyStartDate: start_date 必填
-//   - ErrEmptyEndDate: end_date 必填
+// 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_name}），
+// 执行时通过 workflow.ReplaceParams() 替换为实际值
 func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
 
-	// 参数验证
-	if err := params.Validate(); err != nil {
-		return nil, err
+	// 检查是否使用占位符模式（所有必填参数都为空）
+	usePlaceholders := params.DataSourceName == "" && params.Token == "" &&
+		params.TargetDBPath == "" && params.StartDate == "" && params.EndDate == "" &&
+		len(params.APINames) == 0 && len(params.APIConfigs) == 0
+
+	// 仅在非占位符模式下验证参数
+	if !usePlaceholders {
+		if err := params.Validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	var tasks []*task.Task
 
+	// 如果参数为空，使用占位符
+	dataSourceName := params.DataSourceName
+	if dataSourceName == "" {
+		dataSourceName = "${data_source_name}"
+	}
+	token := params.Token
+	if token == "" {
+		token = "${token}"
+	}
+	targetDBPath := params.TargetDBPath
+	if targetDBPath == "" {
+		targetDBPath = "${target_db_path}"
+	}
+	startDate := params.GetStartDateTime()
+	if startDate == "" {
+		startDate = "${start_date}"
+	}
+	endDate := params.GetEndDateTime()
+	if endDate == "" {
+		endDate = "${end_date}"
+	}
+
 	// 基础参数
 	baseParams := map[string]interface{}{
-		"data_source_name": params.DataSourceName,
-		"token":            params.Token,
-		"target_db_path":   params.TargetDBPath,
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
 	}
 
 	// 日期时间参数（支持可选时间）
 	dateTimeParams := map[string]interface{}{
-		"start_date": params.GetStartDateTime(),
-		"end_date":   params.GetEndDateTime(),
+		"start_date": startDate,
+		"end_date":   endDate,
 	}
 
 	// ==================== Level 0: 基础数据获取 ====================
+
+	// 处理日期参数（交易日历只用日期，不使用时间）
+	startDateOnly := params.StartDate
+	if startDateOnly == "" {
+		startDateOnly = "${start_date}"
+	}
+	endDateOnly := params.EndDate
+	if endDateOnly == "" {
+		endDateOnly = "${end_date}"
+	}
 
 	// Task: 获取交易日历
 	fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
@@ -195,8 +283,8 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			"api_name": "trade_cal",
 			"params": map[string]interface{}{
 				"exchange":   "SSE",
-				"start_date": params.StartDate, // 交易日历只用日期
-				"end_date":   params.EndDate,
+				"start_date": startDateOnly, // 交易日历只用日期
+				"end_date":   endDateOnly,
 			},
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -225,46 +313,46 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 	tasks = append(tasks, fetchStockBasicTask)
 
-	// ==================== Level 1: 数据同步模板任务 ====================
+	// ==================== Level 1: 数据同步任务 ====================
 
-	// 为每个 API 创建模板任务（APINames 必填，已在 Validate 中验证）
-	for _, apiName := range params.APINames {
-		taskName := "Sync_" + apiName
-		templateTask, err := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（模板任务）", b.registry).
-			WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
-				"api_name":      apiName,
-				"param_key":     "ts_code",
-				"max_sub_tasks": params.MaxStocks,
-				"extra_params":  dateTimeParams,
-			})).
-			WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
-			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-			WithTemplate(true). // 标记为模板任务
-			Build()
-		if err != nil {
-			return nil, err
+	// 优先使用 APIConfigs（高级配置模式）
+	if len(params.APIConfigs) > 0 {
+		for _, config := range params.APIConfigs {
+			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
+			if err != nil {
+				return nil, err
+			}
+			tasks = append(tasks, syncTask)
 		}
-		tasks = append(tasks, templateTask)
-	}
+	} else {
+		// 兼容旧用法：使用 APINames（简单模式，默认都是模板任务）
+		apiNames := params.APINames
+		if len(apiNames) == 0 {
+			// 如果为空，使用占位符
+			apiNames = []string{"${api_names}"}
+		}
 
-	// Task: 同步龙虎榜（非模板任务，直接执行）
-	syncTopListTask, err := builder.NewTaskBuilder("SyncTopList", "同步龙虎榜数据", b.registry).
-		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-			"api_name": "top_list",
-			"params": map[string]interface{}{
-				"trade_date": params.StartDate,
-			},
-		})).
-		WithDependency("FetchTradeCal"). // 依赖交易日历
-		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-		WithCompensationFunction("CompensateSyncData").
-		Build()
-	if err != nil {
-		return nil, err
+		for _, apiName := range apiNames {
+			taskName := "Sync_" + apiName
+			templateTask, err := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（模板任务）", b.registry).
+				WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+					"api_name":      apiName,
+					"param_key":     "ts_code",
+					"upstream_task": "FetchStockBasic",
+					"max_sub_tasks": params.MaxStocks,
+					"extra_params":  dateTimeParams,
+				})).
+				WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
+				WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+				WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+				WithTemplate(true). // 标记为模板任务
+				Build()
+			if err != nil {
+				return nil, err
+			}
+			tasks = append(tasks, templateTask)
+		}
 	}
-	tasks = append(tasks, syncTopListTask)
 
 	// 构建工作流
 	wfBuilder := builder.NewWorkflowBuilder("BatchDataSync", "批量数据同步工作流 - 支持用户指定时间区间和 API")
@@ -281,6 +369,90 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	wf.SetTransactional(true)
 
 	return wf, nil
+}
+
+// buildAPITask 根据 APISyncConfig 构建同步任务
+func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, baseParams, dateTimeParams map[string]interface{}) (*task.Task, error) {
+	taskName := "Sync_" + config.APIName
+
+	// 确定同步模式：如果有 ParamKey 则是模板任务，否则是直接任务
+	syncMode := config.SyncMode
+	if syncMode == "" {
+		if config.ParamKey != "" {
+			syncMode = "template"
+		} else {
+			syncMode = "direct"
+		}
+	}
+
+	// 确定依赖任务
+	dependencies := config.Dependencies
+	if len(dependencies) == 0 {
+		// 默认依赖推断
+		if syncMode == "template" {
+			dependencies = []string{"FetchStockBasic"}
+		} else if config.UpstreamTask != "" {
+			dependencies = []string{config.UpstreamTask}
+		}
+	}
+
+	if syncMode == "template" {
+		// 模板任务：按参数拆分生成子任务
+		upstreamTask := config.UpstreamTask
+		if upstreamTask == "" {
+			upstreamTask = "FetchStockBasic"
+		}
+
+		extraParams := dateTimeParams
+		if config.ExtraParams != nil {
+			extraParams = mergeParams(dateTimeParams, config.ExtraParams)
+		}
+
+		taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
+			WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+				"api_name":      config.APIName,
+				"param_key":     config.ParamKey,
+				"upstream_task": upstreamTask,
+				"max_sub_tasks": b.params.MaxStocks,
+				"extra_params":  extraParams,
+			})).
+			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+			WithTemplate(true)
+
+		for _, dep := range dependencies {
+			taskBuilder = taskBuilder.WithDependency(dep)
+		}
+
+		return taskBuilder.Build()
+	}
+
+	// 直接任务：直接调用 SyncAPIData
+	jobParams := mergeParams(baseParams, map[string]interface{}{
+		"api_name": config.APIName,
+	})
+
+	// 添加上游参数映射
+	if config.UpstreamParams != nil {
+		jobParams["upstream_params"] = config.UpstreamParams
+	}
+
+	// 添加额外参数
+	if config.ExtraParams != nil {
+		jobParams["params"] = config.ExtraParams
+	}
+
+	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
+		WithJobFunction("SyncAPIData", jobParams).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithCompensationFunction("CompensateSyncData")
+
+	for _, dep := range dependencies {
+		taskBuilder = taskBuilder.WithDependency(dep)
+	}
+
+	return taskBuilder.Build()
 }
 
 // mergeParams 合并参数 map

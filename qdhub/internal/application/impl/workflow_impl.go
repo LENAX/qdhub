@@ -8,6 +8,8 @@ import (
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
 // WorkflowApplicationServiceImpl implements WorkflowApplicationService.
@@ -253,10 +255,34 @@ func (s *WorkflowApplicationServiceImpl) ExecuteWorkflow(ctx context.Context, re
 		return "", fmt.Errorf("invalid trigger params: %w", err)
 	}
 
-	// Submit to Task Engine
+	// Submit to Task Engine (this will replace placeholders with actual values)
 	engineInstanceID, err := s.taskEngineAdapter.SubmitWorkflow(ctx, def, req.TriggerParams)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit workflow: %w", err)
+	}
+
+	// Get the instance from Task Engine to store trigger information
+	inst, err := s.workflowDefRepo.GetInstance(engineInstanceID)
+	if err != nil {
+		// Log error but don't fail - the workflow is already submitted
+		// We can try to store trigger info later or skip it
+		// For now, we'll create a minimal instance for storage
+		inst = &workflow.WorkflowInstance{
+			ID:         engineInstanceID,
+			WorkflowID: def.ID(),
+			Status:     "Ready", // Initial status
+			StartTime:  shared.Now().ToTime(),
+		}
+	}
+
+	// Store trigger information using repository's extended method
+	// Cast to concrete type to access AddInstanceWithTriggerInfo
+	if repoImpl, ok := s.workflowDefRepo.(*repository.WorkflowDefinitionRepositoryImpl); ok {
+		if err := repoImpl.AddInstanceWithTriggerInfo(inst, string(req.TriggerType), req.TriggerParams); err != nil {
+			// Log warning but don't fail - the workflow is already submitted
+			// This is a best-effort operation to store qdhub-specific metadata
+			// TODO: Add logging here
+		}
 	}
 
 	return shared.ID(engineInstanceID), nil
@@ -431,26 +457,51 @@ func (s *WorkflowApplicationServiceImpl) SyncAllInstances(ctx context.Context) e
 
 // GetTaskInstances retrieves all task instances for a workflow instance.
 func (s *WorkflowApplicationServiceImpl) GetTaskInstances(ctx context.Context, workflowInstID shared.ID) ([]*workflow.TaskInstance, error) {
-	// Get status from Task Engine (includes task info)
-	status, err := s.taskEngineAdapter.GetInstanceStatus(ctx, workflowInstID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow status: %w", err)
-	}
-
-	// Task instances are not directly available from WorkflowStatus
-	// We need to get them from the workflow instance repository
-	_ = status // Status is retrieved but task instances need different handling
-
-	// For now, return empty slice as task instances are managed by Task Engine
-	// In a full implementation, we would query Task Engine for task instances
-	return []*workflow.TaskInstance{}, nil
+	return s.taskEngineAdapter.GetTaskInstances(ctx, workflowInstID.String())
 }
 
 // RetryTask retries a failed task instance.
 func (s *WorkflowApplicationServiceImpl) RetryTask(ctx context.Context, taskInstanceID shared.ID) error {
-	// Task retry is handled by Task Engine
-	// This would require adding a RetryTask method to TaskEngineAdapter
-	return shared.NewDomainError(shared.ErrCodeInvalidState, "task retry not implemented", nil)
+	return s.taskEngineAdapter.RetryTask(ctx, taskInstanceID.String())
+}
+
+// ExecuteBuiltInWorkflowByName executes a built-in workflow by its API name (shortcut).
+func (s *WorkflowApplicationServiceImpl) ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
+	// Validate API name exists
+	_, err := workflows.GetBuiltInWorkflowMetaByName(name)
+	if err != nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow not found: %s", name), nil)
+	}
+
+	// Map API name to workflow builder name (English name used in builder)
+	// The workflow name in DB is the English name from builder (e.g., "MetadataCrawl")
+	builderNameMap := map[string]string{
+		workflows.BuiltInWorkflowNameMetadataCrawl:    "MetadataCrawl",
+		workflows.BuiltInWorkflowNameCreateTables:     "CreateTables",
+		workflows.BuiltInWorkflowNameBatchDataSync:    "BatchDataSync",
+		workflows.BuiltInWorkflowNameRealtimeDataSync: "RealtimeDataSync",
+	}
+
+	workflowName, ok := builderNameMap[name]
+	if !ok {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow name mapping not found: %s", name), nil)
+	}
+
+	// Find workflow definition by English name (as stored by builder)
+	defs, err := s.workflowDefRepo.FindBy(shared.Eq("name", workflowName))
+	if err != nil {
+		return "", fmt.Errorf("failed to find workflow by name: %w", err)
+	}
+	if len(defs) == 0 {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("built-in workflow '%s' not found in database. Please ensure built-in workflows are initialized.", name), nil)
+	}
+	if len(defs) > 1 {
+		return "", fmt.Errorf("multiple workflows found with name '%s'", workflowName)
+	}
+
+	// Use the found workflow ID to execute
+	req.WorkflowDefID = shared.ID(defs[0].ID())
+	return s.ExecuteWorkflow(ctx, req)
 }
 
 // ==================== Helper Functions ====================

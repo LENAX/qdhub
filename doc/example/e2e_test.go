@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,13 +19,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/sirupsen/logrus"
+
 	"github.com/LENAX/task-engine/internal/storage/sqlite"
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/workflow"
+	"github.com/PuerkitoBio/goquery"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // 高并发 HTTP 客户端（支持 50+ 并发连接）
@@ -288,18 +289,18 @@ func registerE2EFunctions(t *testing.T, ctx *E2EContext) {
 
 	// 保留旧的 TemplateNoOp 用于向后兼容（但不推荐使用）
 	registry.Register(bgCtx, "TemplateNoOp", func(tc *task.TaskContext) (interface{}, error) {
-		log.Printf("⚠️ [模板任务] %s - 使用废弃的 TemplateNoOp，建议迁移到 Job Function 模式", tc.TaskName)
+		logrus.Printf("⚠️ [模板任务] %s - 使用废弃的 TemplateNoOp，建议迁移到 Job Function 模式", tc.TaskName)
 		return map[string]string{"status": "template_ready"}, nil
 	}, "模板任务占位函数（已废弃，仅用于向后兼容）")
 
 	// 注册通用Handler
 	registry.RegisterTaskHandler(bgCtx, "LogSuccess", func(tc *task.TaskContext) {
-		log.Printf("✅ [任务成功] %s", tc.TaskName)
+		logrus.Printf("✅ [任务成功] %s", tc.TaskName)
 	}, "记录成功")
 
 	registry.RegisterTaskHandler(bgCtx, "LogError", func(tc *task.TaskContext) {
 		errMsg := tc.GetParamString("_error_message")
-		log.Printf("❌ [任务失败] %s: %s", tc.TaskName, errMsg)
+		logrus.Printf("❌ [任务失败] %s: %s", tc.TaskName, errMsg)
 	}, "记录错误")
 
 	// 注册生成子任务的 Handlers（用于模板任务模式）
@@ -323,7 +324,7 @@ func CrawlDocCatalog(tc *task.TaskContext) (interface{}, error) {
 	ctx := e2eCtx.(*E2EContext)
 
 	url := ctx.Config.DocServerURL + "/document/2"
-	log.Printf("📡 [CrawlDocCatalog] 开始爬取: %s", url)
+	logrus.Printf("📡 [CrawlDocCatalog] 开始爬取: %s", url)
 
 	resp, err := httpClient.Get(url)
 	if err != nil {
@@ -338,7 +339,7 @@ func CrawlDocCatalog(tc *task.TaskContext) (interface{}, error) {
 
 	// 解析目录结构
 	catalogs := parseDocCatalog(string(body), ctx.Config.DocServerURL)
-	log.Printf("✅ [CrawlDocCatalog] 解析到 %d 个目录项", len(catalogs))
+	logrus.Printf("✅ [CrawlDocCatalog] 解析到 %d 个目录项", len(catalogs))
 
 	return catalogs, nil
 }
@@ -355,7 +356,7 @@ func parseDocCatalog(html, baseURL string) []APICatalog {
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		log.Printf("解析HTML失败: %v", err)
+		logrus.Printf("解析HTML失败: %v", err)
 		return catalogs
 	}
 
@@ -438,7 +439,7 @@ func parseDocCatalog(html, baseURL string) []APICatalog {
 // CrawlAPIDetail 爬取API详情（模板任务版本，用于生成子任务）
 // 这个函数现在作为模板任务的占位函数，实际爬取逻辑在子任务中
 func CrawlAPIDetail(tc *task.TaskContext) (interface{}, error) {
-	log.Printf("📋 [CrawlAPIDetail] 模板任务准备生成子任务")
+	logrus.Printf("📋 [CrawlAPIDetail] 模板任务准备生成子任务")
 	return map[string]string{"status": "template_ready"}, nil
 }
 
@@ -463,7 +464,7 @@ func CrawlSingleAPIDetail(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("catalog_link 为空")
 	}
 
-	log.Printf("📡 [CrawlSingleAPIDetail] 爬取: %s (ID=%d)", catalogName, catalogID)
+	logrus.Printf("📡 [CrawlSingleAPIDetail] 爬取: %s (ID=%d)", catalogName, catalogID)
 
 	// 爬取API详情（使用高并发 HTTP 客户端）
 	resp, err := httpClient.Get(catalogLink)
@@ -516,7 +517,7 @@ func CrawlSingleAPIDetail(tc *task.TaskContext) (interface{}, error) {
 	ctx.crawlCollector.mu.Unlock()
 	ctx.crawlResultMu.Unlock()
 
-	log.Printf("✅ [CrawlSingleAPIDetail] 完成: %s, 参数=%d, 字段=%d", catalogName, len(detail.params), len(detail.fields))
+	logrus.Printf("✅ [CrawlSingleAPIDetail] 完成: %s, 参数=%d, 字段=%d", catalogName, len(detail.params), len(detail.fields))
 
 	return map[string]interface{}{
 		"catalog_id":   catalogID,
@@ -542,7 +543,7 @@ func parseAPIDetail(html string, catalogID int) *apiDetailResult {
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		log.Printf("解析API详情HTML失败: %v", err)
+		logrus.Printf("解析API详情HTML失败: %v", err)
 		return result
 	}
 
@@ -786,7 +787,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 			Params:     ctx.crawlCollector.Params,
 			DataFields: ctx.crawlCollector.DataFields,
 		}
-		log.Printf("📊 [SaveMetadata] 从子任务聚合结果: Catalogs=%d, Params=%d, Fields=%d",
+		logrus.Printf("📊 [SaveMetadata] 从子任务聚合结果: Catalogs=%d, Params=%d, Fields=%d",
 			len(ctx.CrawlResult.Catalogs), len(ctx.CrawlResult.Params), len(ctx.CrawlResult.DataFields))
 	}
 	ctx.crawlResultMu.Unlock()
@@ -795,7 +796,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("未找到爬取结果")
 	}
 
-	log.Printf("💾 [SaveMetadata] 开始保存元数据到: %s", ctx.Config.MetadataDBPath)
+	logrus.Printf("💾 [SaveMetadata] 开始保存元数据到: %s", ctx.Config.MetadataDBPath)
 
 	// 创建数据库连接
 	db, err := sql.Open("sqlite3", ctx.Config.MetadataDBPath)
@@ -835,7 +836,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 			c.ID, 1, c.Name, c.Level, c.IsLeaf, c.Link, c.APIName, c.Description, c.Permission, c.SortOrder, c.CreatedAt,
 		)
 		if err != nil {
-			log.Printf("  ⚠️ 保存Catalog失败: %v", err)
+			logrus.Printf("  ⚠️ 保存Catalog失败: %v", err)
 		}
 	}
 
@@ -846,7 +847,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 			p.ID, p.CatalogID, p.Name, p.Type, p.Required, p.Description, p.SortOrder, p.CreatedAt,
 		)
 		if err != nil {
-			log.Printf("  ⚠️ 保存Param失败: %v", err)
+			logrus.Printf("  ⚠️ 保存Param失败: %v", err)
 		}
 	}
 
@@ -857,7 +858,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 			f.ID, f.CatalogID, f.Name, f.Type, f.Default, f.Description, f.SortOrder, f.CreatedAt,
 		)
 		if err != nil {
-			log.Printf("  ⚠️ 保存Field失败: %v", err)
+			logrus.Printf("  ⚠️ 保存Field失败: %v", err)
 		}
 	}
 
@@ -866,7 +867,7 @@ func SaveMetadata(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
 
-	log.Printf("✅ [SaveMetadata] 保存完成: Provider=1, Catalogs=%d, Params=%d, Fields=%d",
+	logrus.Printf("✅ [SaveMetadata] 保存完成: Provider=1, Catalogs=%d, Params=%d, Fields=%d",
 		len(ctx.CrawlResult.Catalogs), len(ctx.CrawlResult.Params), len(ctx.CrawlResult.DataFields))
 
 	return map[string]int{
@@ -945,7 +946,7 @@ func CreateTables(tc *task.TaskContext) (interface{}, error) {
 	}
 	ctx := e2eCtx.(*E2EContext)
 
-	log.Printf("🔨 [CreateTables] 开始在 %s 创建数据表", ctx.Config.StockDBPath)
+	logrus.Printf("🔨 [CreateTables] 开始在 %s 创建数据表", ctx.Config.StockDBPath)
 
 	// 检查是否有爬取结果
 	if ctx.CrawlResult == nil || len(ctx.CrawlResult.Catalogs) == 0 {
@@ -976,16 +977,16 @@ func CreateTables(tc *task.TaskContext) (interface{}, error) {
 		// 获取该API的所有字段
 		fields := getFieldsForCatalog(ctx.CrawlResult.DataFields, catalog.ID)
 		if len(fields) == 0 {
-			log.Printf("  ⚠️ API %s (%s) 没有字段定义，跳过", catalog.Name, catalog.APIName)
+			logrus.Printf("  ⚠️ API %s (%s) 没有字段定义，跳过", catalog.Name, catalog.APIName)
 			continue
 		}
 
 		// 生成DDL
 		ddl := generateTableDDL(catalog.APIName, fields)
-		log.Printf("  - 创建表: %s (%d个字段)", catalog.APIName, len(fields))
+		logrus.Printf("  - 创建表: %s (%d个字段)", catalog.APIName, len(fields))
 
 		if _, err := tx.Exec(ddl); err != nil {
-			log.Printf("  ⚠️ 创建表 %s 失败: %v", catalog.APIName, err)
+			logrus.Printf("  ⚠️ 创建表 %s 失败: %v", catalog.APIName, err)
 			continue
 		}
 		createdTables++
@@ -995,7 +996,7 @@ func CreateTables(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
 
-	log.Printf("✅ [CreateTables] 创建完成，共 %d 个表", createdTables)
+	logrus.Printf("✅ [CreateTables] 创建完成，共 %d 个表", createdTables)
 	return map[string]int{"tables_created": createdTables}, nil
 }
 
@@ -1107,7 +1108,7 @@ func FetchTradeCal(tc *task.TaskContext) (interface{}, error) {
 	}
 	ctx := e2eCtx.(*E2EContext)
 
-	log.Printf("📡 [FetchTradeCal] 获取交易日历: %s - %s", ctx.Config.StartDate, ctx.Config.EndDate)
+	logrus.Printf("📡 [FetchTradeCal] 获取交易日历: %s - %s", ctx.Config.StartDate, ctx.Config.EndDate)
 
 	df, err := callTushareAPI(ctx, "trade_cal", map[string]interface{}{
 		"exchange":   "SSE",
@@ -1154,7 +1155,7 @@ func FetchTradeCal(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	log.Printf("✅ [FetchTradeCal] 保存 %d 条记录，提取 %d 个交易日", count, len(tradeDates))
+	logrus.Printf("✅ [FetchTradeCal] 保存 %d 条记录，提取 %d 个交易日", count, len(tradeDates))
 	return map[string]interface{}{
 		"count":       count,
 		"trade_dates": tradeDates,
@@ -1170,7 +1171,7 @@ func FetchStockBasic(tc *task.TaskContext) (interface{}, error) {
 	}
 	ctx := e2eCtx.(*E2EContext)
 
-	log.Printf("📡 [FetchStockBasic] 获取股票基本信息")
+	logrus.Printf("📡 [FetchStockBasic] 获取股票基本信息")
 
 	df, err := callTushareAPI(ctx, "stock_basic", map[string]interface{}{
 		"list_status": "L",
@@ -1207,7 +1208,7 @@ func FetchStockBasic(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	log.Printf("✅ [FetchStockBasic] 保存 %d 条记录，提取 %d 个股票代码用于子任务", count, len(tsCodes))
+	logrus.Printf("✅ [FetchStockBasic] 保存 %d 条记录，提取 %d 个股票代码用于子任务", count, len(tsCodes))
 	return map[string]interface{}{
 		"count":    count,
 		"ts_codes": tsCodes,
@@ -1229,7 +1230,7 @@ func FetchDaily(tc *task.TaskContext) (interface{}, error) {
 		tsCode = "000001.SZ" // 默认值（用于模拟模式或未注入参数时）
 	}
 
-	log.Printf("📡 [FetchDaily] 获取日线行情: ts_code=%s, %s - %s", tsCode, ctx.Config.StartDate, ctx.Config.EndDate)
+	logrus.Printf("📡 [FetchDaily] 获取日线行情: ts_code=%s, %s - %s", tsCode, ctx.Config.StartDate, ctx.Config.EndDate)
 
 	df, err := callTushareAPI(ctx, "daily", map[string]interface{}{
 		"ts_code":    tsCode,
@@ -1245,7 +1246,7 @@ func FetchDaily(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchDaily] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
+	logrus.Printf("✅ [FetchDaily] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1264,7 +1265,7 @@ func FetchAdjFactor(tc *task.TaskContext) (interface{}, error) {
 		tsCode = "000001.SZ" // 默认值
 	}
 
-	log.Printf("📡 [FetchAdjFactor] 获取复权因子: ts_code=%s", tsCode)
+	logrus.Printf("📡 [FetchAdjFactor] 获取复权因子: ts_code=%s", tsCode)
 
 	df, err := callTushareAPI(ctx, "adj_factor", map[string]interface{}{
 		"ts_code":    tsCode,
@@ -1280,7 +1281,7 @@ func FetchAdjFactor(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchAdjFactor] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
+	logrus.Printf("✅ [FetchAdjFactor] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1299,7 +1300,7 @@ func FetchIncome(tc *task.TaskContext) (interface{}, error) {
 		tsCode = "000001.SZ" // 默认值
 	}
 
-	log.Printf("📡 [FetchIncome] 获取利润表: ts_code=%s", tsCode)
+	logrus.Printf("📡 [FetchIncome] 获取利润表: ts_code=%s", tsCode)
 
 	df, err := callTushareAPI(ctx, "income", map[string]interface{}{
 		"ts_code": tsCode,
@@ -1314,7 +1315,7 @@ func FetchIncome(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchIncome] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
+	logrus.Printf("✅ [FetchIncome] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1333,7 +1334,7 @@ func FetchBalanceSheet(tc *task.TaskContext) (interface{}, error) {
 		tsCode = "000001.SZ" // 默认值
 	}
 
-	log.Printf("📡 [FetchBalanceSheet] 获取资产负债表: ts_code=%s", tsCode)
+	logrus.Printf("📡 [FetchBalanceSheet] 获取资产负债表: ts_code=%s", tsCode)
 
 	df, err := callTushareAPI(ctx, "balancesheet", map[string]interface{}{
 		"ts_code": tsCode,
@@ -1348,7 +1349,7 @@ func FetchBalanceSheet(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchBalanceSheet] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
+	logrus.Printf("✅ [FetchBalanceSheet] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1367,7 +1368,7 @@ func FetchCashFlow(tc *task.TaskContext) (interface{}, error) {
 		tsCode = "000001.SZ" // 默认值
 	}
 
-	log.Printf("📡 [FetchCashFlow] 获取现金流量表: ts_code=%s", tsCode)
+	logrus.Printf("📡 [FetchCashFlow] 获取现金流量表: ts_code=%s", tsCode)
 
 	df, err := callTushareAPI(ctx, "cashflow", map[string]interface{}{
 		"ts_code": tsCode,
@@ -1382,7 +1383,7 @@ func FetchCashFlow(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchCashFlow] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
+	logrus.Printf("✅ [FetchCashFlow] 保存 %d 条记录 (ts_code=%s)", count, tsCode)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1469,34 +1470,34 @@ func extractCatalogsFromUpstream(tc *task.TaskContext) []APICatalog {
 // generateSubTasksForType 通用的子任务生成函数
 func generateSubTasksForType(tc *task.TaskContext, taskTypeName, jobFuncName string) {
 	// 调试：打印所有参数
-	log.Printf("🔍 [%s] Params 内容: %+v", taskTypeName, tc.Params)
+	logrus.Printf("🔍 [%s] Params 内容: %+v", taskTypeName, tc.Params)
 
 	// 获取Engine
 	engineInterface, ok := tc.GetDependency("Engine")
 	if !ok {
-		log.Printf("⚠️ [%s] 未找到Engine依赖", taskTypeName)
+		logrus.Printf("⚠️ [%s] 未找到Engine依赖", taskTypeName)
 		return
 	}
 	eng, ok := engineInterface.(*engine.Engine)
 	if !ok {
-		log.Printf("⚠️ [%s] Engine类型转换失败", taskTypeName)
+		logrus.Printf("⚠️ [%s] Engine类型转换失败", taskTypeName)
 		return
 	}
 
 	registry := eng.GetRegistry()
 	if registry == nil {
-		log.Printf("⚠️ [%s] 无法获取Registry", taskTypeName)
+		logrus.Printf("⚠️ [%s] 无法获取Registry", taskTypeName)
 		return
 	}
 
 	// 从上游任务结果中提取 ts_codes
 	tsCodes := extractTsCodesFromUpstream(tc)
 	if len(tsCodes) == 0 {
-		log.Printf("⚠️ [%s] 未找到 ts_codes，Params keys: %v", taskTypeName, getParamKeys(tc.Params))
+		logrus.Printf("⚠️ [%s] 未找到 ts_codes，Params keys: %v", taskTypeName, getParamKeys(tc.Params))
 		return
 	}
 
-	log.Printf("📡 [%s] 从上游任务获取到 %d 个股票代码: %v", taskTypeName, len(tsCodes), tsCodes)
+	logrus.Printf("📡 [%s] 从上游任务获取到 %d 个股票代码: %v", taskTypeName, len(tsCodes), tsCodes)
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -1512,21 +1513,21 @@ func generateSubTasksForType(tc *task.TaskContext, taskTypeName, jobFuncName str
 			WithTaskHandler(task.TaskStatusFailed, "LogError").
 			Build()
 		if err != nil {
-			log.Printf("❌ [%s] 创建子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
+			logrus.Printf("❌ [%s] 创建子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [%s] 添加子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
+			logrus.Printf("❌ [%s] 添加子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
 			continue
 		}
 
 		generatedCount++
-		log.Printf("✅ [%s] 子任务已添加: %s (ts_code=%s)", taskTypeName, subTaskName, tsCode)
+		logrus.Printf("✅ [%s] 子任务已添加: %s (ts_code=%s)", taskTypeName, subTaskName, tsCode)
 	}
 
-	log.Printf("✅ [%s] 共生成 %d 个子任务", taskTypeName, generatedCount)
+	logrus.Printf("✅ [%s] 共生成 %d 个子任务", taskTypeName, generatedCount)
 }
 
 // GenerateDailySubTasks 日线数据模板任务的 Success Handler（已废弃，仅用于向后兼容）
@@ -1557,7 +1558,7 @@ func GenerateBalanceSheetSubTasks(tc *task.TaskContext) {
 // 返回生成的子任务数量和状态信息
 func generateSubTasksForTypeJob(tc *task.TaskContext, taskTypeName, jobFuncName string) (interface{}, error) {
 	// 调试：打印所有参数
-	log.Printf("🔍 [%s] Job Function 执行，Params 内容: %+v", taskTypeName, tc.Params)
+	logrus.Printf("🔍 [%s] Job Function 执行，Params 内容: %+v", taskTypeName, tc.Params)
 
 	// 获取Engine
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -1577,7 +1578,7 @@ func generateSubTasksForTypeJob(tc *task.TaskContext, taskTypeName, jobFuncName 
 	// 从上游任务结果中提取 ts_codes
 	tsCodes := extractTsCodesFromUpstream(tc)
 	if len(tsCodes) == 0 {
-		log.Printf("⚠️ [%s] 未找到 ts_codes，Params keys: %v", taskTypeName, getParamKeys(tc.Params))
+		logrus.Printf("⚠️ [%s] 未找到 ts_codes，Params keys: %v", taskTypeName, getParamKeys(tc.Params))
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -1585,7 +1586,7 @@ func generateSubTasksForTypeJob(tc *task.TaskContext, taskTypeName, jobFuncName 
 		}, nil
 	}
 
-	log.Printf("📡 [%s] 从上游任务获取到 %d 个股票代码: %v", taskTypeName, len(tsCodes), tsCodes)
+	logrus.Printf("📡 [%s] 从上游任务获取到 %d 个股票代码: %v", taskTypeName, len(tsCodes), tsCodes)
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -1603,13 +1604,13 @@ func generateSubTasksForTypeJob(tc *task.TaskContext, taskTypeName, jobFuncName 
 			WithTaskHandler(task.TaskStatusFailed, "LogError").
 			Build()
 		if err != nil {
-			log.Printf("❌ [%s] 创建子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
+			logrus.Printf("❌ [%s] 创建子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [%s] 添加子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
+			logrus.Printf("❌ [%s] 添加子任务失败: %s, error=%v", taskTypeName, subTaskName, err)
 			continue
 		}
 
@@ -1618,10 +1619,10 @@ func generateSubTasksForTypeJob(tc *task.TaskContext, taskTypeName, jobFuncName 
 			"name":    subTaskName,
 			"ts_code": tsCode,
 		})
-		log.Printf("✅ [%s] 子任务已添加: %s (ts_code=%s)", taskTypeName, subTaskName, tsCode)
+		logrus.Printf("✅ [%s] 子任务已添加: %s (ts_code=%s)", taskTypeName, subTaskName, tsCode)
 	}
 
-	log.Printf("✅ [%s] 共生成 %d 个子任务", taskTypeName, generatedCount)
+	logrus.Printf("✅ [%s] 共生成 %d 个子任务", taskTypeName, generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -1666,7 +1667,7 @@ func GenerateAPIDetailSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	// 从上游任务获取目录列表
 	catalogs := extractCatalogsFromUpstream(tc)
 	if len(catalogs) == 0 {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasksJob] 未找到目录数据，Params keys: %v", getParamKeys(tc.Params))
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasksJob] 未找到目录数据，Params keys: %v", getParamKeys(tc.Params))
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -1676,11 +1677,11 @@ func GenerateAPIDetailSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 真实模式下限制爬取数量
 	if ctx.Config.MaxAPICrawl > 0 && len(catalogs) > ctx.Config.MaxAPICrawl {
-		log.Printf("📡 [GenerateAPIDetailSubTasksJob] 真实模式：限制爬取数量从 %d 到 %d", len(catalogs), ctx.Config.MaxAPICrawl)
+		logrus.Printf("📡 [GenerateAPIDetailSubTasksJob] 真实模式：限制爬取数量从 %d 到 %d", len(catalogs), ctx.Config.MaxAPICrawl)
 		catalogs = catalogs[:ctx.Config.MaxAPICrawl]
 	}
 
-	log.Printf("📡 [GenerateAPIDetailSubTasksJob] 从上游任务获取到 %d 个目录，开始生成子任务", len(catalogs))
+	logrus.Printf("📡 [GenerateAPIDetailSubTasksJob] 从上游任务获取到 %d 个目录，开始生成子任务", len(catalogs))
 
 	// 获取Engine
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -1729,13 +1730,13 @@ func GenerateAPIDetailSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			dirCount++
 		}
 	}
-	log.Printf("📊 [GenerateAPIDetailSubTasksJob] 目录结构: 叶子节点=%d, 目录节点=%d", leafCount, dirCount)
+	logrus.Printf("📊 [GenerateAPIDetailSubTasksJob] 目录结构: 叶子节点=%d, 目录节点=%d", leafCount, dirCount)
 
 	var subTaskInfos []map[string]interface{}
 	for _, catalog := range catalogs {
 		// 只为叶子节点生成子任务（跳过目录节点）
 		if !catalog.IsLeaf {
-			log.Printf("📁 [GenerateAPIDetailSubTasksJob] 跳过目录节点: %s", catalog.Name)
+			logrus.Printf("📁 [GenerateAPIDetailSubTasksJob] 跳过目录节点: %s", catalog.Name)
 			continue
 		}
 
@@ -1754,13 +1755,13 @@ func GenerateAPIDetailSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			WithTaskHandler(task.TaskStatusFailed, "LogError").
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateAPIDetailSubTasksJob] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailSubTasksJob] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateAPIDetailSubTasksJob] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailSubTasksJob] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -1769,10 +1770,10 @@ func GenerateAPIDetailSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			"name":    subTaskName,
 			"catalog": catalog.Name,
 		})
-		log.Printf("✅ [GenerateAPIDetailSubTasksJob] 子任务已添加: %s (catalog=%s)", subTaskName, catalog.Name)
+		logrus.Printf("✅ [GenerateAPIDetailSubTasksJob] 子任务已添加: %s (catalog=%s)", subTaskName, catalog.Name)
 	}
 
-	log.Printf("✅ [GenerateAPIDetailSubTasksJob] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateAPIDetailSubTasksJob] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":     "success",
@@ -1792,7 +1793,7 @@ func GenerateCashFlowSubTasks(tc *task.TaskContext) {
 func GenerateAPIDetailSubTasks(tc *task.TaskContext) {
 	e2eCtx, ok := tc.GetDependency("E2EContext")
 	if !ok {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到E2EContext依赖")
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到E2EContext依赖")
 		return
 	}
 	ctx := e2eCtx.(*E2EContext)
@@ -1800,33 +1801,33 @@ func GenerateAPIDetailSubTasks(tc *task.TaskContext) {
 	// 从上游任务获取目录列表
 	catalogs := extractCatalogsFromUpstream(tc)
 	if len(catalogs) == 0 {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到目录数据，Params keys: %v", getParamKeys(tc.Params))
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到目录数据，Params keys: %v", getParamKeys(tc.Params))
 		return
 	}
 
 	// 真实模式下限制爬取数量
 	if ctx.Config.MaxAPICrawl > 0 && len(catalogs) > ctx.Config.MaxAPICrawl {
-		log.Printf("📡 [GenerateAPIDetailSubTasks] 真实模式：限制爬取数量从 %d 到 %d", len(catalogs), ctx.Config.MaxAPICrawl)
+		logrus.Printf("📡 [GenerateAPIDetailSubTasks] 真实模式：限制爬取数量从 %d 到 %d", len(catalogs), ctx.Config.MaxAPICrawl)
 		catalogs = catalogs[:ctx.Config.MaxAPICrawl]
 	}
 
-	log.Printf("📡 [GenerateAPIDetailSubTasks] 从上游任务获取到 %d 个目录，开始生成子任务", len(catalogs))
+	logrus.Printf("📡 [GenerateAPIDetailSubTasks] 从上游任务获取到 %d 个目录，开始生成子任务", len(catalogs))
 
 	// 获取Engine
 	engineInterface, ok := tc.GetDependency("Engine")
 	if !ok {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到Engine依赖")
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasks] 未找到Engine依赖")
 		return
 	}
 	eng, ok := engineInterface.(*engine.Engine)
 	if !ok {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasks] Engine类型转换失败")
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasks] Engine类型转换失败")
 		return
 	}
 
 	registry := eng.GetRegistry()
 	if registry == nil {
-		log.Printf("⚠️ [GenerateAPIDetailSubTasks] 无法获取Registry")
+		logrus.Printf("⚠️ [GenerateAPIDetailSubTasks] 无法获取Registry")
 		return
 	}
 
@@ -1862,12 +1863,12 @@ func GenerateAPIDetailSubTasks(tc *task.TaskContext) {
 			dirCount++
 		}
 	}
-	log.Printf("📊 [GenerateAPIDetailSubTasks] 目录结构: 叶子节点=%d, 目录节点=%d", leafCount, dirCount)
+	logrus.Printf("📊 [GenerateAPIDetailSubTasks] 目录结构: 叶子节点=%d, 目录节点=%d", leafCount, dirCount)
 
 	for _, catalog := range catalogs {
 		// 只为叶子节点生成子任务（跳过目录节点）
 		if !catalog.IsLeaf {
-			log.Printf("📁 [GenerateAPIDetailSubTasks] 跳过目录节点: %s", catalog.Name)
+			logrus.Printf("📁 [GenerateAPIDetailSubTasks] 跳过目录节点: %s", catalog.Name)
 			continue
 		}
 
@@ -1886,28 +1887,28 @@ func GenerateAPIDetailSubTasks(tc *task.TaskContext) {
 			WithTaskHandler(task.TaskStatusFailed, "LogError").
 			Build()
 		if err != nil {
-			log.Printf("❌ [GenerateAPIDetailSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			log.Printf("❌ [GenerateAPIDetailSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Printf("❌ [GenerateAPIDetailSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		generatedCount++
-		log.Printf("✅ [GenerateAPIDetailSubTasks] 子任务已添加: %s (catalog=%s)", subTaskName, catalog.Name)
+		logrus.Printf("✅ [GenerateAPIDetailSubTasks] 子任务已添加: %s (catalog=%s)", subTaskName, catalog.Name)
 	}
 
-	log.Printf("✅ [GenerateAPIDetailSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Printf("✅ [GenerateAPIDetailSubTasks] 共生成 %d 个子任务", generatedCount)
 }
 
 // AggregateAPIDetailResults 聚合所有API详情子任务的结果
 func AggregateAPIDetailResults(tc *task.TaskContext) {
 	e2eCtx, ok := tc.GetDependency("E2EContext")
 	if !ok {
-		log.Printf("⚠️ [AggregateAPIDetailResults] 未找到E2EContext依赖")
+		logrus.Printf("⚠️ [AggregateAPIDetailResults] 未找到E2EContext依赖")
 		return
 	}
 	ctx := e2eCtx.(*E2EContext)
@@ -1916,7 +1917,7 @@ func AggregateAPIDetailResults(tc *task.TaskContext) {
 	defer ctx.crawlResultMu.Unlock()
 
 	if ctx.crawlCollector == nil {
-		log.Printf("⚠️ [AggregateAPIDetailResults] 结果收集器为空")
+		logrus.Printf("⚠️ [AggregateAPIDetailResults] 结果收集器为空")
 		return
 	}
 
@@ -1930,7 +1931,7 @@ func AggregateAPIDetailResults(tc *task.TaskContext) {
 
 	ctx.CrawlResult = result
 
-	log.Printf("✅ [AggregateAPIDetailResults] 聚合完成: Catalogs=%d, Params=%d, Fields=%d",
+	logrus.Printf("✅ [AggregateAPIDetailResults] 聚合完成: Catalogs=%d, Params=%d, Fields=%d",
 		len(result.Catalogs), len(result.Params), len(result.DataFields))
 }
 
@@ -1942,7 +1943,7 @@ func FetchTopList(tc *task.TaskContext) (interface{}, error) {
 	}
 	ctx := e2eCtx.(*E2EContext)
 
-	log.Printf("📡 [FetchTopList] 获取龙虎榜")
+	logrus.Printf("📡 [FetchTopList] 获取龙虎榜")
 
 	df, err := callTushareAPI(ctx, "top_list", map[string]interface{}{
 		"trade_date": ctx.Config.StartDate,
@@ -1956,7 +1957,7 @@ func FetchTopList(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	log.Printf("✅ [FetchTopList] 保存 %d 条记录", count)
+	logrus.Printf("✅ [FetchTopList] 保存 %d 条记录", count)
 	return map[string]int{"count": count}, nil
 }
 
@@ -1993,7 +1994,7 @@ func saveDataFrame(db *sql.DB, tableName string, df *TushareDataFrame) (int, err
 	count := 0
 	for _, item := range df.Items {
 		if _, err := stmt.Exec(item...); err != nil {
-			log.Printf("  ⚠️ 插入失败: %v", err)
+			logrus.Printf("  ⚠️ 插入失败: %v", err)
 			continue
 		}
 		count++

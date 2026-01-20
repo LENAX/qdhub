@@ -95,10 +95,12 @@ type ParseMetadataRequest struct {
 	DataSourceID shared.ID
 	DocContent   string
 	DocType      metadata.DocumentType
+	MaxAPICrawl  int // 最大爬取 API 数量（0=不限制）
 }
 
 // ParseMetadataResult represents the result of parsing metadata.
 type ParseMetadataResult struct {
+	InstanceID        shared.ID // Workflow instance ID for tracking execution status
 	CategoriesCreated int
 	APIsCreated       int
 	APIsUpdated       int

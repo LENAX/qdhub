@@ -8,6 +8,7 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/core/task"
 
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/taskengine/handlers"
@@ -21,6 +22,11 @@ type Dependencies struct {
 	DataSourceRegistry *datasource.Registry
 	// MetadataRepo is the metadata repository (required for compensation handlers).
 	MetadataRepo metadata.Repository
+	// DataStoreRepo is the data store repository (required for table creation jobs).
+	DataStoreRepo datastore.QuantDataStoreRepository
+	// QuantDB is the quant database adapter (required for table creation jobs).
+	// This interface provides methods to create tables in the target database (DuckDB, ClickHouse, etc.)
+	QuantDB datastore.QuantDB
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -39,7 +45,9 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"SaveCategories", jobs.SaveCategoriesJob, "保存 API 分类"},
 		{"FetchAPIDetail", jobs.FetchAPIDetailJob, "获取 API 详情页"},
 		{"ParseAPIDetail", jobs.ParseAPIDetailJob, "解析 API 详情"},
+		{"FetchAndParseAPIDetail", jobs.FetchAndParseAPIDetailJob, "获取并解析 API 详情（组合函数）"},
 		{"SaveAPIMetadata", jobs.SaveAPIMetadataJob, "保存 API 元数据"},
+		{"SaveAPIMetadataBatch", jobs.SaveAPIMetadataBatchJob, "批量保存 API 元数据"},
 		// 模板任务 Job Functions（元数据）
 		{"GenerateAPIDetailFetchSubTasks", jobs.GenerateAPIDetailFetchSubTasksJob, "生成 API 详情爬取子任务（模板任务）"},
 		{"GenerateAPIParseSubTasks", jobs.GenerateAPIParseSubTasksJob, "生成 API 详情解析子任务（模板任务）"},
@@ -148,6 +156,16 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 	// Register metadata repository as dependency (required for compensation handlers)
 	if deps.MetadataRepo != nil {
 		registry.RegisterDependencyWithKey("MetadataRepo", deps.MetadataRepo)
+	}
+
+	// Register data store repository as dependency (required for table creation jobs)
+	if deps.DataStoreRepo != nil {
+		registry.RegisterDependencyWithKey("DataStoreRepo", deps.DataStoreRepo)
+	}
+
+	// Register QuantDB adapter as dependency (required for table creation jobs)
+	if deps.QuantDB != nil {
+		registry.RegisterDependencyWithKey("QuantDB", deps.QuantDB)
 	}
 
 	// Register engine itself as dependency (for template tasks)

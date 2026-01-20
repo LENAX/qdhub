@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/workflow"
 )
 
 // MetadataApplicationServiceImpl implements MetadataApplicationService.
@@ -17,17 +20,20 @@ type MetadataApplicationServiceImpl struct {
 
 	metadataValidator metadata.MetadataValidator
 	parserFactory     metadata.DocumentParserFactory
+	workflowExecutor  workflow.WorkflowExecutor // 用于执行元数据爬取工作流（领域服务接口）
 }
 
 // NewMetadataApplicationService creates a new MetadataApplicationService implementation.
 func NewMetadataApplicationService(
 	dataSourceRepo metadata.DataSourceRepository,
 	parserFactory metadata.DocumentParserFactory,
+	workflowExecutor workflow.WorkflowExecutor, // 使用领域服务接口，而非应用服务
 ) contracts.MetadataApplicationService {
 	return &MetadataApplicationServiceImpl{
 		dataSourceRepo:    dataSourceRepo,
 		metadataValidator: metadata.NewMetadataValidator(),
 		parserFactory:     parserFactory,
+		workflowExecutor:  workflowExecutor,
 	}
 }
 
@@ -142,8 +148,15 @@ func (s *MetadataApplicationServiceImpl) ListDataSources(ctx context.Context) ([
 // ==================== API Metadata Management ====================
 
 // ParseAndImportMetadata parses documentation and imports metadata.
+// This method uses the built-in metadata_crawl workflow to perform the operation.
+//
+// Pre-conditions validated:
+//   - Data source must exist (validated using req.DataSourceID)
+//
+// The same DataSourceID is used for both validation and workflow execution
+// to ensure consistency.
 func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Context, req contracts.ParseMetadataRequest) (*contracts.ParseMetadataResult, error) {
-	// Verify data source exists
+	// 1. 验证数据源是否存在（前置条件校验）
 	ds, err := s.dataSourceRepo.Get(req.DataSourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get data source: %w", err)
@@ -152,32 +165,35 @@ func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Cont
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
 	}
 
-	// Get parser for document type
-	parser, err := s.parserFactory.GetParser(req.DocType)
+	// 2. 验证 workflow executor 是否可用
+	if s.workflowExecutor == nil {
+		return nil, fmt.Errorf("workflow executor is not available")
+	}
+
+	// 3. 执行内建的 metadata_crawl workflow
+	// 使用类型安全的 ExecuteMetadataCrawl 方法
+	// 注意：req.DataSourceID 既用于上面的校验，也用于 workflow 执行，确保一致性
+	instanceID, err := s.workflowExecutor.ExecuteMetadataCrawl(ctx, workflow.MetadataCrawlRequest{
+		DataSourceID:   req.DataSourceID, // 与校验时使用的 ID 一致
+		DataSourceName: ds.Name,          // 从校验通过的数据源获取名称
+		MaxAPICrawl:    req.MaxAPICrawl,  // 使用请求中的爬取数量限制
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get parser: %w", err)
+		return nil, fmt.Errorf("failed to execute metadata crawl workflow: %w", err)
 	}
 
-	// Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(req.DocContent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse catalog: %w", err)
+	// 记录 workflow instance ID，方便用户查询执行状态
+	logrus.Infof("Metadata crawl workflow started for data source %s, instance ID: %s", req.DataSourceID, instanceID)
+
+	// 4. 返回结果
+	// 由于 workflow 是异步执行的，这些字段暂时无法立即获取
+	// 用户可以通过查询 workflow instance 状态来获取执行结果
+	result := &contracts.ParseMetadataResult{
+		InstanceID:        instanceID, // 返回 workflow instance ID，方便用户跟踪执行状态
+		CategoriesCreated: 0,
+		APIsCreated:       0,
+		APIsUpdated:       0,
 	}
-
-	result := &contracts.ParseMetadataResult{}
-
-	// Save categories
-	for i := range categories {
-		categories[i].DataSourceID = req.DataSourceID
-		if err := s.dataSourceRepo.AddCategory(&categories[i]); err != nil {
-			return nil, fmt.Errorf("failed to create category: %w", err)
-		}
-		result.CategoriesCreated++
-	}
-
-	// Parse and save API metadata (simplified - in real implementation would fetch each URL)
-	_ = apiURLs // URLs would be fetched and parsed in full implementation
-	// For now, APIs would be created via CreateAPIMetadata
 
 	return result, nil
 }

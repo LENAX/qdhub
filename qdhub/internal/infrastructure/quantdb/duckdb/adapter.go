@@ -11,7 +11,6 @@ import (
 	_ "github.com/marcboeker/go-duckdb" // DuckDB driver
 
 	"qdhub/internal/domain/datastore"
-	"qdhub/internal/infrastructure/quantdb"
 )
 
 // Adapter implements the QuantDB interface for DuckDB.
@@ -131,7 +130,7 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 }
 
 // GetTableStats returns statistics for a table.
-func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*quantdb.TableStats, error) {
+func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datastore.TableStats, error) {
 	// Get row count
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
 	var rowCount int64
@@ -140,7 +139,7 @@ func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*quantdb
 	}
 
 	// DuckDB doesn't have a direct way to get table size, so we estimate
-	stats := &quantdb.TableStats{
+	stats := &datastore.TableStats{
 		RowCount:  rowCount,
 		SizeBytes: 0, // Not directly available in DuckDB
 	}
@@ -273,7 +272,7 @@ func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int
 // ==================== Transaction Support ====================
 
 // BeginTx begins a transaction.
-func (a *Adapter) BeginTx(ctx context.Context) (quantdb.QuantDBTx, error) {
+func (a *Adapter) BeginTx(ctx context.Context) (datastore.QuantDBTx, error) {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -399,4 +398,4 @@ func (t *duckDBTx) Execute(ctx context.Context, sqlStmt string, args ...any) (in
 }
 
 // Ensure Adapter implements QuantDB interface
-var _ quantdb.QuantDB = (*Adapter)(nil)
+var _ datastore.QuantDB = (*Adapter)(nil)

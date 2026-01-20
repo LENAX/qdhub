@@ -3,7 +3,7 @@ module qdhub
 go 1.24.2
 
 require (
-	github.com/LENAX/task-engine v1.0.3
+	github.com/LENAX/task-engine v1.0.7
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
@@ -13,6 +13,7 @@ require (
 	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -20,10 +21,9 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.4
 	golang.org/x/sync v0.19.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/LENAX/task-engine => ../../task-engine
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

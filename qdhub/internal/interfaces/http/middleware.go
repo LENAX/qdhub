@@ -1,11 +1,11 @@
 package http
 
 import (
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // Recovery returns a middleware that recovers from panics.
@@ -13,7 +13,7 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[PANIC] %v", err)
+				logrus.Errorf("[PANIC] %v", err)
 				c.JSON(http.StatusInternalServerError, Response{
 					Code:    500,
 					Message: "internal server error",
@@ -41,7 +41,7 @@ func Logger() gin.HandlerFunc {
 			path = path + "?" + query
 		}
 
-		log.Printf("[HTTP] %d | %13v | %15s | %-7s %s",
+		logrus.Infof("[HTTP] %d | %13v | %15s | %-7s %s",
 			statusCode,
 			latency,
 			c.ClientIP(),

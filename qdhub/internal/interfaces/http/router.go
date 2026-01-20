@@ -3,11 +3,11 @@ package http
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
@@ -127,7 +127,7 @@ func (s *Server) Start() error {
 		WriteTimeout: s.config.WriteTimeout,
 	}
 
-	log.Printf("[HTTP] Server starting on %s", addr)
+	logrus.Infof("[HTTP] Server starting on %s", addr)
 
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("failed to start server: %w", err)
@@ -138,7 +138,7 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	log.Println("[HTTP] Server shutting down...")
+	logrus.Info("[HTTP] Server shutting down...")
 
 	if s.httpServer != nil {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
@@ -146,7 +146,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	log.Println("[HTTP] Server stopped")
+	logrus.Info("[HTTP] Server stopped")
 	return nil
 }
 

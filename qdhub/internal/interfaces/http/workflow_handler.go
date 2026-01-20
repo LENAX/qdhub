@@ -34,6 +34,9 @@ func (h *WorkflowHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/workflows/:id/enable", h.EnableWorkflow)
 	rg.POST("/workflows/:id/disable", h.DisableWorkflow)
 
+	// Built-in workflow shortcuts
+	rg.POST("/workflows/built-in/:name/execute", h.ExecuteBuiltInWorkflowByName)
+
 	// Workflow Instance routes
 	rg.GET("/instances", h.ListInstances)
 	rg.GET("/instances/:id", h.GetInstance)
@@ -273,6 +276,44 @@ func (h *WorkflowHandler) DisableWorkflow(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"status": "disabled"})
+}
+
+// ExecuteBuiltInWorkflowByName handles POST /api/v1/workflows/built-in/:name/execute
+// @Summary      Execute built-in workflow by name
+// @Description  Execute a built-in workflow by its API name (shortcut)
+// @Tags         Workflows
+// @Accept       json
+// @Produce      json
+// @Param        name       path      string            true  "Built-in workflow name (e.g., metadata_crawl)"
+// @Param        request    body      ExecuteWorkflowReq false "Execution parameters"
+// @Success      200        {object}  Response
+// @Failure      400        {object}  Response
+// @Failure      404        {object}  Response
+// @Failure      500        {object}  Response
+// @Router       /workflows/built-in/{name}/execute [post]
+func (h *WorkflowHandler) ExecuteBuiltInWorkflowByName(c *gin.Context) {
+	name := c.Param("name")
+
+	var req ExecuteWorkflowReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Allow empty body for simple execution
+		req = ExecuteWorkflowReq{
+			TriggerType: "manual",
+		}
+	}
+
+	instanceID, err := h.workflowSvc.ExecuteBuiltInWorkflowByName(c.Request.Context(), name, contracts.ExecuteWorkflowRequest{
+		TriggerType:   workflow.TriggerType(req.TriggerType),
+		TriggerParams: req.TriggerParams,
+	})
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{
+		"instance_id": instanceID,
+		"status":      "started",
+	})
 }
 
 // ==================== Workflow Instance Endpoints ====================

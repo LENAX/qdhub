@@ -2,12 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -70,7 +70,7 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(upFiles) == 0 {
-		log.Println("No migration files found")
+		logrus.Info("No migration files found")
 		return nil
 	}
 
@@ -85,25 +85,25 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to read migration %s: %w", file, err)
 		}
 
-		log.Printf("Applying migration: %s", filepath.Base(file))
+		logrus.Infof("Applying migration: %s", filepath.Base(file))
 
 		if _, err := db.Exec(string(migrationSQL)); err != nil {
 			// Check if it's a "table already exists" error (migration already applied)
 			if strings.Contains(err.Error(), "already exists") {
-				log.Printf("  Skipped (already applied)")
+				logrus.Infof("  Skipped (already applied)")
 				continue
 			}
 			return fmt.Errorf("failed to apply migration %s: %w", file, err)
 		}
 
 		appliedCount++
-		log.Printf("  Applied successfully")
+		logrus.Infof("  Applied successfully")
 	}
 
 	if appliedCount == 0 {
-		log.Println("All migrations already applied")
+		logrus.Info("All migrations already applied")
 	} else {
-		log.Printf("Applied %d migration(s)", appliedCount)
+		logrus.Infof("Applied %d migration(s)", appliedCount)
 	}
 
 	return nil
@@ -123,7 +123,7 @@ func runMigrateDown(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(downFiles) == 0 {
-		log.Println("No down migration files found")
+		logrus.Info("No down migration files found")
 		return nil
 	}
 
@@ -137,13 +137,13 @@ func runMigrateDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read migration %s: %w", file, err)
 	}
 
-	log.Printf("Rolling back migration: %s", filepath.Base(file))
+	logrus.Infof("Rolling back migration: %s", filepath.Base(file))
 
 	if _, err := db.Exec(string(migrationSQL)); err != nil {
 		return fmt.Errorf("failed to rollback migration %s: %w", file, err)
 	}
 
-	log.Println("Rollback completed successfully")
+	logrus.Info("Rollback completed successfully")
 	return nil
 }
 

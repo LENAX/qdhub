@@ -1,15 +1,15 @@
-// Package quantdb provides interfaces and adapters for quant data storage.
-package quantdb
+// Package datastore contains domain entities and interfaces for data store management.
+package datastore
 
 import (
 	"context"
-
-	"qdhub/internal/domain/datastore"
 )
 
 // QuantDB defines the interface for quant database operations.
 // This interface abstracts the underlying database implementation (DuckDB, ClickHouse, etc.)
 // and provides unified methods for table management and data operations.
+//
+// Implementation: infrastructure/quantdb/
 type QuantDB interface {
 	// ==================== Connection Management ====================
 
@@ -25,7 +25,7 @@ type QuantDB interface {
 	// ==================== Table Operations ====================
 
 	// CreateTable creates a table based on the schema definition.
-	CreateTable(ctx context.Context, schema *datastore.TableSchema) error
+	CreateTable(ctx context.Context, schema *TableSchema) error
 
 	// DropTable drops a table by name.
 	DropTable(ctx context.Context, tableName string) error
@@ -92,9 +92,9 @@ type InsertResult struct {
 
 // QuantDBConfig holds configuration for database connection.
 type QuantDBConfig struct {
-	Type        datastore.DataStoreType `json:"type"`
-	DSN         string                  `json:"dsn,omitempty"`
-	StoragePath string                  `json:"storage_path,omitempty"`
+	Type        DataStoreType `json:"type"`
+	DSN         string        `json:"dsn,omitempty"`
+	StoragePath string        `json:"storage_path,omitempty"`
 }
 
 // QuantDBFactory creates QuantDB instances based on configuration.

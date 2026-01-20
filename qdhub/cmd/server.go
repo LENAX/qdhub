@@ -3,21 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"qdhub/internal/application/impl"
-	"qdhub/internal/infrastructure/persistence"
-	"qdhub/internal/infrastructure/persistence/repository"
-	"qdhub/internal/infrastructure/scheduler"
-	httpserver "qdhub/internal/interfaces/http"
+	"qdhub/internal/infrastructure/container"
 )
 
 var serverCmd = &cobra.Command{
@@ -80,74 +75,39 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dbDSN = "./data/qdhub.db"
 	}
 
-	log.Printf("Starting QDHub server...")
-	log.Printf("  Host: %s", host)
-	log.Printf("  Port: %d", port)
-	log.Printf("  Mode: %s", mode)
-	log.Printf("  Database: %s (%s)", dbDriver, dbDSN)
+	logrus.Infof("Starting QDHub server...")
+	logrus.Infof("  Host: %s", host)
+	logrus.Infof("  Port: %d", port)
+	logrus.Infof("  Mode: %s", mode)
+	logrus.Infof("  Database: %s (%s)", dbDriver, dbDSN)
 
-	// Ensure data directory exists for SQLite
-	if dbDriver == "sqlite" {
-		if err := os.MkdirAll("./data", 0755); err != nil {
-			return fmt.Errorf("failed to create data directory: %w", err)
+	// Create container configuration
+	config := container.DefaultConfig()
+	config.DBDriver = dbDriver
+	config.DBDSN = dbDSN
+	config.ServerHost = host
+	config.ServerPort = port
+	config.ServerMode = mode
+
+	// Create and initialize container
+	ctr := container.NewContainer(config)
+	ctx := context.Background()
+
+	if err := ctr.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize container: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := ctr.Shutdown(shutdownCtx); err != nil {
+			logrus.Errorf("Error during container shutdown: %v", err)
 		}
-	}
+	}()
 
-	// Initialize database
-	db, err := persistence.NewDB(dbDSN)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-	defer db.Close()
-
-	// Run migrations (if migration file exists)
-	if migrationSQL, err := os.ReadFile("./migrations/001_init_schema.up.sql"); err == nil {
-		if _, err := db.Exec(string(migrationSQL)); err != nil {
-			log.Printf("Migration warning (may already exist): %v", err)
-		} else {
-			log.Println("Database migrations applied successfully")
-		}
-	}
-
-	// Initialize repositories
-	dataSourceRepo := repository.NewDataSourceRepository(db)
-	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncJobRepo := repository.NewSyncJobRepository(db)
-	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create workflow repository: %w", err)
-	}
-
-	// Initialize infrastructure services
-	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
-	jobScheduler := scheduler.NewCronScheduler(nil) // TODO: Add job trigger callback
-	jobScheduler.Start()
-	defer jobScheduler.Stop()
-
-	// Initialize application services
-	// Note: Using nil for adapters that aren't fully implemented yet
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, nil)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, mappingRuleRepo, dataSourceRepo, nil)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, nil, cronCalculator, jobScheduler)
-	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, nil)
-
-	// Configure server
-	serverConfig := httpserver.ServerConfig{
-		Host:         host,
-		Port:         port,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		Mode:         mode,
-	}
-
-	// Create and configure HTTP server
-	server := httpserver.NewServer(serverConfig, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
-
-	// Start server in goroutine
+	// Start HTTP server in goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		if err := server.Start(); err != nil {
+		if err := ctr.HTTPServer.Start(); err != nil {
 			errChan <- err
 		}
 	}()
@@ -160,28 +120,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	case err := <-errChan:
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
-		log.Printf("Received signal %v, shutting down...", sig)
+		logrus.Infof("Received signal %v, shutting down...", sig)
 	}
 
-	// Graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown error: %w", err)
-	}
-
-	log.Println("Server stopped gracefully")
+	logrus.Info("Server stopped gracefully")
 	return nil
-}
-
-func ginModeFromString(mode string) string {
-	switch mode {
-	case "debug":
-		return gin.DebugMode
-	case "test":
-		return gin.TestMode
-	default:
-		return gin.ReleaseMode
-	}
 }

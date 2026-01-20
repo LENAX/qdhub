@@ -1,0 +1,145 @@
+// Package quantdb provides interfaces and adapters for quant data storage.
+package quantdb
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/datastore"
+	"qdhub/internal/domain/shared"
+	"qdhub/internal/infrastructure/quantdb/duckdb"
+)
+
+// QuantDBAdapterImpl implements impl.QuantDBAdapter interface.
+// It manages multiple QuantDB connections, one per DataStore.
+type QuantDBAdapterImpl struct {
+	connections map[shared.ID]datastore.QuantDB
+	mu          sync.RWMutex
+}
+
+// NewQuantDBAdapter creates a new QuantDBAdapter implementation.
+func NewQuantDBAdapter() *QuantDBAdapterImpl {
+	return &QuantDBAdapterImpl{
+		connections: make(map[shared.ID]datastore.QuantDB),
+	}
+}
+
+// getOrCreateConnection gets an existing connection or creates a new one for the given DataStore.
+func (a *QuantDBAdapterImpl) getOrCreateConnection(ctx context.Context, ds *datastore.QuantDataStore) (datastore.QuantDB, error) {
+	// Try to get existing connection with read lock
+	a.mu.RLock()
+	if conn, exists := a.connections[ds.ID]; exists {
+		a.mu.RUnlock()
+		// Verify connection is still valid
+		if err := conn.Ping(ctx); err == nil {
+			return conn, nil
+		}
+		// Connection is stale, need to recreate
+	} else {
+		a.mu.RUnlock()
+	}
+
+	// Acquire write lock to create new connection
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if conn, exists := a.connections[ds.ID]; exists {
+		if err := conn.Ping(ctx); err == nil {
+			return conn, nil
+		}
+		// Close stale connection
+		_ = conn.Close()
+		delete(a.connections, ds.ID)
+	}
+
+	// Create new connection based on DataStore type
+	conn, err := a.createConnection(ctx, ds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection for data store %s: %w", ds.ID, err)
+	}
+
+	a.connections[ds.ID] = conn
+	return conn, nil
+}
+
+// createConnection creates a new QuantDB connection based on DataStore configuration.
+func (a *QuantDBAdapterImpl) createConnection(ctx context.Context, ds *datastore.QuantDataStore) (datastore.QuantDB, error) {
+	switch ds.Type {
+	case datastore.DataStoreTypeDuckDB:
+		storagePath := ds.StoragePath
+		if storagePath == "" {
+			storagePath = ds.DSN
+		}
+		if storagePath == "" {
+			return nil, fmt.Errorf("DuckDB requires StoragePath or DSN")
+		}
+
+		adapter := duckdb.NewAdapter(storagePath)
+		if err := adapter.Connect(ctx); err != nil {
+			return nil, fmt.Errorf("failed to connect to DuckDB: %w", err)
+		}
+		return adapter, nil
+
+	case datastore.DataStoreTypeClickHouse:
+		return nil, fmt.Errorf("ClickHouse adapter not implemented yet")
+
+	case datastore.DataStoreTypePostgreSQL:
+		return nil, fmt.Errorf("PostgreSQL adapter not implemented yet")
+
+	default:
+		return nil, fmt.Errorf("unsupported data store type: %s", ds.Type)
+	}
+}
+
+// TestConnection tests the connection to a data store.
+func (a *QuantDBAdapterImpl) TestConnection(ctx context.Context, ds *datastore.QuantDataStore) error {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return err
+	}
+	return conn.Ping(ctx)
+}
+
+// ExecuteDDL executes DDL statement on a data store.
+func (a *QuantDBAdapterImpl) ExecuteDDL(ctx context.Context, ds *datastore.QuantDataStore, ddl string) error {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Execute(ctx, ddl)
+	if err != nil {
+		return fmt.Errorf("failed to execute DDL: %w", err)
+	}
+	return nil
+}
+
+// TableExists checks if a table exists in the data store.
+func (a *QuantDBAdapterImpl) TableExists(ctx context.Context, ds *datastore.QuantDataStore, tableName string) (bool, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return false, err
+	}
+	return conn.TableExists(ctx, tableName)
+}
+
+// Close closes all managed connections.
+func (a *QuantDBAdapterImpl) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	var lastErr error
+	for id, conn := range a.connections {
+		if err := conn.Close(); err != nil {
+			lastErr = fmt.Errorf("failed to close connection %s: %w", id, err)
+		}
+		delete(a.connections, id)
+	}
+	return lastErr
+}
+
+// Ensure QuantDBAdapterImpl implements impl.QuantDBAdapter interface
+var _ impl.QuantDBAdapter = (*QuantDBAdapterImpl)(nil)

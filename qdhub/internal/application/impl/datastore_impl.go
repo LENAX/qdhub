@@ -9,6 +9,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/workflow"
 )
 
 // DataStoreApplicationServiceImpl implements DataStoreApplicationService.
@@ -23,6 +24,9 @@ type DataStoreApplicationServiceImpl struct {
 
 	// Adapter for executing DDL on target databases
 	quantDBAdapter QuantDBAdapter
+
+	// Workflow executor for executing built-in workflows (领域服务接口)
+	workflowExecutor workflow.WorkflowExecutor
 }
 
 // QuantDBAdapter defines the interface for interacting with target databases.
@@ -44,6 +48,7 @@ func NewDataStoreApplicationService(
 	mappingRuleRepo datastore.DataTypeMappingRuleRepository,
 	dataSourceRepo metadata.DataSourceRepository,
 	quantDBAdapter QuantDBAdapter,
+	workflowExecutor workflow.WorkflowExecutor,
 ) contracts.DataStoreApplicationService {
 	return &DataStoreApplicationServiceImpl{
 		dataStoreRepo:      dataStoreRepo,
@@ -53,6 +58,7 @@ func NewDataStoreApplicationService(
 		schemaGenerator:    datastore.NewSchemaGenerator(),
 		typeMappingService: datastore.NewTypeMappingService(),
 		quantDBAdapter:     quantDBAdapter,
+		workflowExecutor:   workflowExecutor,
 	}
 }
 
@@ -310,6 +316,78 @@ func (s *DataStoreApplicationServiceImpl) CreateTable(ctx context.Context, schem
 	}
 
 	return nil
+}
+
+// CreateTablesForDatasource creates tables for all APIs of a data source in the data store.
+// This is an asynchronous operation that uses the built-in create_tables workflow.
+//
+// Pre-conditions validated:
+//   - Data source must exist (validated using req.DataSourceID)
+//   - Data store must exist (validated using req.DataStoreID)
+//   - Data store must have StoragePath or DSN configured
+//
+// The same DataSourceID is used for both validation and workflow execution
+// to ensure consistency.
+func (s *DataStoreApplicationServiceImpl) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
+	// 1. 验证数据源是否存在（前置条件校验）
+	dataSource, err := s.dataSourceRepo.Get(req.DataSourceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get data source: %w", err)
+	}
+	if dataSource == nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+
+	// 2. 验证数据存储是否存在
+	dataStore, err := s.dataStoreRepo.Get(req.DataStoreID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get data store: %w", err)
+	}
+	if dataStore == nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+
+	// 3. 获取目标数据库路径
+	// 优先使用 StoragePath，如果为空则使用 DSN
+	targetDBPath := dataStore.StoragePath
+	if targetDBPath == "" {
+		targetDBPath = dataStore.DSN
+	}
+	if targetDBPath == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "data store must have either StoragePath or DSN configured", nil)
+	}
+
+	// 4. 验证数据源名称
+	dataSourceName := dataSource.Name
+	if dataSourceName == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "data source name cannot be empty", nil)
+	}
+
+	// 5. 准备 max tables 参数
+	maxTables := 0 // 0 表示不限制
+	if req.MaxTables != nil && *req.MaxTables > 0 {
+		maxTables = *req.MaxTables
+	}
+
+	// 6. 验证 workflow executor 是否可用
+	if s.workflowExecutor == nil {
+		return "", fmt.Errorf("workflow executor is not available")
+	}
+
+	// 7. 执行内建的 create_tables workflow
+	// 使用类型安全的 ExecuteCreateTables 方法
+	// 注意：req.DataSourceID 既用于上面的校验，也用于 workflow 执行，确保一致性
+	instanceID, err := s.workflowExecutor.ExecuteCreateTables(ctx, workflow.CreateTablesRequest{
+		DataSourceID:   req.DataSourceID, // 与校验时使用的 ID 一致
+		DataSourceName: dataSourceName,   // 从校验通过的数据源获取
+		TargetDBPath:   targetDBPath,     // 从校验通过的数据存储获取
+		MaxTables:      maxTables,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to execute create_tables workflow: %w", err)
+	}
+
+	return instanceID, nil
 }
 
 // DropTable drops a table from the data store.

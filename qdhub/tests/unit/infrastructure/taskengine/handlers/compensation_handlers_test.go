@@ -23,35 +23,35 @@ func mockTaskContext(params map[string]interface{}) *task.TaskContext {
 func TestCompensateSaveCategoriesHandler_NoDataSourceID(t *testing.T) {
 	tc := mockTaskContext(map[string]interface{}{})
 
-	// Should not panic, just log warning
+	// Should not panic, just logrus warning
 	handlers.CompensateSaveCategoriesHandler(tc)
 }
 
 func TestCompensateSaveAPIMetadataHandler_NoAPIID(t *testing.T) {
 	tc := mockTaskContext(map[string]interface{}{})
 
-	// Should not panic, just log warning
+	// Should not panic, just logrus warning
 	handlers.CompensateSaveAPIMetadataHandler(tc)
 }
 
 func TestCompensateSaveAPIMetadataBatchHandler_NoDataSourceID(t *testing.T) {
 	tc := mockTaskContext(map[string]interface{}{})
 
-	// Should not panic, just log warning
+	// Should not panic, just logrus warning
 	handlers.CompensateSaveAPIMetadataBatchHandler(tc)
 }
 
 func TestCompensateCreateTableHandler_NoParams(t *testing.T) {
 	tc := mockTaskContext(map[string]interface{}{})
 
-	// Should not panic, just log warning
+	// Should not panic, just logrus warning
 	handlers.CompensateCreateTableHandler(tc)
 }
 
 func TestCompensateSyncDataHandler_NoParams(t *testing.T) {
 	tc := mockTaskContext(map[string]interface{}{})
 
-	// Should not panic, just log warning
+	// Should not panic, just logrus warning
 	handlers.CompensateSyncDataHandler(tc)
 }
 
@@ -61,6 +61,6 @@ func TestCompensateGenericHandler(t *testing.T) {
 		"param2": 123,
 	})
 
-	// Should not panic, just log
+	// Should not panic, just logrus
 	handlers.CompensateGenericHandler(tc)
 }

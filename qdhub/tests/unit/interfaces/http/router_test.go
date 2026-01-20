@@ -121,6 +121,9 @@ func (m *FullMockDataStoreService) CreateMappingRule(ctx context.Context, req co
 func (m *FullMockDataStoreService) GetMappingRules(ctx context.Context, dataSourceType, targetDBType string) ([]*datastore.DataTypeMappingRule, error) {
 	return nil, nil
 }
+func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
+	return "", nil
+}
 
 // FullMockSyncService implements SyncApplicationService.
 type FullMockSyncService struct{}
@@ -157,6 +160,12 @@ func (m *FullMockSyncService) UpdateSchedule(ctx context.Context, jobID shared.I
 }
 func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
 	return nil
+}
+func (m *FullMockSyncService) SyncDataSource(ctx context.Context, req contracts.SyncDataSourceRequest) (shared.ID, error) {
+	return "", nil
+}
+func (m *FullMockSyncService) SyncDataSourceRealtime(ctx context.Context, req contracts.SyncDataSourceRealtimeRequest) (shared.ID, error) {
+	return "", nil
 }
 
 // FullMockWorkflowService implements WorkflowApplicationService.
@@ -213,6 +222,9 @@ func (m *FullMockWorkflowService) GetTaskInstances(ctx context.Context, workflow
 }
 func (m *FullMockWorkflowService) RetryTask(ctx context.Context, taskInstanceID shared.ID) error {
 	return nil
+}
+func (m *FullMockWorkflowService) ExecuteBuiltInWorkflowByName(ctx context.Context, name string, req contracts.ExecuteWorkflowRequest) (shared.ID, error) {
+	return "", nil
 }
 
 func TestNewServer(t *testing.T) {

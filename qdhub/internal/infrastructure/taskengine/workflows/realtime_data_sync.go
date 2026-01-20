@@ -123,36 +123,72 @@ func (b *RealtimeDataSyncWorkflowBuilder) WithCronExpr(cronExpr string) *Realtim
 //
 // 事务支持：启用 SAGA 事务，同步失败时按 sync_batch_id 回滚数据
 //
+// 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_name}），
+// 执行时通过 workflow.ReplaceParams() 替换为实际值
+//
 // 返回错误：
-//   - ErrEmptyAPINames: api_names 不能为空
-//   - ErrEmptyDataSourceName: data_source_name 必填
-//   - ErrEmptyToken: token 必填
-//   - ErrEmptyTargetDBPath: target_db_path 必填
-//   - ErrEmptyCheckpointTable: checkpoint_table 必填
+//   - ErrEmptyAPINames: api_names 不能为空（仅在非占位符模式下验证）
+//   - ErrEmptyDataSourceName: data_source_name 必填（仅在非占位符模式下验证）
+//   - ErrEmptyToken: token 必填（仅在非占位符模式下验证）
+//   - ErrEmptyTargetDBPath: target_db_path 必填（仅在非占位符模式下验证）
+//   - ErrEmptyCheckpointTable: checkpoint_table 必填（仅在非占位符模式下验证）
 func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
 
-	// 参数验证
-	if err := params.Validate(); err != nil {
-		return nil, err
+	// 检查是否使用占位符模式（所有必填参数都为空）
+	usePlaceholders := params.DataSourceName == "" && params.Token == "" && 
+		params.TargetDBPath == "" && params.CheckpointTable == "" &&
+		len(params.APINames) == 0
+
+	// 仅在非占位符模式下验证参数
+	if !usePlaceholders {
+		if err := params.Validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	var tasks []*task.Task
 
+	// 如果参数为空，使用占位符
+	dataSourceName := params.DataSourceName
+	if dataSourceName == "" {
+		dataSourceName = "${data_source_name}"
+	}
+	token := params.Token
+	if token == "" {
+		token = "${token}"
+	}
+	targetDBPath := params.TargetDBPath
+	if targetDBPath == "" {
+		targetDBPath = "${target_db_path}"
+	}
+	checkpointTable := params.CheckpointTable
+	if checkpointTable == "" {
+		checkpointTable = "${checkpoint_table}"
+	}
+
 	// 基础参数
 	baseParams := map[string]interface{}{
-		"data_source_name": params.DataSourceName,
-		"token":            params.Token,
-		"target_db_path":   params.TargetDBPath,
-		"checkpoint_table": params.CheckpointTable,
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
+		"checkpoint_table": checkpointTable,
 	}
 
 	// ==================== Level 0: 获取同步检查点 ====================
 
+	// 处理 API 名称列表
+	apiNames := params.APINames
+	if len(apiNames) == 0 {
+		// 如果为空，使用占位符（注意：这需要特殊处理，因为占位符是字符串，不是数组）
+		// 这里我们创建一个特殊的占位符任务，执行时会通过参数替换处理
+		apiNames = []string{"${api_names}"} // 注意：这需要执行时解析为数组
+	}
+
 	// Task: 获取同步检查点
 	getSyncCheckpointTask, err := builder.NewTaskBuilder("GetSyncCheckpoint", "获取上次同步检查点", b.registry).
 		WithJobFunction("GetSyncCheckpoint", mergeParams(baseParams, map[string]interface{}{
-			"api_names": params.APINames,
+			"api_names": apiNames,
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -181,7 +217,7 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	// ==================== Level 2: 增量同步模板任务 ====================
 
 	// 为每个 API 创建增量同步模板任务
-	for _, apiName := range params.APINames {
+	for _, apiName := range apiNames {
 		taskName := "IncrementalSync_" + apiName
 		templateTask, err := builder.NewTaskBuilder(taskName, "增量同步"+apiName+"数据（模板任务）", b.registry).
 			WithJobFunction("GenerateIncrementalSyncSubTasks", mergeParams(baseParams, map[string]interface{}{

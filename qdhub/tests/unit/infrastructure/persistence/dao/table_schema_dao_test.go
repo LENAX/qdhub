@@ -32,7 +32,8 @@ func TestTableSchemaDAO_Create(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -114,7 +115,8 @@ func TestTableSchemaDAO_GetByID(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -200,7 +202,8 @@ func TestTableSchemaDAO_GetByDataStore(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -294,7 +297,8 @@ func TestTableSchemaDAO_GetByAPIMetadata(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -380,7 +384,8 @@ func TestTableSchemaDAO_Update(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -468,7 +473,8 @@ func TestTableSchemaDAO_DeleteByID(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (
@@ -555,7 +561,8 @@ func TestTableSchemaDAO_DeleteByDataStore(t *testing.T) {
 			data_source_id VARCHAR(64) NOT NULL,
 			name VARCHAR(128) NOT NULL,
 			status VARCHAR(32) DEFAULT 'active',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(data_source_id, name)
 		);
 		
 		CREATE TABLE IF NOT EXISTS table_schemas (

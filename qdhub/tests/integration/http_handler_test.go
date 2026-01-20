@@ -120,6 +120,14 @@ func (m *MockHTTPTaskEngineAdapter) GetInstanceStatus(ctx context.Context, insta
 	}, nil
 }
 
+func (m *MockHTTPTaskEngineAdapter) GetTaskInstances(ctx context.Context, engineInstanceID string) ([]*workflow.TaskInstance, error) {
+	return []*workflow.TaskInstance{}, nil
+}
+
+func (m *MockHTTPTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceID string) error {
+	return nil
+}
+
 // MockHTTPJobScheduler is a mock implementation of sync.JobScheduler.
 type MockHTTPJobScheduler struct {
 	scheduledJobs map[string]string
