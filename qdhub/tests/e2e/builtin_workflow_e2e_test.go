@@ -4,12 +4,22 @@
 // Package e2e 提供端到端测试
 // 本文件实现使用真实 Task Engine 和内建 Workflow 的完整流程测试
 // 测试场景：创建 Tushare 数据源 -> 爬取元数据 -> 建表 -> 批量数据同步
+//
+// 运行模式：
+// - Mock 模式（默认）：使用临时数据库和 mock 数据源适配器
+// - 真实模式：设置 QDHUB_TUSHARE_TOKEN 环境变量，使用真实 API 和持久化数据库
+//
+// 真实模式运行命令：
+//
+//	QDHUB_TUSHARE_TOKEN=your_token go test -tags e2e -v -run "TestE2E_BuiltinWorkflow" ./tests/e2e/...
 package e2e
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,11 +36,56 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
+
+// ==================== 测试模式配置 ====================
+
+// e2eTestConfig E2E 测试配置
+type e2eTestConfig struct {
+	TushareToken string // Tushare API Token
+	IsRealMode   bool   // 是否为真实模式
+	DuckDBPath   string // DuckDB 数据库路径
+	SQLiteDBPath string // SQLite 数据库路径
+}
+
+// loadE2ETestConfig 从环境变量加载配置
+func loadE2ETestConfig(t *testing.T) *e2eTestConfig {
+	token := os.Getenv("QDHUB_TUSHARE_TOKEN")
+	if token == "" {
+		token = os.Getenv("TUSHARE_TOKEN")
+	}
+	token = strings.TrimSpace(token)
+
+	isRealMode := token != ""
+
+	var duckDBPath, sqliteDBPath string
+	if isRealMode {
+		// 真实模式：使用持久化数据库
+		dataDir, err := filepath.Abs(filepath.Join(".", "data"))
+		require.NoError(t, err)
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			require.NoError(t, err)
+		}
+		duckDBPath = filepath.Join(dataDir, "e2e_quant.duckdb")
+		sqliteDBPath = filepath.Join(dataDir, "e2e_app.db")
+		t.Logf("🔥 真实模式: DuckDB=%s, SQLite=%s", duckDBPath, sqliteDBPath)
+	} else {
+		t.Logf("🧪 Mock 模式: 使用临时数据库")
+	}
+
+	return &e2eTestConfig{
+		TushareToken: token,
+		IsRealMode:   isRealMode,
+		DuckDBPath:   duckDBPath,
+		SQLiteDBPath: sqliteDBPath,
+	}
+}
 
 // ==================== Mock Data Source Adapter ====================
 
@@ -309,6 +364,7 @@ func getMockDailyHTML() string {
 
 // builtinWorkflowE2EContext 内建 Workflow E2E 测试上下文
 type builtinWorkflowE2EContext struct {
+	config           *e2eTestConfig
 	db               *persistence.DB
 	engine           *engine.Engine
 	workflowRepo     workflow.WorkflowDefinitionRepository
@@ -319,18 +375,40 @@ type builtinWorkflowE2EContext struct {
 	syncAppService   contracts.SyncApplicationService
 	dsRegistry       *datasource.Registry
 	quantDBAdapter   *mockQuantDBAdapter
+	duckDBAdapter    *duckdb.Adapter // 真实模式下使用
 	cleanup          func()
 }
 
 // setupBuiltinWorkflowE2EContext 设置 E2E 测试环境
+// 根据 QDHUB_TUSHARE_TOKEN 环境变量自动选择模式：
+// - 有 token: 真实模式，使用 e2e/data/e2e_quant.duckdb
+// - 无 token: Mock 模式，使用临时数据库
 func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	ctx := context.Background()
+	config := loadE2ETestConfig(t)
 
-	// 1. 创建临时数据库
-	tmpfile, err := os.CreateTemp("", "builtin_workflow_e2e_*.db")
-	require.NoError(t, err)
-	tmpfile.Close()
-	dsn := tmpfile.Name()
+	var dsn string
+	var removeSQLiteOnCleanup bool
+	var duckDBAdapter *duckdb.Adapter
+
+	if config.IsRealMode {
+		// 真实模式：使用持久化数据库
+		dsn = config.SQLiteDBPath
+		removeSQLiteOnCleanup = false // 不删除持久化数据库
+
+		// 创建 DuckDB adapter
+		duckDBAdapter = duckdb.NewAdapter(config.DuckDBPath)
+		err := duckDBAdapter.Connect(ctx)
+		require.NoError(t, err, "连接 DuckDB 失败")
+		t.Logf("✅ DuckDB 已连接: %s", config.DuckDBPath)
+	} else {
+		// Mock 模式：使用临时数据库
+		tmpfile, err := os.CreateTemp("", "builtin_workflow_e2e_*.db")
+		require.NoError(t, err)
+		tmpfile.Close()
+		dsn = tmpfile.Name()
+		removeSQLiteOnCleanup = true
+	}
 
 	db, err := persistence.NewDB(dsn)
 	require.NoError(t, err)
@@ -357,11 +435,20 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	err = eng.Start(ctx)
 	require.NoError(t, err)
 
-	// 3. 创建 Mock DataSource Registry
+	// 3. 创建 DataSource Registry（根据模式选择 mock 或真实 adapter）
 	dsRegistry := datasource.NewRegistry()
-	mockAdapter := newMockTushareAdapter()
-	err = dsRegistry.RegisterAdapter(mockAdapter)
-	require.NoError(t, err)
+	if config.IsRealMode {
+		// 真实模式：使用真实 Tushare adapter
+		tushareAdapter := tushare.NewAdapter()
+		err = dsRegistry.RegisterAdapter(tushareAdapter)
+		require.NoError(t, err)
+		t.Logf("✅ 已注册真实 Tushare Adapter")
+	} else {
+		// Mock 模式
+		mockAdapter := newMockTushareAdapter()
+		err = dsRegistry.RegisterAdapter(mockAdapter)
+		require.NoError(t, err)
+	}
 
 	// 4. 创建 repositories
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
@@ -405,11 +492,17 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 
 	cleanup := func() {
 		eng.Stop()
+		if duckDBAdapter != nil {
+			duckDBAdapter.Close()
+		}
 		db.Close()
-		os.Remove(dsn)
+		if removeSQLiteOnCleanup {
+			os.Remove(dsn)
+		}
 	}
 
 	return &builtinWorkflowE2EContext{
+		config:           config,
 		db:               db,
 		engine:           eng,
 		workflowRepo:     workflowRepo,
@@ -420,6 +513,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		syncAppService:   syncAppService,
 		dsRegistry:       dsRegistry,
 		quantDBAdapter:   newMockQuantDBAdapter(),
+		duckDBAdapter:    duckDBAdapter,
 		cleanup:          cleanup,
 	}
 }
@@ -631,15 +725,44 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 
 		// 5.3 执行 SyncPlan
 		t.Log("  5.3 执行 SyncPlan...")
-		tmpDBFile, err := os.CreateTemp("", "e2e_syncplan_*.duckdb")
-		require.NoError(t, err)
-		tmpDBFile.Close()
-		defer os.Remove(tmpDBFile.Name())
+
+		// 根据模式选择数据库路径
+		var targetDBPath string
+		var removeTmpDB bool
+		if testCtx.config.IsRealMode {
+			// 真实模式：使用持久化 DuckDB
+			targetDBPath = testCtx.config.DuckDBPath
+			removeTmpDB = false
+			t.Logf("  使用持久化 DuckDB: %s", targetDBPath)
+		} else {
+			// Mock 模式：使用临时数据库
+			tmpDBFile, err := os.CreateTemp("", "e2e_syncplan_*.duckdb")
+			require.NoError(t, err)
+			tmpDBFile.Close()
+			targetDBPath = tmpDBFile.Name()
+			removeTmpDB = true
+			defer func() {
+				if removeTmpDB {
+					os.Remove(targetDBPath)
+				}
+			}()
+		}
+
+		// 设置同步日期范围
+		var startDate, endDate string
+		if testCtx.config.IsRealMode {
+			// 真实模式：使用最近 7 天
+			endDate = time.Now().Format("20060102")
+			startDate = time.Now().AddDate(0, 0, -7).Format("20060102")
+		} else {
+			startDate = "20251201"
+			endDate = "20251231"
+		}
 
 		execReq := contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: tmpDBFile.Name(),
-			StartDate:    "20251201",
-			EndDate:      "20251231",
+			TargetDBPath: targetDBPath,
+			StartDate:    startDate,
+			EndDate:      endDate,
 		}
 
 		executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlanID, execReq)
@@ -656,11 +779,23 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		require.NoError(t, err, "获取 SyncExecution 失败")
 		t.Logf("  SyncExecution Status: %s, WorkflowInstID: %s", execution.Status, execution.WorkflowInstID)
 
-		status, err := waitForWorkflowCompletion(ctx, adapter, execution.WorkflowInstID.String(), 60*time.Second)
+		// 真实模式下需要更长的超时时间
+		timeout := 60 * time.Second
+		if testCtx.config.IsRealMode {
+			timeout = 300 * time.Second // 5 分钟
+		}
+
+		status, err := waitForWorkflowCompletion(ctx, adapter, execution.WorkflowInstID.String(), timeout)
 		if err != nil {
 			t.Logf("⚠️ Workflow 未成功完成: %v, Status: %+v", err, status)
 		} else {
 			t.Logf("✅ SyncPlan 执行完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
+		}
+
+		// 5.5 验证数据同步结果（仅真实模式）
+		if testCtx.config.IsRealMode && testCtx.duckDBAdapter != nil {
+			t.Log("  5.5 验证数据同步结果...")
+			verifyDataSyncResults(t, ctx, testCtx.duckDBAdapter, selectedAPIs)
 		}
 
 		// 5.5 验证执行记录
@@ -1143,4 +1278,93 @@ func TestE2E_SyncPlan_WithCronSchedule(t *testing.T) {
 		assert.Equal(t, newCron, *plan.CronExpression)
 		t.Logf("✅ Cron 更新成功: %s", newCron)
 	}
+}
+
+// ==================== 数据验证函数 ====================
+
+// verifyDataSyncResults 验证数据同步结果
+// 检查 DuckDB 中各 API 对应的表是否有数据
+func verifyDataSyncResults(t *testing.T, ctx context.Context, adapter *duckdb.Adapter, expectedAPIs []string) {
+	t.Log("📊 开始验证数据同步结果...")
+
+	// 统计结果
+	tablesWithData := 0
+	tablesEmpty := 0
+	tablesMissing := 0
+	totalRecords := int64(0)
+
+	for _, apiName := range expectedAPIs {
+		// 检查表是否存在
+		exists, err := adapter.TableExists(ctx, apiName)
+		if err != nil {
+			t.Logf("  ⚠️ %s: 检查表存在失败 - %v", apiName, err)
+			tablesMissing++
+			continue
+		}
+
+		if !exists {
+			t.Logf("  ❌ %s: 表不存在", apiName)
+			tablesMissing++
+			continue
+		}
+
+		// 获取表统计
+		stats, err := adapter.GetTableStats(ctx, apiName)
+		if err != nil {
+			t.Logf("  ⚠️ %s: 获取统计失败 - %v", apiName, err)
+			continue
+		}
+
+		if stats.RowCount > 0 {
+			t.Logf("  ✅ %s: %d 条记录", apiName, stats.RowCount)
+			tablesWithData++
+			totalRecords += stats.RowCount
+		} else {
+			t.Logf("  ⏳ %s: 0 条记录 (表已创建但无数据)", apiName)
+			tablesEmpty++
+		}
+	}
+
+	// 输出汇总
+	t.Log("─────────────────────────────────────")
+	t.Logf("📈 数据同步验证汇总:")
+	t.Logf("  - 有数据的表: %d", tablesWithData)
+	t.Logf("  - 空表: %d", tablesEmpty)
+	t.Logf("  - 缺失的表: %d", tablesMissing)
+	t.Logf("  - 总记录数: %d", totalRecords)
+	t.Log("─────────────────────────────────────")
+
+	// 断言：至少应该有一些表有数据
+	assert.Greater(t, tablesWithData, 0, "至少应该有一个表有数据")
+	assert.Greater(t, totalRecords, int64(0), "总记录数应大于 0")
+}
+
+// TestE2E_VerifyExistingData 验证已存在的 DuckDB 数据
+// 这个测试不执行同步，只验证 e2e/data/e2e_quant.duckdb 中的数据
+func TestE2E_VerifyExistingData(t *testing.T) {
+	config := loadE2ETestConfig(t)
+
+	if !config.IsRealMode {
+		t.Skip("跳过：此测试仅在真实模式下运行（需要设置 QDHUB_TUSHARE_TOKEN）")
+	}
+
+	ctx := context.Background()
+
+	// 连接 DuckDB
+	adapter := duckdb.NewAdapter(config.DuckDBPath)
+	err := adapter.Connect(ctx)
+	require.NoError(t, err, "连接 DuckDB 失败")
+	defer adapter.Close()
+
+	t.Logf("📁 DuckDB 路径: %s", config.DuckDBPath)
+
+	// 验证关键 API 的数据
+	keyAPIs := []string{
+		"stock_basic", "trade_cal", "daily", "weekly", "monthly",
+		"daily_basic", "adj_factor", "income", "balancesheet", "cashflow",
+		"index_daily", "top_list", "margin", "block_trade", "fina_indicator",
+		"namechange", "stk_limit", "margin_detail", "fund_basic", "fund_daily",
+	}
+
+	verifyDataSyncResults(t, ctx, adapter, keyAPIs)
 }
