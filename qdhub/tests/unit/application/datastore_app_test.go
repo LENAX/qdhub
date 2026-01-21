@@ -477,6 +477,10 @@ func (m *MockWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req 
 	return shared.ID("mock-instance-id"), nil
 }
 
+func (m *MockWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
 // ==================== Test Cases ====================
 
 func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"qdhub/internal/domain/sync"
+
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/workflow"
@@ -465,4 +467,266 @@ func mergeParams(base, extra map[string]interface{}) map[string]interface{} {
 		result[k] = v
 	}
 	return result
+}
+
+// ==================== ExecutionGraph 支持 ====================
+
+// BuildFromExecutionGraph 从 ExecutionGraph 构建工作流
+// 这是 SyncPlan 的核心执行方法，根据依赖解析后的执行图构建工作流
+//
+// 参数：
+//   - graph: 依赖解析后的执行图
+//   - dataSourceName: 数据源名称
+//   - token: API Token
+//   - targetDBPath: 目标数据库路径
+//   - startDate: 开始日期
+//   - endDate: 结束日期
+//   - startTime: 开始时间（可选）
+//   - endTime: 结束时间（可选）
+//   - maxStocks: 最大股票数量（用于限制子任务）
+func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
+	graph *sync.ExecutionGraph,
+	dataSourceName, token, targetDBPath string,
+	startDate, endDate, startTime, endTime string,
+	maxStocks int,
+) (*workflow.Workflow, error) {
+	if graph == nil || len(graph.Levels) == 0 {
+		return nil, errors.New("execution graph is empty")
+	}
+
+	// 验证必填参数
+	if dataSourceName == "" {
+		return nil, ErrEmptyDataSourceName
+	}
+	if token == "" {
+		return nil, ErrEmptyToken
+	}
+	if targetDBPath == "" {
+		return nil, ErrEmptyTargetDBPath
+	}
+	if startDate == "" {
+		return nil, ErrEmptyStartDate
+	}
+	if endDate == "" {
+		return nil, ErrEmptyEndDate
+	}
+
+	var tasks []*task.Task
+
+	// 基础参数
+	baseParams := map[string]interface{}{
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
+	}
+
+	// 日期时间参数
+	startDateTime := startDate
+	if startTime != "" {
+		startDateTime = fmt.Sprintf("%s %s", startDate, startTime)
+	}
+	endDateTime := endDate
+	if endTime != "" {
+		endDateTime = fmt.Sprintf("%s %s", endDate, endTime)
+	}
+	dateTimeParams := map[string]interface{}{
+		"start_date": startDateTime,
+		"end_date":   endDateTime,
+	}
+
+	// 遍历执行图的每一层
+	for _, level := range graph.Levels {
+		for _, apiName := range level {
+			config, exists := graph.TaskConfigs[apiName]
+			if !exists {
+				// 如果没有配置，使用默认直接模式
+				config = &sync.TaskConfig{
+					APIName:  apiName,
+					SyncMode: sync.TaskSyncModeDirect,
+				}
+			}
+
+			syncTask, err := b.buildTaskFromConfig(config, baseParams, dateTimeParams, maxStocks)
+			if err != nil {
+				return nil, fmt.Errorf("build task for %s: %w", apiName, err)
+			}
+			tasks = append(tasks, syncTask)
+		}
+	}
+
+	// 构建工作流
+	wfBuilder := builder.NewWorkflowBuilder("BatchDataSync", "批量数据同步工作流 - 基于 ExecutionGraph")
+	for _, t := range tasks {
+		wfBuilder.WithTask(t)
+	}
+
+	wf, err := wfBuilder.Build()
+	if err != nil {
+		return nil, err
+	}
+
+	// 启用 SAGA 事务
+	wf.SetTransactional(true)
+
+	return wf, nil
+}
+
+// buildTaskFromConfig 根据 sync.TaskConfig 构建任务
+func (b *BatchDataSyncWorkflowBuilder) buildTaskFromConfig(
+	config *sync.TaskConfig,
+	baseParams, dateTimeParams map[string]interface{},
+	maxStocks int,
+) (*task.Task, error) {
+	taskName := "Sync_" + config.APIName
+
+	// 根据 SyncMode 构建不同类型的任务
+	if config.SyncMode == sync.TaskSyncModeTemplate {
+		return b.buildTemplateTask(taskName, config, baseParams, dateTimeParams, maxStocks)
+	}
+
+	// Direct 模式
+	return b.buildDirectTask(taskName, config, baseParams, dateTimeParams)
+}
+
+// buildTemplateTask 构建模板任务（按参数拆分子任务）
+func (b *BatchDataSyncWorkflowBuilder) buildTemplateTask(
+	taskName string,
+	config *sync.TaskConfig,
+	baseParams, dateTimeParams map[string]interface{},
+	maxStocks int,
+) (*task.Task, error) {
+	// 从 ParamMappings 中获取主参数和上游任务
+	var paramKey, upstreamTask string
+	for _, pm := range config.ParamMappings {
+		if pm.IsList {
+			paramKey = pm.ParamName
+			upstreamTask = pm.SourceTask
+			break
+		}
+	}
+
+	// 默认值
+	if paramKey == "" {
+		paramKey = "ts_code"
+	}
+	if upstreamTask == "" {
+		upstreamTask = "FetchStockBasic"
+	}
+
+	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
+		WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+			"api_name":      config.APIName,
+			"param_key":     paramKey,
+			"upstream_task": upstreamTask,
+			"max_sub_tasks": maxStocks,
+			"extra_params":  dateTimeParams,
+		})).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithTemplate(true)
+
+	// 添加依赖
+	for _, dep := range config.Dependencies {
+		taskBuilder = taskBuilder.WithDependency(dep)
+	}
+
+	return taskBuilder.Build()
+}
+
+// buildDirectTask 构建直接任务
+func (b *BatchDataSyncWorkflowBuilder) buildDirectTask(
+	taskName string,
+	config *sync.TaskConfig,
+	baseParams, dateTimeParams map[string]interface{},
+) (*task.Task, error) {
+	jobParams := mergeParams(baseParams, map[string]interface{}{
+		"api_name": config.APIName,
+	})
+
+	// 构建上游参数映射
+	if len(config.ParamMappings) > 0 {
+		upstreamParams := make(map[string]interface{})
+		for _, pm := range config.ParamMappings {
+			upstreamParams[pm.ParamName] = map[string]interface{}{
+				"source_task":  pm.SourceTask,
+				"source_field": pm.SourceField,
+				"select":       pm.Select,
+			}
+			if pm.FilterField != "" {
+				upstreamParams[pm.ParamName].(map[string]interface{})["filter_field"] = pm.FilterField
+				upstreamParams[pm.ParamName].(map[string]interface{})["filter_value"] = pm.FilterValue
+			}
+		}
+		jobParams["upstream_params"] = upstreamParams
+	}
+
+	// 添加日期参数
+	jobParams["params"] = dateTimeParams
+
+	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
+		WithJobFunction("SyncAPIData", jobParams).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithCompensationFunction("CompensateSyncData")
+
+	// 添加依赖
+	for _, dep := range config.Dependencies {
+		taskBuilder = taskBuilder.WithDependency(dep)
+	}
+
+	return taskBuilder.Build()
+}
+
+// ConvertAPIConfigsFromGraph 将 ExecutionGraph 中的 TaskConfigs 转换为 APISyncConfig 列表
+// 用于兼容旧的 WithAPIConfigs 方法
+func ConvertAPIConfigsFromGraph(graph *sync.ExecutionGraph) []APISyncConfig {
+	var configs []APISyncConfig
+
+	for _, level := range graph.Levels {
+		for _, apiName := range level {
+			taskConfig, exists := graph.TaskConfigs[apiName]
+			if !exists {
+				configs = append(configs, APISyncConfig{
+					APIName:  apiName,
+					SyncMode: "direct",
+				})
+				continue
+			}
+
+			config := APISyncConfig{
+				APIName:      taskConfig.APIName,
+				Dependencies: taskConfig.Dependencies,
+			}
+
+			if taskConfig.SyncMode == sync.TaskSyncModeTemplate {
+				config.SyncMode = "template"
+				// 从 ParamMappings 中提取
+				for _, pm := range taskConfig.ParamMappings {
+					if pm.IsList {
+						config.ParamKey = pm.ParamName
+						config.UpstreamTask = pm.SourceTask
+						break
+					}
+				}
+			} else {
+				config.SyncMode = "direct"
+				if len(taskConfig.ParamMappings) > 0 {
+					config.UpstreamTask = taskConfig.ParamMappings[0].SourceTask
+					upstreamParams := make(map[string]interface{})
+					for _, pm := range taskConfig.ParamMappings {
+						upstreamParams[pm.ParamName] = map[string]interface{}{
+							"source_task":  pm.SourceTask,
+							"source_field": pm.SourceField,
+							"select":       pm.Select,
+						}
+					}
+					config.UpstreamParams = upstreamParams
+				}
+			}
+
+			configs = append(configs, config)
+		}
+	}
+
+	return configs
 }

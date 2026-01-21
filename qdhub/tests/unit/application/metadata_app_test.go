@@ -39,6 +39,10 @@ func (m *MockMetaWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, 
 	return shared.ID("mock-instance-id"), nil
 }
 
+func (m *MockMetaWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.ID("mock-instance-id"), nil
+}
+
 // ==================== Mock Implementations ====================
 
 // MockMetaDataSourceRepository is a mock implementation of metadata.DataSourceRepository.

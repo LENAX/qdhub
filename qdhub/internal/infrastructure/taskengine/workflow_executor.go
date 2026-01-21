@@ -158,3 +158,39 @@ func (e *WorkflowExecutorImpl) ExecuteRealtimeDataSync(ctx context.Context, req 
 
 	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameRealtimeDataSync, params)
 }
+
+// ExecuteFromExecutionGraph executes a data sync workflow based on ExecutionGraph.
+// This is the primary method for SyncPlan execution.
+func (e *WorkflowExecutorImpl) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	// 从 interface{} 转换为具体类型（避免循环依赖）
+	// 实际上 ExecutionGraph 应该在 sync 包中定义
+	// 这里使用 map[string]interface{} 作为中间格式
+
+	// 构建工作流参数
+	params := map[string]interface{}{
+		"data_source_name": req.DataSourceName,
+		"token":            req.Token,
+		"target_db_path":   req.TargetDBPath,
+		"start_date":       req.StartDate,
+		"end_date":         req.EndDate,
+		"api_names":        req.SyncedAPIs,
+		"skipped_apis":     req.SkippedAPIs,
+	}
+
+	// Add optional time parameters if set
+	if req.StartTime != "" {
+		params["start_time"] = req.StartTime
+	}
+	if req.EndTime != "" {
+		params["end_time"] = req.EndTime
+	}
+
+	// Only add max_stocks if it's set (non-zero means limit)
+	if req.MaxStocks > 0 {
+		params["max_stocks"] = req.MaxStocks
+	}
+
+	// 使用标准的 BatchDataSync 工作流（因为 ExecutionGraph 已经在应用层处理）
+	// 工作流需要的是最终的 API 列表，ExecutionGraph 的作用是在应用层确定这些 API
+	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameBatchDataSync, params)
+}

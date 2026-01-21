@@ -103,6 +103,21 @@ type APISyncConfig struct {
 	ExtraParams  map[string]interface{} // 额外参数
 }
 
+// ExecutionGraphSyncRequest 基于 ExecutionGraph 的同步请求参数
+type ExecutionGraphSyncRequest struct {
+	ExecutionGraph interface{}           // ExecutionGraph 结构（使用 interface{} 避免循环依赖）
+	DataSourceName string                // 数据源名称（必填）
+	Token          string                // API Token（必填）
+	TargetDBPath   string                // 目标数据库路径（必填）
+	StartDate      string                // 开始日期（必填，格式: "20251201"）
+	EndDate        string                // 结束日期（必填，格式: "20251231"）
+	StartTime      string                // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string                // 结束时间（可选，格式: "15:00:00"）
+	MaxStocks      int                   // 最大股票数量（可选，0表示不限制）
+	SyncedAPIs     []string              // 需要同步的 API 列表
+	SkippedAPIs    []string              // 跳过的 API 列表
+}
+
 // WorkflowExecutor defines the interface for executing built-in workflows.
 // This is a domain service interface that abstracts workflow execution.
 // Implementation: infrastructure/taskengine/
@@ -135,6 +150,10 @@ type WorkflowExecutor interface {
 	// ExecuteRealtimeDataSync executes the realtime_data_sync built-in workflow.
 	// Performs incremental data sync with checkpoint support.
 	ExecuteRealtimeDataSync(ctx context.Context, req RealtimeDataSyncRequest) (shared.ID, error)
+
+	// ExecuteFromExecutionGraph executes a data sync workflow based on ExecutionGraph.
+	// This is the primary method for SyncPlan execution, supporting field-level dependencies.
+	ExecuteFromExecutionGraph(ctx context.Context, req ExecutionGraphSyncRequest) (shared.ID, error)
 }
 
 // TaskEngineAdapter defines the interface for Task Engine integration.
