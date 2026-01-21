@@ -3,26 +3,51 @@ package sync
 
 import "qdhub/internal/domain/shared"
 
-// SyncJobRepository defines the repository interface for SyncJob aggregate.
-// Following DDD principles, this repository handles both the aggregate root (SyncJob)
-// and its child entities (SyncExecution) to maintain aggregate boundaries.
-//
-// Embeds shared.Repository[SyncJob] to inherit common CRUD operations.
-type SyncJobRepository interface {
-	// Embed base repository for common CRUD operations
-	shared.Repository[SyncJob]
+// SyncPlanRepository 同步计划仓储接口
+// 管理 SyncPlan 聚合根及其子实体（SyncTask、SyncExecution）
+type SyncPlanRepository interface {
+	// 继承基础仓储操作
+	shared.Repository[SyncPlan]
 
-	// ==================== Child Entity Operations (SyncExecution) ====================
+	// ==================== SyncTask 操作 ====================
 
-	// AddExecution adds a new SyncExecution to a SyncJob.
-	AddExecution(exec *SyncExecution) error
+	// AddTask 添加 SyncTask
+	AddTask(task *SyncTask) error
 
-	// GetExecution retrieves a SyncExecution by ID.
-	GetExecution(id shared.ID) (*SyncExecution, error)
+	// GetTask 获取单个 SyncTask
+	GetTask(id shared.ID) (*SyncTask, error)
 
-	// GetExecutionsByJob retrieves all SyncExecutions for a SyncJob.
-	GetExecutionsByJob(jobID shared.ID) ([]*SyncExecution, error)
+	// GetTasksByPlan 获取计划的所有任务
+	GetTasksByPlan(planID shared.ID) ([]*SyncTask, error)
 
-	// UpdateExecution updates a SyncExecution.
-	UpdateExecution(exec *SyncExecution) error
+	// UpdateTask 更新 SyncTask（用于更新 LastSyncedAt 等）
+	UpdateTask(task *SyncTask) error
+
+	// DeleteTasksByPlan 删除计划的所有任务
+	DeleteTasksByPlan(planID shared.ID) error
+
+	// ==================== SyncExecution 操作 ====================
+
+	// AddExecution 添加执行记录
+	AddPlanExecution(exec *SyncExecution) error
+
+	// GetExecution 获取执行记录
+	GetPlanExecution(id shared.ID) (*SyncExecution, error)
+
+	// GetExecutionsByPlan 获取计划的所有执行记录
+	GetExecutionsByPlan(planID shared.ID) ([]*SyncExecution, error)
+
+	// UpdateExecution 更新执行记录
+	UpdatePlanExecution(exec *SyncExecution) error
+
+	// ==================== 查询 ====================
+
+	// GetByDataSource 按数据源获取计划列表
+	GetByDataSource(dataSourceID shared.ID) ([]*SyncPlan, error)
+
+	// GetEnabledPlans 获取所有启用的计划
+	GetEnabledPlans() ([]*SyncPlan, error)
+
+	// GetByStatus 按状态获取计划列表
+	GetByStatus(status PlanStatus) ([]*SyncPlan, error)
 }

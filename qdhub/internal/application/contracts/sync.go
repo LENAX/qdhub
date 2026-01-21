@@ -15,53 +15,57 @@ import (
 //   - Coordinate with WorkflowApplicationService
 //   - Handle Task Engine scheduler integration
 type SyncApplicationService interface {
-	// ==================== Sync Job Management ====================
+	// ==================== Sync Plan Management ====================
 
-	// CreateSyncJob creates a new sync job.
-	CreateSyncJob(ctx context.Context, req CreateSyncJobRequest) (*sync.SyncJob, error)
+	// CreateSyncPlan creates a new sync plan.
+	CreateSyncPlan(ctx context.Context, req CreateSyncPlanRequest) (*sync.SyncPlan, error)
 
-	// GetSyncJob retrieves a sync job by ID.
-	GetSyncJob(ctx context.Context, id shared.ID) (*sync.SyncJob, error)
+	// GetSyncPlan retrieves a sync plan by ID.
+	GetSyncPlan(ctx context.Context, id shared.ID) (*sync.SyncPlan, error)
 
-	// UpdateSyncJob updates a sync job.
-	UpdateSyncJob(ctx context.Context, id shared.ID, req UpdateSyncJobRequest) error
+	// UpdateSyncPlan updates a sync plan.
+	UpdateSyncPlan(ctx context.Context, id shared.ID, req UpdateSyncPlanRequest) error
 
-	// DeleteSyncJob deletes a sync job.
-	DeleteSyncJob(ctx context.Context, id shared.ID) error
+	// DeleteSyncPlan deletes a sync plan.
+	DeleteSyncPlan(ctx context.Context, id shared.ID) error
 
-	// ListSyncJobs lists all sync jobs.
-	ListSyncJobs(ctx context.Context) ([]*sync.SyncJob, error)
+	// ListSyncPlans lists all sync plans.
+	ListSyncPlans(ctx context.Context) ([]*sync.SyncPlan, error)
 
-	// ==================== Job Execution ====================
+	// ResolveSyncPlan resolves dependencies for a sync plan.
+	ResolveSyncPlan(ctx context.Context, planID shared.ID) error
 
-	// ExecuteSyncJob executes a sync job manually.
-	// This is a complex use case involving:
-	//   1. Validate job status
-	//   2. Create workflow instance
-	//   3. Submit to Task Engine
-	//   4. Create sync execution record
-	//   5. Return execution ID
-	ExecuteSyncJob(ctx context.Context, jobID shared.ID) (shared.ID, error)
+	// ==================== Plan Execution ====================
+
+	// ExecuteSyncPlan executes a sync plan.
+	// This is the core method that:
+	//   1. Validates plan status
+	//   2. Filters tasks by sync frequency
+	//   3. Converts ExecutionGraph to API configs
+	//   4. Submits to Task Engine
+	//   5. Creates sync execution record
+	//   6. Returns execution ID
+	ExecuteSyncPlan(ctx context.Context, planID shared.ID, req ExecuteSyncPlanRequest) (shared.ID, error)
 
 	// GetSyncExecution retrieves a sync execution by ID.
 	GetSyncExecution(ctx context.Context, id shared.ID) (*sync.SyncExecution, error)
 
-	// ListSyncExecutions lists all executions for a sync job.
-	ListSyncExecutions(ctx context.Context, jobID shared.ID) ([]*sync.SyncExecution, error)
+	// ListPlanExecutions lists all executions for a sync plan.
+	ListPlanExecutions(ctx context.Context, planID shared.ID) ([]*sync.SyncExecution, error)
 
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
 
 	// ==================== Scheduling ====================
 
-	// EnableJob enables a sync job and schedules it if it has a cron expression.
-	EnableJob(ctx context.Context, jobID shared.ID) error
+	// EnablePlan enables a sync plan and schedules it if it has a cron expression.
+	EnablePlan(ctx context.Context, planID shared.ID) error
 
-	// DisableJob disables a sync job and unschedules it.
-	DisableJob(ctx context.Context, jobID shared.ID) error
+	// DisablePlan disables a sync plan and unschedules it.
+	DisablePlan(ctx context.Context, planID shared.ID) error
 
-	// UpdateSchedule updates the cron schedule for a sync job.
-	UpdateSchedule(ctx context.Context, jobID shared.ID, cronExpression string) error
+	// UpdatePlanSchedule updates the cron schedule for a sync plan.
+	UpdatePlanSchedule(ctx context.Context, planID shared.ID, cronExpression string) error
 
 	// ==================== Callback Handlers ====================
 
@@ -69,7 +73,7 @@ type SyncApplicationService interface {
 	// This is called by workflow engine when sync execution completes.
 	HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error
 
-	// ==================== Built-in Workflow Execution ====================
+	// ==================== Built-in Workflow Execution (Legacy) ====================
 
 	// SyncDataSource executes the batch_data_sync built-in workflow.
 	// This is a convenience method that:
@@ -90,27 +94,32 @@ type SyncApplicationService interface {
 
 // ==================== Request/Response DTOs ====================
 
-// CreateSyncJobRequest represents a request to create a sync job.
-type CreateSyncJobRequest struct {
+// CreateSyncPlanRequest represents a request to create a sync plan.
+type CreateSyncPlanRequest struct {
 	Name           string
 	Description    string
-	APIMetadataID  shared.ID
+	DataSourceID   shared.ID
 	DataStoreID    shared.ID
-	WorkflowDefID  shared.ID
-	Mode           sync.SyncMode
+	SelectedAPIs   []string
 	CronExpression *string
-	Params         map[string]interface{}
-	ParamRules     []sync.ParamRule
 }
 
-// UpdateSyncJobRequest represents a request to update a sync job.
-type UpdateSyncJobRequest struct {
+// UpdateSyncPlanRequest represents a request to update a sync plan.
+type UpdateSyncPlanRequest struct {
 	Name           *string
 	Description    *string
-	Mode           *sync.SyncMode
+	DataStoreID    *shared.ID
+	SelectedAPIs   *[]string
 	CronExpression *string
-	Params         *map[string]interface{}
-	ParamRules     *[]sync.ParamRule
+}
+
+// ExecuteSyncPlanRequest represents a request to execute a sync plan.
+type ExecuteSyncPlanRequest struct {
+	TargetDBPath string // 目标数据库路径（必填）
+	StartDate    string // 开始日期（必填，格式: "20251201"）
+	EndDate      string // 结束日期（必填，格式: "20251231"）
+	StartTime    string // 开始时间（可选，格式: "09:30:00"）
+	EndTime      string // 结束时间（可选，格式: "15:00:00"）
 }
 
 // ExecutionCallbackRequest represents a callback request from workflow engine.

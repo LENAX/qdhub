@@ -54,16 +54,16 @@ func (s *CronScheduler) Stop() context.Context {
 	return s.cron.Stop()
 }
 
-// ScheduleJob schedules a sync job with the given cron expression.
-// If the job is already scheduled, it will be rescheduled with the new expression.
-func (s *CronScheduler) ScheduleJob(jobID string, cronExpr string) error {
+// SchedulePlan schedules a sync plan with the given cron expression.
+// If the plan is already scheduled, it will be rescheduled with the new expression.
+func (s *CronScheduler) SchedulePlan(planID string, cronExpr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Remove existing schedule if any
-	if existingID, exists := s.entryIDs[jobID]; exists {
+	if existingID, exists := s.entryIDs[planID]; exists {
 		s.cron.Remove(existingID)
-		delete(s.entryIDs, jobID)
+		delete(s.entryIDs, planID)
 	}
 
 	// Add new schedule
@@ -71,9 +71,9 @@ func (s *CronScheduler) ScheduleJob(jobID string, cronExpr string) error {
 		if s.jobHandler != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
-			if err := s.jobHandler.ExecuteScheduledJob(ctx, jobID); err != nil {
+			if err := s.jobHandler.ExecuteScheduledJob(ctx, planID); err != nil {
 				// Log error but don't panic - the job will run again on next schedule
-				fmt.Printf("[CronScheduler] Failed to execute job %s: %v\n", jobID, err)
+				fmt.Printf("[CronScheduler] Failed to execute plan %s: %v\n", planID, err)
 			}
 		}
 	})
@@ -81,35 +81,35 @@ func (s *CronScheduler) ScheduleJob(jobID string, cronExpr string) error {
 		return fmt.Errorf("failed to add cron job: %w", err)
 	}
 
-	s.entryIDs[jobID] = entryID
+	s.entryIDs[planID] = entryID
 	return nil
 }
 
-// UnscheduleJob removes a job from the scheduler.
-func (s *CronScheduler) UnscheduleJob(jobID string) {
+// UnschedulePlan removes a plan from the scheduler.
+func (s *CronScheduler) UnschedulePlan(planID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if entryID, exists := s.entryIDs[jobID]; exists {
+	if entryID, exists := s.entryIDs[planID]; exists {
 		s.cron.Remove(entryID)
-		delete(s.entryIDs, jobID)
+		delete(s.entryIDs, planID)
 	}
 }
 
-// IsScheduled returns true if the job is currently scheduled.
-func (s *CronScheduler) IsScheduled(jobID string) bool {
+// IsScheduled returns true if the plan is currently scheduled.
+func (s *CronScheduler) IsScheduled(planID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, exists := s.entryIDs[jobID]
+	_, exists := s.entryIDs[planID]
 	return exists
 }
 
-// GetNextRunTime returns the next scheduled run time for a job.
-func (s *CronScheduler) GetNextRunTime(jobID string) *time.Time {
+// GetNextRunTime returns the next scheduled run time for a plan.
+func (s *CronScheduler) GetNextRunTime(planID string) *time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if entryID, exists := s.entryIDs[jobID]; exists {
+	if entryID, exists := s.entryIDs[planID]; exists {
 		entry := s.cron.Entry(entryID)
 		if entry.Valid() {
 			next := entry.Next
@@ -119,8 +119,8 @@ func (s *CronScheduler) GetNextRunTime(jobID string) *time.Time {
 	return nil
 }
 
-// GetScheduledJobCount returns the number of scheduled jobs.
-func (s *CronScheduler) GetScheduledJobCount() int {
+// GetScheduledPlanCount returns the number of scheduled plans.
+func (s *CronScheduler) GetScheduledPlanCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.entryIDs)
@@ -159,7 +159,7 @@ func (p *CronParser) CalculateNextRunTime(cronExpr string, fromTime time.Time) (
 
 // ==================== Ensure interfaces ====================
 
-var _ domainSync.JobScheduler = (*CronScheduler)(nil)
+var _ domainSync.PlanScheduler = (*CronScheduler)(nil)
 var _ domainSync.CronScheduleCalculator = (*CronSchedulerCalculatorAdapter)(nil)
 
 // CronSchedulerCalculatorAdapter adapts CronParser to domain CronScheduleCalculator interface.

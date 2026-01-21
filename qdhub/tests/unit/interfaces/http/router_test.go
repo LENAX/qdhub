@@ -128,34 +128,37 @@ func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context
 // FullMockSyncService implements SyncApplicationService.
 type FullMockSyncService struct{}
 
-func (m *FullMockSyncService) CreateSyncJob(ctx context.Context, req contracts.CreateSyncJobRequest) (*sync.SyncJob, error) {
+func (m *FullMockSyncService) CreateSyncPlan(ctx context.Context, req contracts.CreateSyncPlanRequest) (*sync.SyncPlan, error) {
 	return nil, nil
 }
-func (m *FullMockSyncService) GetSyncJob(ctx context.Context, id shared.ID) (*sync.SyncJob, error) {
+func (m *FullMockSyncService) GetSyncPlan(ctx context.Context, id shared.ID) (*sync.SyncPlan, error) {
 	return nil, nil
 }
-func (m *FullMockSyncService) UpdateSyncJob(ctx context.Context, id shared.ID, req contracts.UpdateSyncJobRequest) error {
+func (m *FullMockSyncService) UpdateSyncPlan(ctx context.Context, id shared.ID, req contracts.UpdateSyncPlanRequest) error {
 	return nil
 }
-func (m *FullMockSyncService) DeleteSyncJob(ctx context.Context, id shared.ID) error { return nil }
-func (m *FullMockSyncService) ListSyncJobs(ctx context.Context) ([]*sync.SyncJob, error) {
+func (m *FullMockSyncService) DeleteSyncPlan(ctx context.Context, id shared.ID) error { return nil }
+func (m *FullMockSyncService) ListSyncPlans(ctx context.Context) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }
-func (m *FullMockSyncService) ExecuteSyncJob(ctx context.Context, jobID shared.ID) (shared.ID, error) {
+func (m *FullMockSyncService) ResolveSyncPlan(ctx context.Context, planID shared.ID) error {
+	return nil
+}
+func (m *FullMockSyncService) ExecuteSyncPlan(ctx context.Context, planID shared.ID, req contracts.ExecuteSyncPlanRequest) (shared.ID, error) {
 	return "", nil
 }
 func (m *FullMockSyncService) GetSyncExecution(ctx context.Context, id shared.ID) (*sync.SyncExecution, error) {
 	return nil, nil
 }
-func (m *FullMockSyncService) ListSyncExecutions(ctx context.Context, jobID shared.ID) ([]*sync.SyncExecution, error) {
+func (m *FullMockSyncService) ListPlanExecutions(ctx context.Context, planID shared.ID) ([]*sync.SyncExecution, error) {
 	return nil, nil
 }
 func (m *FullMockSyncService) CancelExecution(ctx context.Context, executionID shared.ID) error {
 	return nil
 }
-func (m *FullMockSyncService) EnableJob(ctx context.Context, jobID shared.ID) error  { return nil }
-func (m *FullMockSyncService) DisableJob(ctx context.Context, jobID shared.ID) error { return nil }
-func (m *FullMockSyncService) UpdateSchedule(ctx context.Context, jobID shared.ID, cronExpression string) error {
+func (m *FullMockSyncService) EnablePlan(ctx context.Context, planID shared.ID) error  { return nil }
+func (m *FullMockSyncService) DisablePlan(ctx context.Context, planID shared.ID) error { return nil }
+func (m *FullMockSyncService) UpdatePlanSchedule(ctx context.Context, planID shared.ID, cronExpression string) error {
 	return nil
 }
 func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
@@ -318,6 +321,6 @@ func TestAPIRoutes(t *testing.T) {
 	assert.True(t, routePaths["GET /health"])
 	assert.True(t, routePaths["GET /api/v1/datasources"])
 	assert.True(t, routePaths["GET /api/v1/datastores"])
-	assert.True(t, routePaths["GET /api/v1/sync-jobs"])
+	assert.True(t, routePaths["GET /api/v1/sync-plans"])
 	assert.True(t, routePaths["GET /api/v1/workflows"])
 }

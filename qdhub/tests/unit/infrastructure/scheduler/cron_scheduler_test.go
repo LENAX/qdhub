@@ -126,42 +126,42 @@ func TestCronScheduler_ScheduleAndUnschedule(t *testing.T) {
 	handler := newMockJobHandler()
 	sched := scheduler.NewCronScheduler(handler)
 
-	// Schedule a job
-	err := sched.ScheduleJob("job-1", "* * * * * *") // every second
+	// Schedule a plan
+	err := sched.SchedulePlan("plan-1", "* * * * * *") // every second
 	require.NoError(t, err)
 
-	assert.True(t, sched.IsScheduled("job-1"))
-	assert.Equal(t, 1, sched.GetScheduledJobCount())
+	assert.True(t, sched.IsScheduled("plan-1"))
+	assert.Equal(t, 1, sched.GetScheduledPlanCount())
 
 	// Unschedule
-	sched.UnscheduleJob("job-1")
-	assert.False(t, sched.IsScheduled("job-1"))
-	assert.Equal(t, 0, sched.GetScheduledJobCount())
+	sched.UnschedulePlan("plan-1")
+	assert.False(t, sched.IsScheduled("plan-1"))
+	assert.Equal(t, 0, sched.GetScheduledPlanCount())
 }
 
-func TestCronScheduler_RescheduleJob(t *testing.T) {
+func TestCronScheduler_ReschedulePlan(t *testing.T) {
 	handler := newMockJobHandler()
 	sched := scheduler.NewCronScheduler(handler)
 
-	// Schedule a job
-	err := sched.ScheduleJob("job-1", "0 0 9 * * *")
+	// Schedule a plan
+	err := sched.SchedulePlan("plan-1", "0 0 9 * * *")
 	require.NoError(t, err)
 
 	// Reschedule with different expression
-	err = sched.ScheduleJob("job-1", "0 0 10 * * *")
+	err = sched.SchedulePlan("plan-1", "0 0 10 * * *")
 	require.NoError(t, err)
 
-	assert.True(t, sched.IsScheduled("job-1"))
-	assert.Equal(t, 1, sched.GetScheduledJobCount()) // Should still be 1, not 2
+	assert.True(t, sched.IsScheduled("plan-1"))
+	assert.Equal(t, 1, sched.GetScheduledPlanCount()) // Should still be 1, not 2
 }
 
 func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 	handler := newMockJobHandler()
 	sched := scheduler.NewCronScheduler(handler)
 
-	err := sched.ScheduleJob("job-1", "invalid")
+	err := sched.SchedulePlan("plan-1", "invalid")
 	assert.Error(t, err)
-	assert.False(t, sched.IsScheduled("job-1"))
+	assert.False(t, sched.IsScheduled("plan-1"))
 }
 
 func TestCronScheduler_GetNextRunTime(t *testing.T) {
@@ -170,15 +170,15 @@ func TestCronScheduler_GetNextRunTime(t *testing.T) {
 	sched.Start()
 	defer sched.Stop()
 
-	// Schedule a job for every hour
-	err := sched.ScheduleJob("job-1", "0 0 * * * *")
+	// Schedule a plan for every hour
+	err := sched.SchedulePlan("plan-1", "0 0 * * * *")
 	require.NoError(t, err)
 
-	nextTime := sched.GetNextRunTime("job-1")
+	nextTime := sched.GetNextRunTime("plan-1")
 	require.NotNil(t, nextTime)
 	assert.True(t, nextTime.After(time.Now()))
 
-	// Non-existent job
+	// Non-existent plan
 	noNext := sched.GetNextRunTime("non-existent")
 	assert.Nil(t, noNext)
 }
@@ -188,27 +188,27 @@ func TestCronScheduler_UnscheduleNonExistent(t *testing.T) {
 	sched := scheduler.NewCronScheduler(handler)
 
 	// Should not panic
-	sched.UnscheduleJob("non-existent")
+	sched.UnschedulePlan("non-existent")
 }
 
-func TestCronScheduler_MultipleJobs(t *testing.T) {
+func TestCronScheduler_MultiplePlans(t *testing.T) {
 	handler := newMockJobHandler()
 	sched := scheduler.NewCronScheduler(handler)
 
-	// Schedule multiple jobs
-	require.NoError(t, sched.ScheduleJob("job-1", "0 0 9 * * *"))
-	require.NoError(t, sched.ScheduleJob("job-2", "0 0 10 * * *"))
-	require.NoError(t, sched.ScheduleJob("job-3", "0 0 11 * * *"))
+	// Schedule multiple plans
+	require.NoError(t, sched.SchedulePlan("plan-1", "0 0 9 * * *"))
+	require.NoError(t, sched.SchedulePlan("plan-2", "0 0 10 * * *"))
+	require.NoError(t, sched.SchedulePlan("plan-3", "0 0 11 * * *"))
 
-	assert.Equal(t, 3, sched.GetScheduledJobCount())
-	assert.True(t, sched.IsScheduled("job-1"))
-	assert.True(t, sched.IsScheduled("job-2"))
-	assert.True(t, sched.IsScheduled("job-3"))
+	assert.Equal(t, 3, sched.GetScheduledPlanCount())
+	assert.True(t, sched.IsScheduled("plan-1"))
+	assert.True(t, sched.IsScheduled("plan-2"))
+	assert.True(t, sched.IsScheduled("plan-3"))
 
 	// Unschedule one
-	sched.UnscheduleJob("job-2")
-	assert.Equal(t, 2, sched.GetScheduledJobCount())
-	assert.False(t, sched.IsScheduled("job-2"))
+	sched.UnschedulePlan("plan-2")
+	assert.Equal(t, 2, sched.GetScheduledPlanCount())
+	assert.False(t, sched.IsScheduled("plan-2"))
 }
 
 // ==================== CronSchedulerCalculatorAdapter Tests ====================
@@ -233,7 +233,7 @@ func TestCronSchedulerCalculatorAdapter_ImplementsInterface(t *testing.T) {
 
 // ==================== Integration-like Test ====================
 
-func TestCronScheduler_JobExecution(t *testing.T) {
+func TestCronScheduler_PlanExecution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration-like test in short mode")
 	}
@@ -243,16 +243,16 @@ func TestCronScheduler_JobExecution(t *testing.T) {
 	sched.Start()
 	defer sched.Stop()
 
-	// Schedule a job to run every second
-	err := sched.ScheduleJob("fast-job", "* * * * * *")
+	// Schedule a plan to run every second
+	err := sched.SchedulePlan("fast-plan", "* * * * * *")
 	require.NoError(t, err)
 
 	// Wait for at least one execution (with timeout)
 	select {
-	case jobID := <-handler.executeCh:
-		assert.Equal(t, "fast-job", jobID)
+	case planID := <-handler.executeCh:
+		assert.Equal(t, "fast-plan", planID)
 	case <-time.After(3 * time.Second):
-		t.Fatal("Job was not executed within timeout")
+		t.Fatal("Plan was not executed within timeout")
 	}
 
 	// Verify execution happened

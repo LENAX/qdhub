@@ -12,33 +12,42 @@ import (
 	"qdhub/internal/infrastructure/persistence/dao"
 )
 
-// SyncJobRepositoryImpl implements sync.SyncJobRepository.
-type SyncJobRepositoryImpl struct {
+// SyncPlanRepositoryImpl implements sync.SyncPlanRepository.
+type SyncPlanRepositoryImpl struct {
 	db               *persistence.DB
-	syncJobDAO       *dao.SyncJobDAO
+	syncPlanDAO      *dao.SyncPlanDAO
+	syncTaskDAO      *dao.SyncTaskDAO
 	syncExecutionDAO *dao.SyncExecutionDAO
 }
 
-// NewSyncJobRepository creates a new SyncJobRepositoryImpl.
-func NewSyncJobRepository(db *persistence.DB) *SyncJobRepositoryImpl {
-	return &SyncJobRepositoryImpl{
+// NewSyncPlanRepository creates a new SyncPlanRepositoryImpl.
+func NewSyncPlanRepository(db *persistence.DB) *SyncPlanRepositoryImpl {
+	return &SyncPlanRepositoryImpl{
 		db:               db,
-		syncJobDAO:       dao.NewSyncJobDAO(db.DB),
+		syncPlanDAO:      dao.NewSyncPlanDAO(db.DB),
+		syncTaskDAO:      dao.NewSyncTaskDAO(db.DB),
 		syncExecutionDAO: dao.NewSyncExecutionDAO(db.DB),
 	}
 }
 
-// Create creates a new sync job with its aggregated entities.
-func (r *SyncJobRepositoryImpl) Create(job *sync.SyncJob) error {
+// Create creates a new sync plan with its aggregated entities.
+func (r *SyncPlanRepositoryImpl) Create(plan *sync.SyncPlan) error {
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create sync job
-		if err := r.syncJobDAO.Create(tx, job); err != nil {
+		// Create sync plan
+		if err := r.syncPlanDAO.Create(tx, plan); err != nil {
 			return err
 		}
 
+		// Create tasks
+		for _, task := range plan.Tasks {
+			if err := r.syncTaskDAO.Create(tx, task); err != nil {
+				return err
+			}
+		}
+
 		// Create executions
-		for _, exec := range job.Executions {
-			if err := r.syncExecutionDAO.Create(tx, &exec); err != nil {
+		for _, exec := range plan.Executions {
+			if err := r.syncExecutionDAO.Create(tx, exec); err != nil {
 				return err
 			}
 		}
@@ -47,44 +56,48 @@ func (r *SyncJobRepositoryImpl) Create(job *sync.SyncJob) error {
 	})
 }
 
-// Get retrieves a sync job by ID with its aggregated entities.
-func (r *SyncJobRepositoryImpl) Get(id shared.ID) (*sync.SyncJob, error) {
-	job, err := r.syncJobDAO.GetByID(nil, id)
+// Get retrieves a sync plan by ID with its aggregated entities.
+func (r *SyncPlanRepositoryImpl) Get(id shared.ID) (*sync.SyncPlan, error) {
+	plan, err := r.syncPlanDAO.GetByID(nil, id)
 	if err != nil {
 		return nil, err
 	}
-	if job == nil {
+	if plan == nil {
 		return nil, nil
 	}
 
-	// Load executions
-	executions, err := r.syncExecutionDAO.GetBySyncJob(nil, id)
+	// Load tasks
+	tasks, err := r.syncTaskDAO.GetByPlanID(nil, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tasks: %w", err)
+	}
+	plan.Tasks = tasks
+
+	// Load executions (lazy load, only recent ones)
+	executions, err := r.syncExecutionDAO.GetByPlanID(nil, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load executions: %w", err)
 	}
-	job.Executions = make([]sync.SyncExecution, len(executions))
-	for i, exec := range executions {
-		job.Executions[i] = *exec
-	}
+	plan.Executions = executions
 
-	return job, nil
+	return plan, nil
 }
 
-// Update updates a sync job.
-func (r *SyncJobRepositoryImpl) Update(job *sync.SyncJob) error {
-	return r.syncJobDAO.Update(nil, job)
+// Update updates a sync plan.
+func (r *SyncPlanRepositoryImpl) Update(plan *sync.SyncPlan) error {
+	return r.syncPlanDAO.Update(nil, plan)
 }
 
-// Delete deletes a sync job and its aggregated entities.
-func (r *SyncJobRepositoryImpl) Delete(id shared.ID) error {
+// Delete deletes a sync plan and its aggregated entities.
+func (r *SyncPlanRepositoryImpl) Delete(id shared.ID) error {
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Delete executions first
-		if err := r.syncExecutionDAO.DeleteBySyncJob(tx, id); err != nil {
+		// Delete tasks first
+		if err := r.syncTaskDAO.DeleteByPlanID(tx, id); err != nil {
 			return err
 		}
 
-		// Delete sync job
-		if err := r.syncJobDAO.DeleteByID(tx, id); err != nil {
+		// Delete sync plan
+		if err := r.syncPlanDAO.DeleteByID(tx, id); err != nil {
 			return err
 		}
 
@@ -92,52 +105,96 @@ func (r *SyncJobRepositoryImpl) Delete(id shared.ID) error {
 	})
 }
 
-// List retrieves all sync jobs (without aggregated entities for performance).
-func (r *SyncJobRepositoryImpl) List() ([]*sync.SyncJob, error) {
-	return r.syncJobDAO.ListAll(nil)
+// List retrieves all sync plans (without aggregated entities for performance).
+func (r *SyncPlanRepositoryImpl) List() ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.ListAll(nil)
 }
 
-// ==================== Child Entity Operations (SyncExecution) ====================
+// ==================== SyncTask Operations ====================
 
-// AddExecution adds a new SyncExecution to a SyncJob.
-func (r *SyncJobRepositoryImpl) AddExecution(exec *sync.SyncExecution) error {
+// AddTask adds a new SyncTask to a SyncPlan.
+func (r *SyncPlanRepositoryImpl) AddTask(task *sync.SyncTask) error {
+	return r.syncTaskDAO.Create(nil, task)
+}
+
+// GetTask retrieves a SyncTask by ID.
+func (r *SyncPlanRepositoryImpl) GetTask(id shared.ID) (*sync.SyncTask, error) {
+	return r.syncTaskDAO.GetByID(nil, id)
+}
+
+// GetTasksByPlan retrieves all SyncTasks for a SyncPlan.
+func (r *SyncPlanRepositoryImpl) GetTasksByPlan(planID shared.ID) ([]*sync.SyncTask, error) {
+	return r.syncTaskDAO.GetByPlanID(nil, planID)
+}
+
+// UpdateTask updates a SyncTask.
+func (r *SyncPlanRepositoryImpl) UpdateTask(task *sync.SyncTask) error {
+	return r.syncTaskDAO.Update(nil, task)
+}
+
+// DeleteTasksByPlan deletes all SyncTasks for a SyncPlan.
+func (r *SyncPlanRepositoryImpl) DeleteTasksByPlan(planID shared.ID) error {
+	return r.syncTaskDAO.DeleteByPlanID(nil, planID)
+}
+
+// ==================== SyncExecution Operations ====================
+
+// AddPlanExecution adds a new SyncExecution to a SyncPlan.
+func (r *SyncPlanRepositoryImpl) AddPlanExecution(exec *sync.SyncExecution) error {
 	return r.syncExecutionDAO.Create(nil, exec)
 }
 
-// GetExecution retrieves a SyncExecution by ID.
-func (r *SyncJobRepositoryImpl) GetExecution(id shared.ID) (*sync.SyncExecution, error) {
+// GetPlanExecution retrieves a SyncExecution by ID.
+func (r *SyncPlanRepositoryImpl) GetPlanExecution(id shared.ID) (*sync.SyncExecution, error) {
 	return r.syncExecutionDAO.GetByID(nil, id)
 }
 
-// GetExecutionsByJob retrieves all SyncExecutions for a SyncJob.
-func (r *SyncJobRepositoryImpl) GetExecutionsByJob(jobID shared.ID) ([]*sync.SyncExecution, error) {
-	return r.syncExecutionDAO.GetBySyncJob(nil, jobID)
+// GetExecutionsByPlan retrieves all SyncExecutions for a SyncPlan.
+func (r *SyncPlanRepositoryImpl) GetExecutionsByPlan(planID shared.ID) ([]*sync.SyncExecution, error) {
+	return r.syncExecutionDAO.GetByPlanID(nil, planID)
 }
 
-// UpdateExecution updates a SyncExecution.
-func (r *SyncJobRepositoryImpl) UpdateExecution(exec *sync.SyncExecution) error {
+// UpdatePlanExecution updates a SyncExecution.
+func (r *SyncPlanRepositoryImpl) UpdatePlanExecution(exec *sync.SyncExecution) error {
 	return r.syncExecutionDAO.Update(nil, exec)
+}
+
+// ==================== Query Operations ====================
+
+// GetByDataSource retrieves sync plans by data source ID.
+func (r *SyncPlanRepositoryImpl) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.GetByDataSource(nil, dataSourceID)
+}
+
+// GetEnabledPlans retrieves all enabled sync plans.
+func (r *SyncPlanRepositoryImpl) GetEnabledPlans() ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.GetByStatus(nil, sync.PlanStatusEnabled)
+}
+
+// GetByStatus retrieves sync plans by status.
+func (r *SyncPlanRepositoryImpl) GetByStatus(status sync.PlanStatus) ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.GetByStatus(nil, status)
 }
 
 // ==================== Extended Query Operations ====================
 
 // FindBy retrieves entities matching the given conditions.
-func (r *SyncJobRepositoryImpl) FindBy(conditions ...shared.QueryCondition) ([]*sync.SyncJob, error) {
+func (r *SyncPlanRepositoryImpl) FindBy(conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
 	return r.findByInternal(nil, nil, conditions...)
 }
 
 // FindByWithOrder retrieves entities matching conditions with ordering.
-func (r *SyncJobRepositoryImpl) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*sync.SyncJob, error) {
+func (r *SyncPlanRepositoryImpl) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
 	return r.findByInternal(orderBy, nil, conditions...)
 }
 
 // ListWithPagination retrieves entities with pagination.
-func (r *SyncJobRepositoryImpl) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[sync.SyncJob], error) {
+func (r *SyncPlanRepositoryImpl) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[sync.SyncPlan], error) {
 	return r.FindByWithPagination(pagination)
 }
 
 // FindByWithPagination retrieves entities matching conditions with pagination.
-func (r *SyncJobRepositoryImpl) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[sync.SyncJob], error) {
+func (r *SyncPlanRepositoryImpl) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[sync.SyncPlan], error) {
 	total, err := r.Count(conditions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count entities: %w", err)
@@ -152,20 +209,20 @@ func (r *SyncJobRepositoryImpl) FindByWithPagination(pagination shared.Paginatio
 }
 
 // Count returns the total count of entities matching conditions.
-func (r *SyncJobRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
+func (r *SyncPlanRepositoryImpl) Count(conditions ...shared.QueryCondition) (int64, error) {
 	whereClause, args := buildWhereClause(conditions...)
-	query := fmt.Sprintf("SELECT COUNT(*) FROM sync_jobs%s", whereClause)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM sync_plan%s", whereClause)
 
 	var count int64
 	err := r.db.DB.Get(&count, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("failed to count sync_jobs: %w", err)
+		return 0, fmt.Errorf("failed to count sync_plan: %w", err)
 	}
 	return count, nil
 }
 
 // Exists checks if any entity matching conditions exists.
-func (r *SyncJobRepositoryImpl) Exists(conditions ...shared.QueryCondition) (bool, error) {
+func (r *SyncPlanRepositoryImpl) Exists(conditions ...shared.QueryCondition) (bool, error) {
 	count, err := r.Count(conditions...)
 	if err != nil {
 		return false, err
@@ -173,23 +230,23 @@ func (r *SyncJobRepositoryImpl) Exists(conditions ...shared.QueryCondition) (boo
 	return count > 0, nil
 }
 
-func (r *SyncJobRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagination *shared.Pagination, conditions ...shared.QueryCondition) ([]*sync.SyncJob, error) {
+func (r *SyncPlanRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagination *shared.Pagination, conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
 	whereClause, args := buildWhereClause(conditions...)
 	orderClause := buildOrderClause(orderBy)
 	limitClause := buildLimitClause(pagination)
 
-	query := fmt.Sprintf("SELECT * FROM sync_jobs%s%s%s", whereClause, orderClause, limitClause)
+	query := fmt.Sprintf("SELECT * FROM sync_plan%s%s%s", whereClause, orderClause, limitClause)
 
-	var rows []dao.SyncJobRow
+	var rows []dao.SyncPlanRow
 	err := r.db.DB.Select(&rows, query, args...)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return []*sync.SyncJob{}, nil
+			return []*sync.SyncPlan{}, nil
 		}
-		return nil, fmt.Errorf("failed to find sync_jobs: %w", err)
+		return nil, fmt.Errorf("failed to find sync_plan: %w", err)
 	}
 
-	entities := make([]*sync.SyncJob, 0, len(rows))
+	entities := make([]*sync.SyncPlan, 0, len(rows))
 	for _, row := range rows {
 		entity, err := r.rowToEntity(&row)
 		if err != nil {
@@ -201,46 +258,47 @@ func (r *SyncJobRepositoryImpl) findByInternal(orderBy []shared.OrderBy, paginat
 }
 
 // rowToEntity converts database row to domain entity.
-func (r *SyncJobRepositoryImpl) rowToEntity(row *dao.SyncJobRow) (*sync.SyncJob, error) {
-	entity := &sync.SyncJob{
-		ID:            shared.ID(row.ID),
-		Name:          row.Name,
-		Description:   row.Description,
-		APIMetadataID: shared.ID(row.APIMetadataID),
-		DataStoreID:   shared.ID(row.DataStoreID),
-		WorkflowDefID: shared.ID(row.WorkflowDefID),
-		Mode:          sync.SyncMode(row.Mode),
-		Status:        sync.JobStatus(row.Status),
-		CreatedAt:     shared.Timestamp(row.CreatedAt),
-		UpdatedAt:     shared.Timestamp(row.UpdatedAt),
+func (r *SyncPlanRepositoryImpl) rowToEntity(row *dao.SyncPlanRow) (*sync.SyncPlan, error) {
+	entity := &sync.SyncPlan{
+		ID:           shared.ID(row.ID),
+		Name:         row.Name,
+		Description:  row.Description,
+		DataSourceID: shared.ID(row.DataSourceID),
+		Status:       sync.PlanStatus(row.Status),
+		CreatedAt:    shared.Timestamp(row.CreatedAt),
+		UpdatedAt:    shared.Timestamp(row.UpdatedAt),
+	}
+
+	if row.DataStoreID.Valid {
+		entity.DataStoreID = shared.ID(row.DataStoreID.String)
 	}
 
 	if row.CronExpression.Valid {
 		entity.CronExpression = &row.CronExpression.String
 	}
 
-	if row.LastRunAt.Valid {
-		entity.LastRunAt = &row.LastRunAt.Time
+	if row.LastExecutedAt.Valid {
+		entity.LastExecutedAt = &row.LastExecutedAt.Time
 	}
 
-	if row.NextRunAt.Valid {
-		entity.NextRunAt = &row.NextRunAt.Time
+	if row.NextExecuteAt.Valid {
+		entity.NextExecuteAt = &row.NextExecuteAt.Time
 	}
 
-	if row.Params != "" {
-		if err := entity.UnmarshalParamsJSON(row.Params); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+	if err := entity.UnmarshalSelectedAPIsJSON(row.SelectedAPIs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal selected apis: %w", err)
+	}
+
+	if row.ResolvedAPIs != "" {
+		if err := entity.UnmarshalResolvedAPIsJSON(row.ResolvedAPIs); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal resolved apis: %w", err)
 		}
-	} else {
-		entity.Params = make(map[string]interface{})
 	}
 
-	if row.ParamRules != "" {
-		if err := entity.UnmarshalParamRulesJSON(row.ParamRules); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal param rules: %w", err)
+	if row.ExecutionGraph != "" {
+		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal execution graph: %w", err)
 		}
-	} else {
-		entity.ParamRules = []sync.ParamRule{}
 	}
 
 	return entity, nil

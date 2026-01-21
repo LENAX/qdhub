@@ -105,35 +105,53 @@ type DataTypeMappingRuleRow struct {
 
 // ==================== Sync Domain Models ====================
 
-// SyncJobRow represents sync_jobs table row.
-type SyncJobRow struct {
-	ID             string         `db:"id"`
-	Name           string         `db:"name"`
-	Description    string         `db:"description"`
-	APIMetadataID  string         `db:"api_meta_id"`
-	DataStoreID    string         `db:"data_store_id"`
-	WorkflowDefID  string         `db:"workflow_def_id"`
-	Mode           string         `db:"mode"`
-	CronExpression sql.NullString `db:"cron_expression"`
-	Params         string         `db:"params"`
-	ParamRules     string         `db:"param_rules"`
-	Status         string         `db:"status"`
-	LastRunAt      sql.NullTime   `db:"last_run_at"`
-	NextRunAt      sql.NullTime   `db:"next_run_at"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
-}
-
-// SyncExecutionRow represents sync_executions table row.
+// SyncExecutionRow represents sync_execution table row.
 type SyncExecutionRow struct {
 	ID             string         `db:"id"`
-	SyncJobID      string         `db:"sync_job_id"`
+	SyncPlanID     string         `db:"sync_plan_id"`
 	WorkflowInstID string         `db:"workflow_inst_id"`
 	Status         string         `db:"status"`
 	StartedAt      time.Time      `db:"started_at"`
 	FinishedAt     sql.NullTime   `db:"finished_at"`
 	RecordCount    int64          `db:"record_count"`
 	ErrorMessage   sql.NullString `db:"error_message"`
+	ExecuteParams  string         `db:"execute_params"`
+	SyncedAPIs     string         `db:"synced_apis"`
+	SkippedAPIs    string         `db:"skipped_apis"`
+}
+
+// SyncPlanRow represents sync_plan table row.
+type SyncPlanRow struct {
+	ID             string         `db:"id"`
+	Name           string         `db:"name"`
+	Description    string         `db:"description"`
+	DataSourceID   string         `db:"data_source_id"`
+	DataStoreID    sql.NullString `db:"data_store_id"`
+	SelectedAPIs   string         `db:"selected_apis"`
+	ResolvedAPIs   string         `db:"resolved_apis"`
+	ExecutionGraph string         `db:"execution_graph"`
+	CronExpression sql.NullString `db:"cron_expression"`
+	Status         string         `db:"status"`
+	LastExecutedAt sql.NullTime   `db:"last_executed_at"`
+	NextExecuteAt  sql.NullTime   `db:"next_execute_at"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+}
+
+// SyncTaskRow represents sync_task table row.
+type SyncTaskRow struct {
+	ID            string         `db:"id"`
+	SyncPlanID    string         `db:"sync_plan_id"`
+	APIName       string         `db:"api_name"`
+	SyncMode      string         `db:"sync_mode"`
+	Params        string         `db:"params"`
+	ParamMappings string         `db:"param_mappings"`
+	Dependencies  string         `db:"dependencies"`
+	Level         int            `db:"level"`
+	SortOrder     int            `db:"sort_order"`
+	SyncFrequency int64          `db:"sync_frequency"`
+	LastSyncedAt  sql.NullTime   `db:"last_synced_at"`
+	CreatedAt     time.Time      `db:"created_at"`
 }
 
 // ==================== Workflow Domain Models ====================

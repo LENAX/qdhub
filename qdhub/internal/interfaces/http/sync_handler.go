@@ -5,7 +5,6 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/sync"
 )
 
 // SyncHandler handles sync-related HTTP requests.
@@ -22,20 +21,21 @@ func NewSyncHandler(syncSvc contracts.SyncApplicationService) *SyncHandler {
 
 // RegisterRoutes registers sync routes to the router group.
 func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
-	// Sync Job routes
-	rg.POST("/sync-jobs", h.CreateSyncJob)
-	rg.GET("/sync-jobs", h.ListSyncJobs)
-	rg.GET("/sync-jobs/:id", h.GetSyncJob)
-	rg.PUT("/sync-jobs/:id", h.UpdateSyncJob)
-	rg.DELETE("/sync-jobs/:id", h.DeleteSyncJob)
+	// Sync Plan routes
+	rg.POST("/sync-plans", h.CreateSyncPlan)
+	rg.GET("/sync-plans", h.ListSyncPlans)
+	rg.GET("/sync-plans/:id", h.GetSyncPlan)
+	rg.PUT("/sync-plans/:id", h.UpdateSyncPlan)
+	rg.DELETE("/sync-plans/:id", h.DeleteSyncPlan)
 
-	// Job control
-	rg.POST("/sync-jobs/:id/trigger", h.TriggerSyncJob)
-	rg.POST("/sync-jobs/:id/enable", h.EnableJob)
-	rg.POST("/sync-jobs/:id/disable", h.DisableJob)
+	// Plan control
+	rg.POST("/sync-plans/:id/resolve", h.ResolveSyncPlan)
+	rg.POST("/sync-plans/:id/trigger", h.TriggerSyncPlan)
+	rg.POST("/sync-plans/:id/enable", h.EnablePlan)
+	rg.POST("/sync-plans/:id/disable", h.DisablePlan)
 
 	// Execution management
-	rg.GET("/sync-jobs/:id/executions", h.ListExecutions)
+	rg.GET("/sync-plans/:id/executions", h.ListExecutions)
 	rg.GET("/executions/:id", h.GetExecution)
 	rg.POST("/executions/:id/cancel", h.CancelExecution)
 
@@ -43,125 +43,115 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/sync/callback", h.HandleCallback)
 }
 
-// ==================== Sync Job Endpoints ====================
+// ==================== Sync Plan Endpoints ====================
 
-// CreateSyncJob handles POST /api/v1/sync-jobs
-// @Summary      Create a new sync job
-// @Description  Create a sync job to synchronize data from an API to a data store
-// @Tags         SyncJobs
+// CreateSyncPlan handles POST /api/v1/sync-plans
+// @Summary      Create a new sync plan
+// @Description  Create a sync plan to synchronize data from APIs to a data store
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        request  body      CreateSyncJobReq  true  "Sync job details"
+// @Param        request  body      CreateSyncPlanReq  true  "Sync plan details"
 // @Success      201      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      500      {object}  Response
-// @Router       /sync-jobs [post]
-func (h *SyncHandler) CreateSyncJob(c *gin.Context) {
-	var req CreateSyncJobReq
+// @Router       /sync-plans [post]
+func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
+	var req CreateSyncPlanReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "invalid request body: "+err.Error())
 		return
 	}
 
-	job, err := h.syncSvc.CreateSyncJob(c.Request.Context(), contracts.CreateSyncJobRequest{
+	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
 		Name:           req.Name,
 		Description:    req.Description,
-		APIMetadataID:  shared.ID(req.APIMetadataID),
+		DataSourceID:   shared.ID(req.DataSourceID),
 		DataStoreID:    shared.ID(req.DataStoreID),
-		WorkflowDefID:  shared.ID(req.WorkflowDefID),
-		Mode:           sync.SyncMode(req.Mode),
+		SelectedAPIs:   req.SelectedAPIs,
 		CronExpression: req.CronExpression,
-		Params:         req.Params,
-		ParamRules:     convertParamRules(req.ParamRules),
 	})
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-	Created(c, job)
+	Created(c, plan)
 }
 
-// ListSyncJobs handles GET /api/v1/sync-jobs
-// @Summary      List all sync jobs
-// @Description  Get a list of all sync jobs
-// @Tags         SyncJobs
+// ListSyncPlans handles GET /api/v1/sync-plans
+// @Summary      List all sync plans
+// @Description  Get a list of all sync plans
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs [get]
-func (h *SyncHandler) ListSyncJobs(c *gin.Context) {
-	jobs, err := h.syncSvc.ListSyncJobs(c.Request.Context())
+// @Router       /sync-plans [get]
+func (h *SyncHandler) ListSyncPlans(c *gin.Context) {
+	plans, err := h.syncSvc.ListSyncPlans(c.Request.Context())
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-	Success(c, jobs)
+	Success(c, plans)
 }
 
-// GetSyncJob handles GET /api/v1/sync-jobs/:id
-// @Summary      Get a sync job
-// @Description  Get details of a specific sync job by ID
-// @Tags         SyncJobs
+// GetSyncPlan handles GET /api/v1/sync-plans/:id
+// @Summary      Get a sync plan
+// @Description  Get details of a specific sync plan by ID
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id} [get]
-func (h *SyncHandler) GetSyncJob(c *gin.Context) {
+// @Router       /sync-plans/{id} [get]
+func (h *SyncHandler) GetSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	job, err := h.syncSvc.GetSyncJob(c.Request.Context(), id)
+	plan, err := h.syncSvc.GetSyncPlan(c.Request.Context(), id)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-	Success(c, job)
+	Success(c, plan)
 }
 
-// UpdateSyncJob handles PUT /api/v1/sync-jobs/:id
-// @Summary      Update a sync job
-// @Description  Update details of a specific sync job
-// @Tags         SyncJobs
+// UpdateSyncPlan handles PUT /api/v1/sync-plans/:id
+// @Summary      Update a sync plan
+// @Description  Update details of a specific sync plan
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string            true  "Sync job ID"
-// @Param        request  body      UpdateSyncJobReq  true  "Updated sync job details"
+// @Param        id       path      string            true  "Sync plan ID"
+// @Param        request  body      UpdateSyncPlanReq  true  "Updated sync plan details"
 // @Success      200      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
-// @Router       /sync-jobs/{id} [put]
-func (h *SyncHandler) UpdateSyncJob(c *gin.Context) {
+// @Router       /sync-plans/{id} [put]
+func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	var req UpdateSyncJobReq
+	var req UpdateSyncPlanReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "invalid request body: "+err.Error())
 		return
 	}
 
-	var mode *sync.SyncMode
-	if req.Mode != nil {
-		m := sync.SyncMode(*req.Mode)
-		mode = &m
+	var dataStoreID *shared.ID
+	if req.DataStoreID != nil {
+		id := shared.ID(*req.DataStoreID)
+		dataStoreID = &id
 	}
 
-	var paramRules *[]sync.ParamRule
-	if req.ParamRules != nil {
-		rules := convertParamRules(*req.ParamRules)
-		paramRules = &rules
-	}
-
-	err := h.syncSvc.UpdateSyncJob(c.Request.Context(), id, contracts.UpdateSyncJobRequest{
+	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
 		Name:           req.Name,
 		Description:    req.Description,
-		Mode:           mode,
+		DataStoreID:    dataStoreID,
+		SelectedAPIs:   req.SelectedAPIs,
 		CronExpression: req.CronExpression,
-		Params:         req.Params,
-		ParamRules:     paramRules,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -170,21 +160,21 @@ func (h *SyncHandler) UpdateSyncJob(c *gin.Context) {
 	Success(c, nil)
 }
 
-// DeleteSyncJob handles DELETE /api/v1/sync-jobs/:id
-// @Summary      Delete a sync job
-// @Description  Delete a specific sync job
-// @Tags         SyncJobs
+// DeleteSyncPlan handles DELETE /api/v1/sync-plans/:id
+// @Summary      Delete a sync plan
+// @Description  Delete a specific sync plan
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      204  {object}  nil
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id} [delete]
-func (h *SyncHandler) DeleteSyncJob(c *gin.Context) {
+// @Router       /sync-plans/{id} [delete]
+func (h *SyncHandler) DeleteSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	err := h.syncSvc.DeleteSyncJob(c.Request.Context(), id)
+	err := h.syncSvc.DeleteSyncPlan(c.Request.Context(), id)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -192,23 +182,58 @@ func (h *SyncHandler) DeleteSyncJob(c *gin.Context) {
 	NoContent(c)
 }
 
-// ==================== Job Control Endpoints ====================
+// ==================== Plan Control Endpoints ====================
 
-// TriggerSyncJob handles POST /api/v1/sync-jobs/:id/trigger
-// @Summary      Trigger a sync job
-// @Description  Manually trigger execution of a sync job
-// @Tags         SyncJobs
+// ResolveSyncPlan handles POST /api/v1/sync-plans/:id/resolve
+// @Summary      Resolve sync plan dependencies
+// @Description  Resolve API dependencies for a sync plan
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id}/trigger [post]
-func (h *SyncHandler) TriggerSyncJob(c *gin.Context) {
+// @Router       /sync-plans/{id}/resolve [post]
+func (h *SyncHandler) ResolveSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	executionID, err := h.syncSvc.ExecuteSyncJob(c.Request.Context(), id)
+	err := h.syncSvc.ResolveSyncPlan(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"status": "resolved"})
+}
+
+// TriggerSyncPlan handles POST /api/v1/sync-plans/:id/trigger
+// @Summary      Trigger a sync plan
+// @Description  Manually trigger execution of a sync plan
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string            true  "Sync plan ID"
+// @Param        request  body      TriggerSyncPlanReq  true  "Execution parameters"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-plans/{id}/trigger [post]
+func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	var req TriggerSyncPlanReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	executionID, err := h.syncSvc.ExecuteSyncPlan(c.Request.Context(), id, contracts.ExecuteSyncPlanRequest{
+		TargetDBPath: req.TargetDBPath,
+		StartDate:    req.StartDate,
+		EndDate:      req.EndDate,
+		StartTime:    req.StartTime,
+		EndTime:      req.EndTime,
+	})
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -219,21 +244,21 @@ func (h *SyncHandler) TriggerSyncJob(c *gin.Context) {
 	})
 }
 
-// EnableJob handles POST /api/v1/sync-jobs/:id/enable
-// @Summary      Enable a sync job
-// @Description  Enable a sync job for scheduled execution
-// @Tags         SyncJobs
+// EnablePlan handles POST /api/v1/sync-plans/:id/enable
+// @Summary      Enable a sync plan
+// @Description  Enable a sync plan for scheduled execution
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id}/enable [post]
-func (h *SyncHandler) EnableJob(c *gin.Context) {
+// @Router       /sync-plans/{id}/enable [post]
+func (h *SyncHandler) EnablePlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	err := h.syncSvc.EnableJob(c.Request.Context(), id)
+	err := h.syncSvc.EnablePlan(c.Request.Context(), id)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -241,21 +266,21 @@ func (h *SyncHandler) EnableJob(c *gin.Context) {
 	Success(c, gin.H{"status": "enabled"})
 }
 
-// DisableJob handles POST /api/v1/sync-jobs/:id/disable
-// @Summary      Disable a sync job
-// @Description  Disable a sync job to stop scheduled execution
-// @Tags         SyncJobs
+// DisablePlan handles POST /api/v1/sync-plans/:id/disable
+// @Summary      Disable a sync plan
+// @Description  Disable a sync plan to stop scheduled execution
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id}/disable [post]
-func (h *SyncHandler) DisableJob(c *gin.Context) {
+// @Router       /sync-plans/{id}/disable [post]
+func (h *SyncHandler) DisablePlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	err := h.syncSvc.DisableJob(c.Request.Context(), id)
+	err := h.syncSvc.DisablePlan(c.Request.Context(), id)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -265,21 +290,21 @@ func (h *SyncHandler) DisableJob(c *gin.Context) {
 
 // ==================== Execution Endpoints ====================
 
-// ListExecutions handles GET /api/v1/sync-jobs/:id/executions
+// ListExecutions handles GET /api/v1/sync-plans/:id/executions
 // @Summary      List sync executions
-// @Description  Get a list of all executions for a sync job
-// @Tags         SyncJobs
+// @Description  Get a list of all executions for a sync plan
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "Sync job ID"
+// @Param        id   path      string  true  "Sync plan ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /sync-jobs/{id}/executions [get]
+// @Router       /sync-plans/{id}/executions [get]
 func (h *SyncHandler) ListExecutions(c *gin.Context) {
-	jobID := shared.ID(c.Param("id"))
+	planID := shared.ID(c.Param("id"))
 
-	executions, err := h.syncSvc.ListSyncExecutions(c.Request.Context(), jobID)
+	executions, err := h.syncSvc.ListPlanExecutions(c.Request.Context(), planID)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -290,7 +315,7 @@ func (h *SyncHandler) ListExecutions(c *gin.Context) {
 // GetExecution handles GET /api/v1/executions/:id
 // @Summary      Get sync execution
 // @Description  Get details of a specific sync execution
-// @Tags         SyncJobs
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "Execution ID"
@@ -312,7 +337,7 @@ func (h *SyncHandler) GetExecution(c *gin.Context) {
 // CancelExecution handles POST /api/v1/executions/:id/cancel
 // @Summary      Cancel sync execution
 // @Description  Cancel a running sync execution
-// @Tags         SyncJobs
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "Execution ID"
@@ -336,7 +361,7 @@ func (h *SyncHandler) CancelExecution(c *gin.Context) {
 // HandleCallback handles POST /api/v1/sync/callback
 // @Summary      Handle execution callback
 // @Description  Handle callback from workflow engine for sync execution (internal use)
-// @Tags         SyncJobs
+// @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Param        request  body      ExecutionCallbackReq true  "Execution callback details"
@@ -366,34 +391,32 @@ func (h *SyncHandler) HandleCallback(c *gin.Context) {
 
 // ==================== Request DTOs ====================
 
-// CreateSyncJobReq represents the request body for creating a sync job.
-type CreateSyncJobReq struct {
-	Name           string                 `json:"name" binding:"required"`
-	Description    string                 `json:"description"`
-	APIMetadataID  string                 `json:"api_metadata_id" binding:"required"`
-	DataStoreID    string                 `json:"data_store_id" binding:"required"`
-	WorkflowDefID  string                 `json:"workflow_def_id" binding:"required"`
-	Mode           string                 `json:"mode" binding:"required"` // full, incremental
-	CronExpression *string                `json:"cron_expression"`
-	Params         map[string]interface{} `json:"params"`
-	ParamRules     []ParamRuleReq         `json:"param_rules"`
+// CreateSyncPlanReq represents the request body for creating a sync plan.
+type CreateSyncPlanReq struct {
+	Name           string   `json:"name" binding:"required"`
+	Description    string   `json:"description"`
+	DataSourceID   string   `json:"data_source_id" binding:"required"`
+	DataStoreID    string   `json:"data_store_id"`
+	SelectedAPIs   []string `json:"selected_apis" binding:"required"`
+	CronExpression *string  `json:"cron_expression"`
 }
 
-// UpdateSyncJobReq represents the request body for updating a sync job.
-type UpdateSyncJobReq struct {
-	Name           *string                 `json:"name"`
-	Description    *string                 `json:"description"`
-	Mode           *string                 `json:"mode"`
-	CronExpression *string                 `json:"cron_expression"`
-	Params         *map[string]interface{} `json:"params"`
-	ParamRules     *[]ParamRuleReq         `json:"param_rules"`
+// UpdateSyncPlanReq represents the request body for updating a sync plan.
+type UpdateSyncPlanReq struct {
+	Name           *string   `json:"name"`
+	Description    *string   `json:"description"`
+	DataStoreID    *string   `json:"data_store_id"`
+	SelectedAPIs   *[]string `json:"selected_apis"`
+	CronExpression *string   `json:"cron_expression"`
 }
 
-// ParamRuleReq represents a parameter generation rule in request.
-type ParamRuleReq struct {
-	ParamName  string      `json:"param_name"`
-	RuleType   string      `json:"rule_type"` // date_range, list, fixed
-	RuleConfig interface{} `json:"rule_config"`
+// TriggerSyncPlanReq represents the request body for triggering a sync plan.
+type TriggerSyncPlanReq struct {
+	TargetDBPath string `json:"target_db_path" binding:"required"`
+	StartDate    string `json:"start_date" binding:"required"`
+	EndDate      string `json:"end_date" binding:"required"`
+	StartTime    string `json:"start_time"`
+	EndTime      string `json:"end_time"`
 }
 
 // ExecutionCallbackReq represents the request body for execution callback.
@@ -402,17 +425,4 @@ type ExecutionCallbackReq struct {
 	Success      bool    `json:"success"`
 	RecordCount  int64   `json:"record_count"`
 	ErrorMessage *string `json:"error_message"`
-}
-
-// convertParamRules converts request param rules to domain param rules.
-func convertParamRules(reqRules []ParamRuleReq) []sync.ParamRule {
-	rules := make([]sync.ParamRule, len(reqRules))
-	for i, r := range reqRules {
-		rules[i] = sync.ParamRule{
-			ParamName:  r.ParamName,
-			RuleType:   r.RuleType,
-			RuleConfig: r.RuleConfig,
-		}
-	}
-	return rules
 }

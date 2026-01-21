@@ -93,6 +93,16 @@ type RealtimeDataSyncRequest struct {
 	CronExpr        string   // Cron 表达式（可选）
 }
 
+// APISyncConfig API 同步配置（用于 SyncPlan 执行）
+type APISyncConfig struct {
+	APIName      string                 // API 名称
+	SyncMode     string                 // 同步模式: direct | template
+	ParamKey     string                 // 参数键（用于上游任务传递）
+	UpstreamTask string                 // 上游任务名称
+	Dependencies []string               // 依赖的任务列表
+	ExtraParams  map[string]interface{} // 额外参数
+}
+
 // WorkflowExecutor defines the interface for executing built-in workflows.
 // This is a domain service interface that abstracts workflow execution.
 // Implementation: infrastructure/taskengine/

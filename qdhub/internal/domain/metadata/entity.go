@@ -98,20 +98,21 @@ func NewAPICategory(dataSourceID shared.ID, name, description, docPath string, p
 // APIMetadata represents an API metadata entity.
 // Belongs to: DataSource aggregate
 type APIMetadata struct {
-	ID             shared.ID
-	DataSourceID   shared.ID
-	CategoryID     *shared.ID
-	Name           string
-	DisplayName    string
-	Description    string
-	Endpoint       string
-	RequestParams  []ParamMeta
-	ResponseFields []FieldMeta
-	RateLimit      *RateLimit
-	Permission     string
-	Status         shared.Status
-	CreatedAt      shared.Timestamp
-	UpdatedAt      shared.Timestamp
+	ID                shared.ID
+	DataSourceID      shared.ID
+	CategoryID        *shared.ID
+	Name              string
+	DisplayName       string
+	Description       string
+	Endpoint          string
+	RequestParams     []ParamMeta
+	ResponseFields    []FieldMeta
+	RateLimit         *RateLimit
+	Permission        string
+	Status            shared.Status
+	CreatedAt         shared.Timestamp
+	UpdatedAt         shared.Timestamp
+	ParamDependencies []ParamDependency // 参数依赖规则（用于自动解析 API 依赖）
 }
 
 // NewAPIMetadata creates a new APIMetadata.
@@ -204,6 +205,41 @@ func (api *APIMetadata) UnmarshalRateLimitJSON(jsonStr string) error {
 	return nil
 }
 
+// MarshalParamDependenciesJSON marshals param dependencies to JSON string.
+func (api *APIMetadata) MarshalParamDependenciesJSON() (string, error) {
+	if len(api.ParamDependencies) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(api.ParamDependencies)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// UnmarshalParamDependenciesJSON unmarshals param dependencies from JSON string.
+func (api *APIMetadata) UnmarshalParamDependenciesJSON(jsonStr string) error {
+	if jsonStr == "" {
+		api.ParamDependencies = nil
+		return nil
+	}
+	return json.Unmarshal([]byte(jsonStr), &api.ParamDependencies)
+}
+
+// GetSourceAPIs returns all source APIs from param dependencies.
+// Used by DependencyResolver to build dependency graph.
+func (api *APIMetadata) GetSourceAPIs() []string {
+	seen := make(map[string]bool)
+	var sources []string
+	for _, dep := range api.ParamDependencies {
+		if dep.SourceAPI != "" && !seen[dep.SourceAPI] {
+			seen[dep.SourceAPI] = true
+			sources = append(sources, dep.SourceAPI)
+		}
+	}
+	return sources
+}
+
 // Token represents a token entity.
 // Belongs to: DataSource aggregate
 type Token struct {
@@ -257,6 +293,18 @@ type FieldMeta struct {
 type RateLimit struct {
 	RequestsPerMinute int `json:"requests_per_minute"`
 	PointsRequired    int `json:"points_required"`
+}
+
+// ParamDependency 参数依赖规则（值对象）
+// 定义 API 参数从哪个上游 API 的字段获取值
+// 用于 DependencyResolver 自动解析 API 之间的依赖关系
+type ParamDependency struct {
+	ParamName   string `json:"param_name"`             // 参数名，如 "ts_code"
+	SourceAPI   string `json:"source_api"`             // 来源 API，如 "stock_basic"
+	SourceField string `json:"source_field"`           // 来源字段，如 "ts_code"
+	IsList      bool   `json:"is_list"`                // 是否是列表（需要拆分子任务）
+	FilterField string `json:"filter_field,omitempty"` // 过滤字段（可选），如 "is_open"
+	FilterValue any    `json:"filter_value,omitempty"` // 过滤值（可选），如 1
 }
 
 // ==================== 枚举类型 ====================

@@ -41,7 +41,7 @@ type Container struct {
 	DataSourceRepo  metadata.DataSourceRepository
 	DataStoreRepo   datastore.QuantDataStoreRepository
 	MappingRuleRepo datastore.DataTypeMappingRuleRepository
-	SyncJobRepo     sync.SyncJobRepository
+	SyncPlanRepo    sync.SyncPlanRepository
 	WorkflowRepo    workflow.WorkflowDefinitionRepository
 	MetadataRepo    metadata.Repository
 
@@ -54,7 +54,10 @@ type Container struct {
 
 	// Scheduler
 	CronCalculator sync.CronScheduleCalculator
-	JobScheduler   sync.JobScheduler
+	PlanScheduler  sync.PlanScheduler
+
+	// Domain Services
+	DependencyResolver sync.DependencyResolver
 
 	// Application Services
 	MetadataSvc  contracts.MetadataApplicationService
@@ -201,7 +204,7 @@ func (c *Container) initRepositories() error {
 	c.DataSourceRepo = repository.NewDataSourceRepository(c.DB)
 	c.DataStoreRepo = repository.NewQuantDataStoreRepository(c.DB)
 	c.MappingRuleRepo = repository.NewDataTypeMappingRuleRepository(c.DB)
-	c.SyncJobRepo = repository.NewSyncJobRepository(c.DB)
+	c.SyncPlanRepo = repository.NewSyncPlanRepository(c.DB)
 
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(c.DB)
 	if err != nil {
@@ -276,8 +279,11 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 // initScheduler initializes the scheduler.
 func (c *Container) initScheduler() error {
 	c.CronCalculator = scheduler.NewCronSchedulerCalculatorAdapter()
-	c.JobScheduler = scheduler.NewCronScheduler(nil) // TODO: Add job trigger callback
-	c.JobScheduler.Start()
+	c.PlanScheduler = scheduler.NewCronScheduler(nil) // TODO: Add plan trigger callback
+	c.PlanScheduler.Start()
+
+	// Initialize dependency resolver
+	c.DependencyResolver = sync.NewDependencyResolver()
 
 	logrus.Info("Scheduler initialized")
 	return nil
@@ -304,16 +310,14 @@ func (c *Container) initApplicationServices() error {
 	)
 
 	// Sync service
-	// 注意：SyncSvc 现在需要额外的 DataSourceRepo 和 WorkflowExecutor 用于
-	// SyncDataSource 和 SyncDataSourceRealtime 方法
+	// 使用 SyncPlan 模型
 	c.SyncSvc = impl.NewSyncApplicationService(
-		c.SyncJobRepo,
-		c.WorkflowRepo,
-		c.TaskEngineAdapter,
+		c.SyncPlanRepo,
 		c.CronCalculator,
-		c.JobScheduler,
-		c.DataSourceRepo,   // 新增：用于校验数据源和获取 token
-		c.WorkflowExecutor, // 新增：用于执行内建 workflow
+		c.PlanScheduler,
+		c.DataSourceRepo,
+		c.WorkflowExecutor,
+		c.DependencyResolver,
 	)
 
 	logrus.Info("Application services initialized")
@@ -370,8 +374,8 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}
 
 	// Shutdown scheduler
-	if c.JobScheduler != nil {
-		stopCtx := c.JobScheduler.Stop()
+	if c.PlanScheduler != nil {
+		stopCtx := c.PlanScheduler.Stop()
 		// Wait for scheduler to stop or context timeout
 		select {
 		case <-stopCtx.Done():
