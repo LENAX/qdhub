@@ -203,10 +203,10 @@ func newMockTushareAdapter() *mockTushareAdapter {
 	}
 }
 
-func (a *mockTushareAdapter) Name() string                         { return "tushare" }
-func (a *mockTushareAdapter) Client() datasource.APIClient         { return a.client }
-func (a *mockTushareAdapter) Crawler() datasource.Crawler          { return a.crawler }
-func (a *mockTushareAdapter) Parser() datasource.DocumentParser    { return a.parser }
+func (a *mockTushareAdapter) Name() string                      { return "tushare" }
+func (a *mockTushareAdapter) Client() datasource.APIClient      { return a.client }
+func (a *mockTushareAdapter) Crawler() datasource.Crawler       { return a.crawler }
+func (a *mockTushareAdapter) Parser() datasource.DocumentParser { return a.parser }
 
 // ==================== Mock QuantDB Adapter ====================
 
@@ -558,13 +558,44 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 	t.Run("Step5_CreateAndExecuteSyncPlan", func(t *testing.T) {
 		t.Log("----- Step 5: 使用 SyncPlan 执行批量数据同步 -----")
 
-		// 5.1 创建 SyncPlan
+		// 5.1 创建 SyncPlan（测试 20+ 个 API）
 		t.Log("  5.1 创建 SyncPlan...")
+		// 选择 20+ 个常用 API 进行测试
+		selectedAPIs := []string{
+			// 基础数据
+			"stock_basic",    // 股票基础信息
+			"trade_cal",      // 交易日历
+			"namechange",     // 股票曾用名
+			"hs_const",       // 沪深股通成分股
+			"stk_limit",      // 涨跌停价格
+			// 行情数据
+			"daily",          // 日线行情
+			"weekly",         // 周线行情
+			"monthly",        // 月线行情
+			"daily_basic",    // 每日指标
+			"adj_factor",     // 复权因子
+			// 财务数据
+			"income",         // 利润表
+			"balancesheet",   // 资产负债表
+			"cashflow",       // 现金流量表
+			"fina_indicator", // 财务指标
+			"fina_mainbz",    // 主营业务构成
+			// 市场参考
+			"top_list",       // 龙虎榜每日明细
+			"top_inst",       // 龙虎榜机构交易明细
+			"margin",         // 融资融券交易汇总
+			"margin_detail",  // 融资融券交易明细
+			"block_trade",    // 大宗交易
+			// 指数数据
+			"index_basic",    // 指数基本信息
+			"index_daily",    // 指数日线行情
+			"index_weight",   // 指数成份和权重
+		}
 		createReq := contracts.CreateSyncPlanRequest{
-			Name:         "E2E Test Sync Plan",
-			Description:  "E2E 测试同步计划",
+			Name:         "E2E Test Sync Plan (20+ APIs)",
+			Description:  "E2E 测试同步计划 - 测试 20+ 个 API",
 			DataSourceID: dataSourceID,
-			SelectedAPIs: []string{"stock_basic", "daily"},
+			SelectedAPIs: selectedAPIs,
 		}
 
 		plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, createReq)
@@ -732,15 +763,18 @@ func TestE2E_BuiltinWorkflow_BatchDataSyncOnly(t *testing.T) {
 	tmpDBFile.Close()
 	defer os.Remove(tmpDBFile.Name())
 
-	// 执行批量同步
+	// 执行批量同步（测试多个 API）
 	req := workflow.BatchDataSyncRequest{
 		DataSourceName: "tushare",
 		Token:          "test-token",
 		TargetDBPath:   tmpDBFile.Name(),
 		StartDate:      "20251201",
 		EndDate:        "20251215",
-		APINames:       []string{"stock_basic"},
-		MaxStocks:      5,
+		APINames: []string{
+			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
+			"adj_factor", "daily_basic", "income", "balancesheet", "cashflow",
+		},
+		MaxStocks: 5,
 	}
 
 	instanceID, err := testCtx.workflowExecutor.ExecuteBatchDataSync(ctx, req)
@@ -772,14 +806,16 @@ func TestE2E_BuiltinWorkflow_RealtimeDataSyncOnly(t *testing.T) {
 	tmpDBFile.Close()
 	defer os.Remove(tmpDBFile.Name())
 
-	// 执行实时同步
+	// 执行实时同步（测试多个 API）
 	req := workflow.RealtimeDataSyncRequest{
 		DataSourceName:  "tushare",
 		Token:           "test-token",
 		TargetDBPath:    tmpDBFile.Name(),
 		CheckpointTable: "sync_checkpoint",
-		APINames:        []string{"daily"},
-		MaxStocks:       3,
+		APINames: []string{
+			"daily", "daily_basic", "adj_factor", "weekly", "monthly",
+		},
+		MaxStocks: 3,
 	}
 
 	instanceID, err := testCtx.workflowExecutor.ExecuteRealtimeDataSync(ctx, req)
@@ -805,7 +841,7 @@ func TestE2E_BuiltinWorkflow_VerifyWorkflowRegistration(t *testing.T) {
 
 	// 验证所有内建 Workflows 都已正确注册
 	builtInWorkflows := workflows.GetBuiltInWorkflows()
-	
+
 	for _, meta := range builtInWorkflows {
 		t.Run(meta.APIName, func(t *testing.T) {
 			// 通过 ID 查找
@@ -845,13 +881,20 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 	err = testCtx.dataSourceRepo.SetToken(token)
 	require.NoError(t, err)
 
-	// 1. 创建 SyncPlan
+	// 1. 创建 SyncPlan（测试更多 API）
 	t.Run("Step1_CreateSyncPlan", func(t *testing.T) {
+		// 选择多种类型的 API 进行测试
+		selectedAPIs := []string{
+			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
+			"daily_basic", "adj_factor", "income", "balancesheet", "cashflow",
+			"index_basic", "index_daily", "top_list", "margin", "block_trade",
+			"fina_indicator", "namechange", "hs_const", "stk_limit", "margin_detail",
+		}
 		req := contracts.CreateSyncPlanRequest{
-			Name:         "Test Sync Plan",
-			Description:  "测试同步计划",
+			Name:         "Test Sync Plan (20 APIs)",
+			Description:  "测试同步计划 - 20 个 API",
 			DataSourceID: ds.ID,
-			SelectedAPIs: []string{"stock_basic", "daily"},
+			SelectedAPIs: selectedAPIs,
 		}
 
 		plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
@@ -977,11 +1020,23 @@ func TestE2E_SyncPlan_DependencyResolution(t *testing.T) {
 	err := testCtx.dataSourceRepo.Create(ds)
 	require.NoError(t, err)
 
-	// 创建 SyncPlan，选择有依赖关系的 API
+	// 创建 SyncPlan，选择有复杂依赖关系的 API
+	// 这些 API 可能依赖 stock_basic, trade_cal 等基础数据
 	req := contracts.CreateSyncPlanRequest{
-		Name:         "Dependency Test Plan",
+		Name:         "Dependency Test Plan (Complex)",
 		DataSourceID: ds.ID,
-		SelectedAPIs: []string{"daily"}, // daily 依赖 stock_basic
+		SelectedAPIs: []string{
+			"daily",         // 依赖 stock_basic, trade_cal
+			"weekly",        // 依赖 stock_basic
+			"adj_factor",    // 依赖 stock_basic
+			"daily_basic",   // 依赖 stock_basic, trade_cal
+			"income",        // 依赖 stock_basic
+			"balancesheet",  // 依赖 stock_basic
+			"cashflow",      // 依赖 stock_basic
+			"margin",        // 依赖 trade_cal
+			"margin_detail", // 依赖 trade_cal, stock_basic
+			"block_trade",   // 依赖 trade_cal
+		},
 	}
 
 	plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
@@ -998,11 +1053,11 @@ func TestE2E_SyncPlan_DependencyResolution(t *testing.T) {
 	// 验证依赖解析结果
 	assert.Equal(t, sync.PlanStatusResolved, plan.Status)
 	assert.NotNil(t, plan.ExecutionGraph)
-	
+
 	t.Logf("SelectedAPIs: %v", plan.SelectedAPIs)
 	t.Logf("ResolvedAPIs: %v", plan.ResolvedAPIs)
 	t.Logf("ExecutionGraph Levels: %d", len(plan.ExecutionGraph.Levels))
-	
+
 	for i, level := range plan.ExecutionGraph.Levels {
 		t.Logf("  Level %d: %v", i, level)
 	}
@@ -1026,12 +1081,17 @@ func TestE2E_SyncPlan_WithCronSchedule(t *testing.T) {
 	err := testCtx.dataSourceRepo.Create(ds)
 	require.NoError(t, err)
 
-	// 创建带 Cron 的 SyncPlan
+	// 创建带 Cron 的 SyncPlan（测试更多 API）
 	cronExpr := "0 0 9 * * *" // 每天 9 点
 	req := contracts.CreateSyncPlanRequest{
-		Name:           "Scheduled Sync Plan",
-		DataSourceID:   ds.ID,
-		SelectedAPIs:   []string{"stock_basic"},
+		Name:         "Scheduled Sync Plan (20 APIs)",
+		DataSourceID: ds.ID,
+		SelectedAPIs: []string{
+			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
+			"daily_basic", "adj_factor", "income", "balancesheet", "cashflow",
+			"index_basic", "index_daily", "top_list", "margin", "block_trade",
+			"fina_indicator", "namechange", "hs_const", "stk_limit", "margin_detail",
+		},
 		CronExpression: &cronExpr,
 	}
 
