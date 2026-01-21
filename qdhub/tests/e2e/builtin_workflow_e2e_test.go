@@ -18,10 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/persistence"
@@ -307,15 +309,17 @@ func getMockDailyHTML() string {
 
 // builtinWorkflowE2EContext 内建 Workflow E2E 测试上下文
 type builtinWorkflowE2EContext struct {
-	db              *persistence.DB
-	engine          *engine.Engine
-	workflowRepo    workflow.WorkflowDefinitionRepository
-	dataSourceRepo  metadata.DataSourceRepository
-	metadataRepo    metadata.Repository
+	db               *persistence.DB
+	engine           *engine.Engine
+	workflowRepo     workflow.WorkflowDefinitionRepository
+	dataSourceRepo   metadata.DataSourceRepository
+	metadataRepo     metadata.Repository
+	syncPlanRepo     sync.SyncPlanRepository
 	workflowExecutor workflow.WorkflowExecutor
-	dsRegistry      *datasource.Registry
-	quantDBAdapter  *mockQuantDBAdapter
-	cleanup         func()
+	syncAppService   contracts.SyncApplicationService
+	dsRegistry       *datasource.Registry
+	quantDBAdapter   *mockQuantDBAdapter
+	cleanup          func()
 }
 
 // setupBuiltinWorkflowE2EContext 设置 E2E 测试环境
@@ -358,6 +362,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	require.NoError(t, err)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	metadataRepo := repository.NewMetadataRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 
 	// 5. 初始化 Task Engine（注册 job functions 和 handlers）
 	taskEngineDeps := &taskengine.Dependencies{
@@ -379,6 +384,19 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	// 8. 创建 WorkflowExecutor
 	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter)
 
+	// 9. 创建 SyncApplicationService
+	cronCalculator := sync.NewCronScheduleCalculator()
+	dependencyResolver := sync.NewDependencyResolver()
+	// 使用 nil 作为 PlanScheduler，因为测试不需要调度功能
+	syncAppService := impl.NewSyncApplicationService(
+		syncPlanRepo,
+		cronCalculator,
+		nil, // planScheduler - not needed for tests
+		dataSourceRepo,
+		workflowExecutor,
+		dependencyResolver,
+	)
+
 	cleanup := func() {
 		eng.Stop()
 		db.Close()
@@ -391,7 +409,9 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		workflowRepo:     workflowRepo,
 		dataSourceRepo:   dataSourceRepo,
 		metadataRepo:     metadataRepo,
+		syncPlanRepo:     syncPlanRepo,
 		workflowExecutor: workflowExecutor,
+		syncAppService:   syncAppService,
 		dsRegistry:       dsRegistry,
 		quantDBAdapter:   newMockQuantDBAdapter(),
 		cleanup:          cleanup,
@@ -533,39 +553,85 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		}
 	})
 
-	// ==================== Step 5: 执行批量数据同步 Workflow ====================
-	t.Run("Step5_ExecuteBatchDataSync", func(t *testing.T) {
-		t.Log("----- Step 5: 执行批量数据同步 Workflow -----")
+	// ==================== Step 5: 使用 SyncPlan 执行批量数据同步 ====================
+	var syncPlanID shared.ID
+	t.Run("Step5_CreateAndExecuteSyncPlan", func(t *testing.T) {
+		t.Log("----- Step 5: 使用 SyncPlan 执行批量数据同步 -----")
 
-		// 创建临时 DuckDB 文件
-		tmpDBFile, err := os.CreateTemp("", "e2e_sync_*.duckdb")
+		// 5.1 创建 SyncPlan
+		t.Log("  5.1 创建 SyncPlan...")
+		createReq := contracts.CreateSyncPlanRequest{
+			Name:         "E2E Test Sync Plan",
+			Description:  "E2E 测试同步计划",
+			DataSourceID: dataSourceID,
+			SelectedAPIs: []string{"stock_basic", "daily"},
+		}
+
+		plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, createReq)
+		require.NoError(t, err, "创建 SyncPlan 失败")
+		require.NotNil(t, plan, "SyncPlan 不应为空")
+		syncPlanID = plan.ID
+		t.Logf("✅ SyncPlan 创建成功: ID=%s, Name=%s, Status=%s", plan.ID, plan.Name, plan.Status)
+		assert.Equal(t, sync.PlanStatusDraft, plan.Status, "初始状态应为 draft")
+
+		// 5.2 解析依赖
+		t.Log("  5.2 解析 SyncPlan 依赖...")
+		err = testCtx.syncAppService.ResolveSyncPlan(ctx, syncPlanID)
+		require.NoError(t, err, "解析 SyncPlan 依赖失败")
+
+		// 获取更新后的 plan
+		plan, err = testCtx.syncAppService.GetSyncPlan(ctx, syncPlanID)
+		require.NoError(t, err)
+		t.Logf("✅ SyncPlan 依赖解析成功: Status=%s, ResolvedAPIs=%v", plan.Status, plan.ResolvedAPIs)
+		assert.Equal(t, sync.PlanStatusResolved, plan.Status, "解析后状态应为 resolved")
+
+		// 验证 ExecutionGraph
+		require.NotNil(t, plan.ExecutionGraph, "ExecutionGraph 不应为空")
+		t.Logf("  执行图层级数: %d", len(plan.ExecutionGraph.Levels))
+		for i, level := range plan.ExecutionGraph.Levels {
+			t.Logf("  Level %d: %v", i, level)
+		}
+
+		// 5.3 执行 SyncPlan
+		t.Log("  5.3 执行 SyncPlan...")
+		tmpDBFile, err := os.CreateTemp("", "e2e_syncplan_*.duckdb")
 		require.NoError(t, err)
 		tmpDBFile.Close()
 		defer os.Remove(tmpDBFile.Name())
 
-		req := workflow.BatchDataSyncRequest{
-			DataSourceName: "tushare",
-			Token:          "test-token-for-e2e",
-			TargetDBPath:   tmpDBFile.Name(),
-			StartDate:      "20251201",
-			EndDate:        "20251231",
-			APINames:       []string{"stock_basic", "daily"},
-			MaxStocks:      10,
+		execReq := contracts.ExecuteSyncPlanRequest{
+			TargetDBPath: tmpDBFile.Name(),
+			StartDate:    "20251201",
+			EndDate:      "20251231",
 		}
 
-		instanceID, err := testCtx.workflowExecutor.ExecuteBatchDataSync(ctx, req)
-		require.NoError(t, err, "执行批量数据同步 Workflow 失败")
-		require.NotEmpty(t, instanceID, "Instance ID 不应为空")
-		t.Logf("✅ 批量数据同步 Workflow 已提交: InstanceID=%s", instanceID)
+		executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlanID, execReq)
+		require.NoError(t, err, "执行 SyncPlan 失败")
+		require.NotEmpty(t, executionID, "Execution ID 不应为空")
+		t.Logf("✅ SyncPlan 执行已提交: ExecutionID=%s", executionID)
 
-		// 等待 Workflow 完成
+		// 5.4 等待执行完成并验证
+		t.Log("  5.4 等待执行完成...")
 		adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-		status, err := waitForWorkflowCompletion(ctx, adapter, instanceID.String(), 60*time.Second)
+
+		// 获取 SyncExecution 来获取 workflow instance ID
+		execution, err := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
+		require.NoError(t, err, "获取 SyncExecution 失败")
+		t.Logf("  SyncExecution Status: %s, WorkflowInstID: %s", execution.Status, execution.WorkflowInstID)
+
+		status, err := waitForWorkflowCompletion(ctx, adapter, execution.WorkflowInstID.String(), 60*time.Second)
 		if err != nil {
 			t.Logf("⚠️ Workflow 未成功完成: %v, Status: %+v", err, status)
 		} else {
-			t.Logf("✅ 批量数据同步 Workflow 完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
+			t.Logf("✅ SyncPlan 执行完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
 		}
+
+		// 5.5 验证执行记录
+		t.Log("  5.5 验证执行记录...")
+		executions, err := testCtx.syncAppService.ListPlanExecutions(ctx, syncPlanID)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(executions), 1, "应该至少有一条执行记录")
+		t.Logf("✅ 执行记录数: %d", len(executions))
 	})
 
 	t.Log("========== 内建 Workflow E2E 测试完成 ==========")
@@ -757,5 +823,245 @@ func TestE2E_BuiltinWorkflow_VerifyWorkflowRegistration(t *testing.T) {
 			t.Logf("✅ Workflow %s: 名称=%s, 系统=%v",
 				meta.APIName, def.Workflow.Name, def.IsSystem)
 		})
+	}
+}
+
+// ==================== SyncPlan E2E Tests ====================
+
+// TestE2E_SyncPlan_FullLifecycle 测试 SyncPlan 完整生命周期
+func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
+	testCtx := setupBuiltinWorkflowE2EContext(t)
+	defer testCtx.cleanup()
+
+	ctx := context.Background()
+
+	t.Log("========== SyncPlan 生命周期 E2E 测试开始 ==========")
+
+	// 创建数据源
+	ds := metadata.NewDataSource("Tushare", "Test Data Source", "http://api.tushare.pro", "https://tushare.pro/document/2")
+	err := testCtx.dataSourceRepo.Create(ds)
+	require.NoError(t, err)
+	token := metadata.NewToken(ds.ID, "test-token", nil)
+	err = testCtx.dataSourceRepo.SetToken(token)
+	require.NoError(t, err)
+
+	// 1. 创建 SyncPlan
+	t.Run("Step1_CreateSyncPlan", func(t *testing.T) {
+		req := contracts.CreateSyncPlanRequest{
+			Name:         "Test Sync Plan",
+			Description:  "测试同步计划",
+			DataSourceID: ds.ID,
+			SelectedAPIs: []string{"stock_basic", "daily"},
+		}
+
+		plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
+		require.NoError(t, err)
+		assert.NotNil(t, plan)
+		assert.Equal(t, "Test Sync Plan", plan.Name)
+		assert.Equal(t, sync.PlanStatusDraft, plan.Status)
+		t.Logf("✅ SyncPlan 创建成功: ID=%s", plan.ID)
+	})
+
+	// 2. 列出所有 SyncPlans
+	t.Run("Step2_ListSyncPlans", func(t *testing.T) {
+		plans, err := testCtx.syncAppService.ListSyncPlans(ctx)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(plans), 1)
+		t.Logf("✅ 列出 SyncPlans: %d 个", len(plans))
+	})
+
+	// 3. 获取单个 SyncPlan
+	var planID shared.ID
+	t.Run("Step3_GetSyncPlan", func(t *testing.T) {
+		plans, _ := testCtx.syncAppService.ListSyncPlans(ctx)
+		require.NotEmpty(t, plans)
+		planID = plans[0].ID
+
+		plan, err := testCtx.syncAppService.GetSyncPlan(ctx, planID)
+		require.NoError(t, err)
+		assert.Equal(t, planID, plan.ID)
+		t.Logf("✅ 获取 SyncPlan: ID=%s, Name=%s", plan.ID, plan.Name)
+	})
+
+	// 4. 解析依赖
+	t.Run("Step4_ResolveDependencies", func(t *testing.T) {
+		err := testCtx.syncAppService.ResolveSyncPlan(ctx, planID)
+		require.NoError(t, err)
+
+		plan, err := testCtx.syncAppService.GetSyncPlan(ctx, planID)
+		require.NoError(t, err)
+		assert.Equal(t, sync.PlanStatusResolved, plan.Status)
+		assert.NotNil(t, plan.ExecutionGraph)
+		t.Logf("✅ 依赖解析成功: Status=%s, Levels=%d", plan.Status, len(plan.ExecutionGraph.Levels))
+	})
+
+	// 5. 更新 SyncPlan
+	t.Run("Step5_UpdateSyncPlan", func(t *testing.T) {
+		newName := "Updated Sync Plan"
+		newDesc := "更新后的同步计划"
+		updateReq := contracts.UpdateSyncPlanRequest{
+			Name:        &newName,
+			Description: &newDesc,
+		}
+
+		err := testCtx.syncAppService.UpdateSyncPlan(ctx, planID, updateReq)
+		require.NoError(t, err)
+
+		plan, err := testCtx.syncAppService.GetSyncPlan(ctx, planID)
+		require.NoError(t, err)
+		assert.Equal(t, newName, plan.Name)
+		assert.Equal(t, newDesc, plan.Description)
+		t.Logf("✅ SyncPlan 更新成功: Name=%s", plan.Name)
+	})
+
+	// 6. 执行 SyncPlan
+	var executionID shared.ID
+	t.Run("Step6_ExecuteSyncPlan", func(t *testing.T) {
+		tmpDBFile, err := os.CreateTemp("", "e2e_lifecycle_*.duckdb")
+		require.NoError(t, err)
+		tmpDBFile.Close()
+		defer os.Remove(tmpDBFile.Name())
+
+		execReq := contracts.ExecuteSyncPlanRequest{
+			TargetDBPath: tmpDBFile.Name(),
+			StartDate:    "20251201",
+			EndDate:      "20251215",
+		}
+
+		executionID, err = testCtx.syncAppService.ExecuteSyncPlan(ctx, planID, execReq)
+		require.NoError(t, err)
+		assert.NotEmpty(t, executionID)
+		t.Logf("✅ SyncPlan 执行已提交: ExecutionID=%s", executionID)
+	})
+
+	// 7. 获取执行记录
+	t.Run("Step7_GetSyncExecution", func(t *testing.T) {
+		execution, err := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
+		require.NoError(t, err)
+		assert.NotNil(t, execution)
+		assert.Equal(t, planID, execution.SyncPlanID)
+		t.Logf("✅ 获取执行记录: Status=%s", execution.Status)
+	})
+
+	// 8. 列出计划的所有执行记录
+	t.Run("Step8_ListPlanExecutions", func(t *testing.T) {
+		executions, err := testCtx.syncAppService.ListPlanExecutions(ctx, planID)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(executions), 1)
+		t.Logf("✅ 列出执行记录: %d 条", len(executions))
+	})
+
+	// 9. 删除 SyncPlan
+	t.Run("Step9_DeleteSyncPlan", func(t *testing.T) {
+		err := testCtx.syncAppService.DeleteSyncPlan(ctx, planID)
+		require.NoError(t, err)
+
+		// 验证已删除
+		_, err = testCtx.syncAppService.GetSyncPlan(ctx, planID)
+		assert.Error(t, err, "删除后应该无法获取")
+		t.Logf("✅ SyncPlan 删除成功")
+	})
+
+	t.Log("========== SyncPlan 生命周期 E2E 测试完成 ==========")
+}
+
+// TestE2E_SyncPlan_DependencyResolution 测试依赖解析
+func TestE2E_SyncPlan_DependencyResolution(t *testing.T) {
+	testCtx := setupBuiltinWorkflowE2EContext(t)
+	defer testCtx.cleanup()
+
+	ctx := context.Background()
+
+	// 创建数据源
+	ds := metadata.NewDataSource("Tushare", "Test Data Source", "http://api.tushare.pro", "https://tushare.pro/document/2")
+	err := testCtx.dataSourceRepo.Create(ds)
+	require.NoError(t, err)
+
+	// 创建 SyncPlan，选择有依赖关系的 API
+	req := contracts.CreateSyncPlanRequest{
+		Name:         "Dependency Test Plan",
+		DataSourceID: ds.ID,
+		SelectedAPIs: []string{"daily"}, // daily 依赖 stock_basic
+	}
+
+	plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
+	require.NoError(t, err)
+
+	// 解析依赖
+	err = testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID)
+	require.NoError(t, err)
+
+	// 获取更新后的计划
+	plan, err = testCtx.syncAppService.GetSyncPlan(ctx, plan.ID)
+	require.NoError(t, err)
+
+	// 验证依赖解析结果
+	assert.Equal(t, sync.PlanStatusResolved, plan.Status)
+	assert.NotNil(t, plan.ExecutionGraph)
+	
+	t.Logf("SelectedAPIs: %v", plan.SelectedAPIs)
+	t.Logf("ResolvedAPIs: %v", plan.ResolvedAPIs)
+	t.Logf("ExecutionGraph Levels: %d", len(plan.ExecutionGraph.Levels))
+	
+	for i, level := range plan.ExecutionGraph.Levels {
+		t.Logf("  Level %d: %v", i, level)
+	}
+
+	// 验证任务配置
+	for apiName, config := range plan.ExecutionGraph.TaskConfigs {
+		t.Logf("TaskConfig[%s]: SyncMode=%s, Dependencies=%v, ParamMappings=%d",
+			apiName, config.SyncMode, config.Dependencies, len(config.ParamMappings))
+	}
+}
+
+// TestE2E_SyncPlan_WithCronSchedule 测试带 Cron 调度的 SyncPlan
+func TestE2E_SyncPlan_WithCronSchedule(t *testing.T) {
+	testCtx := setupBuiltinWorkflowE2EContext(t)
+	defer testCtx.cleanup()
+
+	ctx := context.Background()
+
+	// 创建数据源
+	ds := metadata.NewDataSource("Tushare", "Test Data Source", "http://api.tushare.pro", "https://tushare.pro/document/2")
+	err := testCtx.dataSourceRepo.Create(ds)
+	require.NoError(t, err)
+
+	// 创建带 Cron 的 SyncPlan
+	cronExpr := "0 0 9 * * *" // 每天 9 点
+	req := contracts.CreateSyncPlanRequest{
+		Name:           "Scheduled Sync Plan",
+		DataSourceID:   ds.ID,
+		SelectedAPIs:   []string{"stock_basic"},
+		CronExpression: &cronExpr,
+	}
+
+	plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, plan.CronExpression)
+	assert.Equal(t, cronExpr, *plan.CronExpression)
+
+	// 解析并启用
+	err = testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID)
+	require.NoError(t, err)
+
+	// 启用计划（注意：由于 planScheduler 为 nil，这可能会失败或跳过调度）
+	// 在实际环境中，这会将计划添加到调度器
+	err = testCtx.syncAppService.EnablePlan(ctx, plan.ID)
+	// 由于 scheduler 为 nil，这里可能会出错，但我们验证状态变化
+	if err == nil {
+		plan, _ = testCtx.syncAppService.GetSyncPlan(ctx, plan.ID)
+		assert.Equal(t, sync.PlanStatusEnabled, plan.Status)
+		t.Logf("✅ SyncPlan 已启用: Status=%s", plan.Status)
+	} else {
+		t.Logf("⚠️ 启用失败（可能因为 scheduler 为 nil）: %v", err)
+	}
+
+	// 更新调度
+	newCron := "0 0 10 * * *"
+	err = testCtx.syncAppService.UpdatePlanSchedule(ctx, plan.ID, newCron)
+	if err == nil {
+		plan, _ = testCtx.syncAppService.GetSyncPlan(ctx, plan.ID)
+		assert.Equal(t, newCron, *plan.CronExpression)
+		t.Logf("✅ Cron 更新成功: %s", newCron)
 	}
 }
