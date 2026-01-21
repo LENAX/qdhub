@@ -1,0 +1,8 @@
+# command-line-arguments [command-line-arguments.test]
+tests/e2e/builtin_workflow_e2e_test.go:579:11: status.TotalTasks undefined (type *"qdhub/internal/domain/workflow".WorkflowStatus has no field or method TotalTasks)
+tests/e2e/builtin_workflow_e2e_test.go:579:30: status.CompletedTasks undefined (type *"qdhub/internal/domain/workflow".WorkflowStatus has no field or method CompletedTasks)
+tests/e2e/builtin_workflow_e2e_test.go:579:53: status.FailedTasks undefined (type *"qdhub/internal/domain/workflow".WorkflowStatus has no field or method FailedTasks)
+tests/e2e/builtin_workflow_e2e_test.go:697:61: status.CompletedTasks undefined (type *"qdhub/internal/domain/workflow".WorkflowStatus has no field or method CompletedTasks)
+tests/e2e/builtin_workflow_e2e_test.go:733:49: status.CompletedTasks undefined (type *"qdhub/internal/domain/workflow".WorkflowStatus has no field or method CompletedTasks)
+FAIL	command-line-arguments [build failed]
+FAIL

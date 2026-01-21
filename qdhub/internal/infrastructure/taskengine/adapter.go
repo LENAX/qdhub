@@ -227,3 +227,28 @@ func (a *TaskEngineAdapterImpl) RetryTask(ctx context.Context, taskInstanceID st
 	// For now, return an error indicating it's not implemented
 	return fmt.Errorf("task retry not yet implemented in Task Engine")
 }
+
+// SubmitDynamicWorkflow submits a dynamically built workflow to Task Engine.
+// Unlike SubmitWorkflow, this method accepts a raw workflow object (from Task Engine)
+// without requiring a WorkflowDefinition. Use this for workflows that are built
+// at execution time (e.g., BatchDataSync with variable API lists).
+func (a *TaskEngineAdapterImpl) SubmitDynamicWorkflow(ctx context.Context, wf *workflow.Workflow) (string, error) {
+	if wf == nil {
+		return "", fmt.Errorf("workflow is nil")
+	}
+
+	// Submit the workflow directly to Task Engine
+	// The workflow must have all tasks already built with concrete parameters
+	controller, err := a.engine.SubmitWorkflow(ctx, wf)
+	if err != nil {
+		return "", fmt.Errorf("failed to submit dynamic workflow: %w", err)
+	}
+
+	return controller.GetInstanceID(), nil
+}
+
+// GetFunctionRegistry returns the Task Engine function registry.
+// This is needed for dynamically building workflows at execution time.
+func (a *TaskEngineAdapterImpl) GetFunctionRegistry() interface{} {
+	return a.engine.GetRegistry()
+}

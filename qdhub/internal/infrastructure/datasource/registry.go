@@ -3,6 +3,7 @@ package datasource
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -85,42 +86,67 @@ func (r *Registry) RegisterParser(name string, parser DocumentParser) error {
 }
 
 // GetAdapter returns a data source adapter by name.
+// GetAdapter returns an adapter by name (case-insensitive).
 func (r *Registry) GetAdapter(name string) (DataSourceAdapter, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Try exact match first
 	adapter, exists := r.adapters[name]
-	if !exists {
-		return nil, fmt.Errorf("adapter %s not found", name)
+	if exists {
+		return adapter, nil
 	}
 
-	return adapter, nil
+	// Try case-insensitive match
+	lowerName := strings.ToLower(name)
+	adapter, exists = r.adapters[lowerName]
+	if exists {
+		return adapter, nil
+	}
+
+	return nil, fmt.Errorf("adapter %s not found", name)
 }
 
-// GetClient returns an API client by name.
+// GetClient returns an API client by name (case-insensitive).
 func (r *Registry) GetClient(name string) (APIClient, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Try exact match first
 	client, exists := r.clients[name]
-	if !exists {
-		return nil, fmt.Errorf("client %s not found", name)
+	if exists {
+		return client, nil
 	}
 
-	return client, nil
+	// Try case-insensitive match
+	lowerName := strings.ToLower(name)
+	client, exists = r.clients[lowerName]
+	if exists {
+		return client, nil
+	}
+
+	return nil, fmt.Errorf("client %s not found", name)
 }
 
-// GetCrawler returns a crawler by name.
+// GetCrawler returns a crawler by name (case-insensitive).
 func (r *Registry) GetCrawler(name string) (Crawler, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Try exact match first
 	crawler, exists := r.crawlers[name]
-	if !exists {
-		return nil, fmt.Errorf("crawler %s not found", name)
+	if exists {
+		return crawler, nil
 	}
 
-	return crawler, nil
+	// Try case-insensitive match
+	lowerName := strings.ToLower(name)
+	crawler, exists = r.crawlers[lowerName]
+	if exists {
+		return crawler, nil
+	}
+
+	return nil, fmt.Errorf("crawler %s not found", name)
 }
 
 // GetParser returns a document parser by name.

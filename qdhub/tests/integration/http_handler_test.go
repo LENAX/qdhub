@@ -128,6 +128,14 @@ func (m *MockHTTPTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceI
 	return nil
 }
 
+func (m *MockHTTPTaskEngineAdapter) SubmitDynamicWorkflow(ctx context.Context, wf *workflow.Workflow) (string, error) {
+	return shared.NewID().String(), nil
+}
+
+func (m *MockHTTPTaskEngineAdapter) GetFunctionRegistry() interface{} {
+	return nil
+}
+
 // MockHTTPJobScheduler is a mock implementation of sync.JobScheduler.
 type MockHTTPJobScheduler struct {
 	scheduledJobs map[string]string

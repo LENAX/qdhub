@@ -162,6 +162,12 @@ type TaskEngineAdapter interface {
 	// SubmitWorkflow submits a workflow to Task Engine.
 	SubmitWorkflow(ctx context.Context, definition *WorkflowDefinition, params map[string]interface{}) (string, error)
 
+	// SubmitDynamicWorkflow submits a dynamically built workflow to Task Engine.
+	// Unlike SubmitWorkflow, this method accepts a raw workflow object without
+	// requiring a WorkflowDefinition. Use this for workflows that are built
+	// at execution time (e.g., BatchDataSync with variable API lists).
+	SubmitDynamicWorkflow(ctx context.Context, wf *Workflow) (string, error)
+
 	// PauseInstance pauses a workflow instance.
 	PauseInstance(ctx context.Context, engineInstanceID string) error
 
@@ -185,4 +191,8 @@ type TaskEngineAdapter interface {
 
 	// RetryTask retries a failed task instance.
 	RetryTask(ctx context.Context, taskInstanceID string) error
+
+	// GetFunctionRegistry returns the Task Engine function registry.
+	// This is needed for dynamically building workflows at execution time.
+	GetFunctionRegistry() interface{}
 }

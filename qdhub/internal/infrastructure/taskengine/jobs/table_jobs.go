@@ -45,7 +45,7 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("api_name is required")
 	}
 
-	logrus.Printf("🔨 [CreateTableFromMetadata] 开始创建表: %s, target_db_path=%s", apiName, targetDBPath)
+	logrus.Debugf("[CreateTableFromMetadata] 开始创建表: %s", apiName)
 
 	// 获取字段定义（必须由父任务传递）
 	var fields []metadata.FieldMeta
@@ -90,14 +90,14 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 构建 TableSchema
 	schema := buildTableSchema(apiName, fields)
-	logrus.Printf("📝 [CreateTableFromMetadata] 准备创建表: %s, 字段数=%d", apiName, len(schema.Columns))
+	logrus.Debugf("[CreateTableFromMetadata] 准备创建表: %s, 字段数=%d", apiName, len(schema.Columns))
 
 	// 使用 QuantDB Adapter 创建表
 	if err := quantDB.CreateTable(ctx, schema); err != nil {
 		return nil, fmt.Errorf("failed to create table %s: %w", apiName, err)
 	}
 
-	logrus.Printf("✅ [CreateTableFromMetadata] 表创建成功: %s, 字段数=%d", apiName, len(fields))
+	logrus.Debugf("[CreateTableFromMetadata] 表创建成功: %s", apiName)
 
 	return map[string]interface{}{
 		"table_name":     apiName,
@@ -212,7 +212,7 @@ func mapTypeToDuckDB(sourceType string) string {
 //   - generated: int - 生成的子任务数量
 //   - api_count: int - 数据源中的 API 总数
 func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
-	logrus.Printf("📋 [CreateTablesFromCatalog] Job Function 执行")
+	logrus.Debugf("[CreateTablesFromCatalog] Job Function 执行")
 
 	// 获取必需参数
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -226,8 +226,7 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("target_db_path is required")
 	}
 
-	logrus.Printf("📋 [CreateTablesFromCatalog] data_source_id=%s, target_db_path=%s, max_tables=%d",
-		dataSourceID, targetDBPath, maxTables)
+	logrus.Debugf("[CreateTablesFromCatalog] data_source_id=%s, max_tables=%d", dataSourceID, maxTables)
 
 	// 获取 Engine
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -261,15 +260,13 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	totalAPICount := len(apiMetadataList)
-	logrus.Printf("📡 [CreateTablesFromCatalog] 从数据源 %s 获取到 %d 个 API 元数据", dataSourceID, totalAPICount)
+	logrus.Debugf("[CreateTablesFromCatalog] 从数据源获取到 %d 个 API 元数据", totalAPICount)
 
 	// 应用数量限制
 	if maxTables > 0 && len(apiMetadataList) > maxTables {
 		apiMetadataList = apiMetadataList[:maxTables]
-		logrus.Printf("📡 [CreateTablesFromCatalog] 限制建表数量从 %d 到 %d", totalAPICount, maxTables)
+		logrus.Debugf("[CreateTablesFromCatalog] 限制建表数量到 %d", maxTables)
 	}
-
-	logrus.Printf("📡 [CreateTablesFromCatalog] 为 %d 个 API 生成建表子任务", len(apiMetadataList))
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -278,13 +275,13 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 	for _, apiMeta := range apiMetadataList {
 		apiName := apiMeta.Name
 		if apiName == "" {
-			logrus.Warnf("⚠️ [CreateTablesFromCatalog] API 元数据 ID=%s 名称为空，跳过", apiMeta.ID)
+			logrus.Warnf("[CreateTablesFromCatalog] API 元数据 ID=%s 名称为空，跳过", apiMeta.ID)
 			continue
 		}
 
 		// 跳过没有响应字段的 API（无法建表）
 		if len(apiMeta.ResponseFields) == 0 {
-			logrus.Debugf("⏭️ [CreateTablesFromCatalog] API %s 没有响应字段，跳过建表", apiName)
+			logrus.Debugf("[CreateTablesFromCatalog] API %s 没有响应字段，跳过", apiName)
 			continue
 		}
 
@@ -313,21 +310,20 @@ func CreateTablesFromCatalogJob(tc *task.TaskContext) (interface{}, error) {
 			WithCompensationFunction("CompensateCreateTable"). // SAGA 补偿
 			Build()
 		if err != nil {
-			logrus.Printf("❌ [CreateTablesFromCatalog] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Warnf("[CreateTablesFromCatalog] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			logrus.Printf("❌ [CreateTablesFromCatalog] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Warnf("[CreateTablesFromCatalog] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		generatedCount++
-		logrus.Printf("✅ [CreateTablesFromCatalog] 子任务已添加: %s (字段数=%d)", subTaskName, len(fields))
 	}
 
-	logrus.Printf("✅ [CreateTablesFromCatalog] 共生成 %d 个建表子任务", generatedCount)
+	logrus.Debugf("[CreateTablesFromCatalog] 共生成 %d 个建表子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -351,13 +347,13 @@ func DropTableJob(tc *task.TaskContext) (interface{}, error) {
 	ctx := context.Background()
 
 	tableName := tc.GetParamString("table_name")
-	targetDBPath := tc.GetParamString("target_db_path")
+	_ = tc.GetParamString("target_db_path") // 保留用于日志或未来扩展
 
 	if tableName == "" {
 		return nil, fmt.Errorf("table_name is required")
 	}
 
-	logrus.Printf("🗑️ [DropTable] 删除表: %s (db=%s)", tableName, targetDBPath)
+	logrus.Debugf("[DropTable] 删除表: %s", tableName)
 
 	// 获取 QuantDB Adapter
 	// 注意：需要先检查 Registry 是否存在，避免 nil pointer panic
@@ -375,7 +371,7 @@ func DropTableJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to drop table %s: %w", tableName, err)
 	}
 
-	logrus.Printf("✅ [DropTable] 表删除成功: %s", tableName)
+	logrus.Debugf("[DropTable] 表删除成功: %s", tableName)
 
 	return map[string]interface{}{
 		"dropped":    true,

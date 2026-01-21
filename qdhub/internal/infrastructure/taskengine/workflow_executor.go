@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/LENAX/task-engine/pkg/core/task"
+
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -102,31 +104,65 @@ func (e *WorkflowExecutorImpl) ExecuteCreateTables(ctx context.Context, req work
 }
 
 // ExecuteBatchDataSync executes the batch_data_sync built-in workflow.
-// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+// IMPORTANT: Unlike other built-in workflows that use parameter replacement,
+// BatchDataSync dynamically builds the workflow at execution time based on
+// the provided API list. This is because each API requires a separate task,
+// and the workflow structure cannot be determined at initialization time.
 func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
-	params := map[string]interface{}{
-		"data_source_name": req.DataSourceName,
-		"token":            req.Token,
-		"target_db_path":   req.TargetDBPath,
-		"start_date":       req.StartDate,
-		"end_date":         req.EndDate,
-		"api_names":        req.APINames,
+	// Validate required parameters
+	if req.DataSourceName == "" {
+		return "", workflows.ErrEmptyDataSourceName
 	}
+	if req.Token == "" {
+		return "", workflows.ErrEmptyToken
+	}
+	if req.TargetDBPath == "" {
+		return "", workflows.ErrEmptyTargetDBPath
+	}
+	if req.StartDate == "" {
+		return "", workflows.ErrEmptyStartDate
+	}
+	if req.EndDate == "" {
+		return "", workflows.ErrEmptyEndDate
+	}
+	if len(req.APINames) == 0 {
+		return "", workflows.ErrEmptyAPINames
+	}
+
+	// Get function registry from Task Engine adapter
+	registryInterface := e.taskEngineAdapter.GetFunctionRegistry()
+	registry, ok := registryInterface.(task.FunctionRegistry)
+	if !ok {
+		return "", fmt.Errorf("failed to get function registry: invalid type")
+	}
+
+	// Dynamically build the workflow with the actual API list
+	// This creates a separate task for each API, rather than using
+	// parameter replacement on a placeholder template
+	wfBuilder := workflows.NewBatchDataSyncWorkflowBuilder(registry).
+		WithDataSource(req.DataSourceName, req.Token).
+		WithTargetDB(req.TargetDBPath).
+		WithDateRange(req.StartDate, req.EndDate).
+		WithAPIs(req.APINames...).
+		WithMaxStocks(req.MaxStocks)
 
 	// Add optional time parameters if set
-	if req.StartTime != "" {
-		params["start_time"] = req.StartTime
-	}
-	if req.EndTime != "" {
-		params["end_time"] = req.EndTime
+	if req.StartTime != "" || req.EndTime != "" {
+		wfBuilder.WithTimeRange(req.StartTime, req.EndTime)
 	}
 
-	// Only add max_stocks if it's set (non-zero means limit)
-	if req.MaxStocks > 0 {
-		params["max_stocks"] = req.MaxStocks
+	wf, err := wfBuilder.Build()
+	if err != nil {
+		return "", fmt.Errorf("failed to build batch data sync workflow: %w", err)
 	}
 
-	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameBatchDataSync, params)
+	// Submit the dynamically built workflow directly to Task Engine
+	controller, err := e.taskEngineAdapter.SubmitDynamicWorkflow(ctx, wf)
+	if err != nil {
+		return "", fmt.Errorf("failed to submit workflow: %w", err)
+	}
+
+	return shared.ID(controller), nil
 }
 
 // ExecuteRealtimeDataSync executes the realtime_data_sync built-in workflow.

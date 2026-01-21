@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/scheduler"
@@ -137,7 +138,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncJobRepo := repository.NewSyncJobRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err)
 
@@ -150,11 +151,12 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	jobScheduler := newE2EJobScheduler()
 	ctx.JobScheduler = jobScheduler
 	workflowExecutor := newE2EWorkflowExecutor()
+	dependencyResolver := sync.NewDependencyResolver()
 
 	// 创建 application services
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	if cfg.Mode == "mock" {

@@ -26,6 +26,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
@@ -145,6 +146,16 @@ func (m *e2eTaskEngineAdapter) RetryTask(ctx context.Context, taskInstanceID str
 	return nil
 }
 
+func (m *e2eTaskEngineAdapter) SubmitDynamicWorkflow(ctx context.Context, wf *workflow.Workflow) (string, error) {
+	id := shared.NewID().String()
+	m.submittedWorkflows = append(m.submittedWorkflows, id)
+	return id, nil
+}
+
+func (m *e2eTaskEngineAdapter) GetFunctionRegistry() interface{} {
+	return nil
+}
+
 // e2eWorkflowExecutor implements workflow.WorkflowExecutor for e2e tests.
 type e2eWorkflowExecutor struct{}
 
@@ -172,6 +183,10 @@ func (e *e2eWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req w
 	return shared.NewID(), nil
 }
 
+func (e *e2eWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
 // e2eJobScheduler is a mock scheduler for e2e tests.
 type e2eJobScheduler struct {
 	scheduledJobs map[string]string
@@ -189,17 +204,17 @@ func (s *e2eJobScheduler) Stop() context.Context {
 	return context.Background()
 }
 
-func (s *e2eJobScheduler) ScheduleJob(jobID string, cronExpr string) error {
-	s.scheduledJobs[jobID] = cronExpr
+func (s *e2eJobScheduler) SchedulePlan(planID string, cronExpr string) error {
+	s.scheduledJobs[planID] = cronExpr
 	return nil
 }
 
-func (s *e2eJobScheduler) UnscheduleJob(jobID string) {
-	delete(s.scheduledJobs, jobID)
+func (s *e2eJobScheduler) UnschedulePlan(planID string) {
+	delete(s.scheduledJobs, planID)
 }
 
-func (s *e2eJobScheduler) IsScheduled(jobID string) bool {
-	_, exists := s.scheduledJobs[jobID]
+func (s *e2eJobScheduler) IsScheduled(planID string) bool {
+	_, exists := s.scheduledJobs[planID]
 	return exists
 }
 
@@ -248,7 +263,7 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncJobRepo := repository.NewSyncJobRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err)
 
@@ -261,11 +276,12 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 
 	// Create adapters
 	workflowExecutor := newE2EWorkflowExecutor()
+	dependencyResolver := sync.NewDependencyResolver()
 
 	// Create application services
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server

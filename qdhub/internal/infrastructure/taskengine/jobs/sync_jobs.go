@@ -4,7 +4,9 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -32,10 +34,10 @@ import (
 //   - sync_batch_id: string - 同步批次 ID（用于回滚，默认为 WorkflowInstanceID）
 //   - upstream_params: map[string]UpstreamParamConfig - 上游参数映射配置（可选）
 //     格式: {"param_name": {"task_name": "TaskA", "field": "field_name", "extracted_field": "cal_dates"}}
-//     - task_name: 上游任务名称
-//     - field: 上游结果中的字段名（直接字段）
-//     - extracted_field: 上游结果 extracted_data 中的字段名（用于获取 cal_dates, ts_codes 等列表）
-//     - select: 选择策略，"first" | "last" | "all"，默认 "last"（取最新值）
+//   - task_name: 上游任务名称
+//   - field: 上游结果中的字段名（直接字段）
+//   - extracted_field: 上游结果 extracted_data 中的字段名（用于获取 cal_dates, ts_codes 等列表）
+//   - select: 选择策略，"first" | "last" | "all"，默认 "last"（取最新值）
 //
 // Output:
 //   - count: int - 保存的记录数
@@ -84,9 +86,22 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	// 获取查询参数（可以从上游任务注入，也可以直接传入）
 	var params map[string]interface{}
 	paramsRaw := tc.GetParam("params")
+	log.Printf("🔍 [SyncAPIData] API=%s, paramsRaw type=%T, value=%v", apiName, paramsRaw, paramsRaw)
 	if paramsRaw != nil {
-		if p, ok := paramsRaw.(map[string]interface{}); ok {
+		switch p := paramsRaw.(type) {
+		case map[string]interface{}:
 			params = p
+			log.Printf("🔍 [SyncAPIData] API=%s, parsed params (map)=%v", apiName, params)
+		case string:
+			// task-engine 可能将 map 序列化为字符串，尝试 JSON 解析
+			if err := json.Unmarshal([]byte(p), &params); err != nil {
+				// 如果不是 JSON 格式，可能是 Go 的 fmt.Sprintf 格式 "map[key:value]"
+				log.Printf("⚠️ [SyncAPIData] API=%s, params is string but not JSON: %s, trying to parse Go map format", apiName, p)
+				params = parseGoMapString(p)
+			}
+			log.Printf("🔍 [SyncAPIData] API=%s, parsed params (from string)=%v", apiName, params)
+		default:
+			log.Printf("⚠️ [SyncAPIData] API=%s, params type assertion failed, got %T", apiName, paramsRaw)
 		}
 	}
 	if params == nil {
@@ -996,3 +1011,31 @@ func convertToStringSlice(raw interface{}) []string {
 	return nil
 }
 
+// parseGoMapString 解析 Go fmt.Sprintf 格式的 map 字符串
+// 例如: "map[trade_date:20260121]" -> map[string]interface{}{"trade_date": "20260121"}
+// 例如: "map[end_date:20260121 start_date:20260114]" -> map[string]interface{}{"end_date": "20260121", "start_date": "20260114"}
+func parseGoMapString(s string) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	// 移除 "map[" 前缀和 "]" 后缀
+	s = strings.TrimPrefix(s, "map[")
+	s = strings.TrimSuffix(s, "]")
+
+	if s == "" {
+		return result
+	}
+
+	// 按空格分割键值对
+	pairs := strings.Fields(s)
+	for _, pair := range pairs {
+		// 按第一个 ":" 分割键和值
+		idx := strings.Index(pair, ":")
+		if idx > 0 {
+			key := pair[:idx]
+			value := pair[idx+1:]
+			result[key] = value
+		}
+	}
+
+	return result
+}

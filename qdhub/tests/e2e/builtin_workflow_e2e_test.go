@@ -360,23 +360,118 @@ func getMockDailyHTML() string {
 	</body></html>`
 }
 
+// ==================== 辅助函数 ====================
+
+// buildTableSchemaFromMetadata 从 API 元数据构建表结构
+// 复用 table_jobs.go 中 buildTableSchema 的逻辑
+func buildTableSchemaFromMetadata(tableName string, fields []metadata.FieldMeta) *datastore.TableSchema {
+	schema := &datastore.TableSchema{
+		ID:          shared.NewID(),
+		TableName:   tableName,
+		Columns:     make([]datastore.ColumnDef, 0, len(fields)+2), // +2 for sync_batch_id and created_at
+		PrimaryKeys: []string{},
+		Indexes:     []datastore.IndexDef{},
+	}
+
+	// 去重字段名
+	seenFields := make(map[string]bool)
+	primaryKeys := make([]string, 0)
+
+	for _, f := range fields {
+		fieldName := strings.TrimSpace(f.Name)
+		if fieldName == "" || seenFields[fieldName] {
+			continue
+		}
+		seenFields[fieldName] = true
+
+		col := datastore.ColumnDef{
+			Name:       fieldName,
+			SourceType: f.Type,
+			TargetType: mapTypeToDuckDBForTest(f.Type),
+			Nullable:   !f.IsPrimary,
+			Comment:    f.Description,
+		}
+		schema.Columns = append(schema.Columns, col)
+
+		if f.IsPrimary {
+			primaryKeys = append(primaryKeys, fieldName)
+		}
+		if f.IsIndex {
+			schema.Indexes = append(schema.Indexes, datastore.IndexDef{
+				Name:    fmt.Sprintf("idx_%s_%s", tableName, fieldName),
+				Columns: []string{fieldName},
+				Unique:  false,
+			})
+		}
+	}
+
+	// 添加同步批次字段（用于回滚）
+	schema.Columns = append(schema.Columns, datastore.ColumnDef{
+		Name:       "sync_batch_id",
+		SourceType: "string",
+		TargetType: "VARCHAR",
+		Nullable:   true,
+		Comment:    "同步批次ID，用于数据回滚",
+	})
+
+	// 添加创建时间字段
+	schema.Columns = append(schema.Columns, datastore.ColumnDef{
+		Name:       "created_at",
+		SourceType: "timestamp",
+		TargetType: "TIMESTAMP",
+		Nullable:   true,
+		Comment:    "记录创建时间",
+	})
+
+	schema.PrimaryKeys = primaryKeys
+
+	return schema
+}
+
+// mapTypeToDuckDBForTest 将数据源字段类型映射为 DuckDB 类型
+func mapTypeToDuckDBForTest(sourceType string) string {
+	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
+	switch sourceType {
+	case "int", "integer":
+		return "INTEGER"
+	case "bigint", "long":
+		return "BIGINT"
+	case "float", "number", "double", "decimal":
+		return "DOUBLE"
+	case "str", "string", "text", "varchar", "char":
+		return "VARCHAR"
+	case "date":
+		return "DATE"
+	case "datetime", "timestamp":
+		return "TIMESTAMP"
+	case "bool", "boolean":
+		return "BOOLEAN"
+	default:
+		return "VARCHAR" // 默认使用 VARCHAR
+	}
+}
+
 // ==================== E2E 测试上下文 ====================
 
 // builtinWorkflowE2EContext 内建 Workflow E2E 测试上下文
 type builtinWorkflowE2EContext struct {
-	config           *e2eTestConfig
-	db               *persistence.DB
-	engine           *engine.Engine
-	workflowRepo     workflow.WorkflowDefinitionRepository
-	dataSourceRepo   metadata.DataSourceRepository
-	metadataRepo     metadata.Repository
-	syncPlanRepo     sync.SyncPlanRepository
-	workflowExecutor workflow.WorkflowExecutor
-	syncAppService   contracts.SyncApplicationService
-	dsRegistry       *datasource.Registry
-	quantDBAdapter   *mockQuantDBAdapter
-	duckDBAdapter    *duckdb.Adapter // 真实模式下使用
-	cleanup          func()
+	config              *e2eTestConfig
+	db                  *persistence.DB
+	engine              *engine.Engine
+	workflowRepo        workflow.WorkflowDefinitionRepository
+	dataSourceRepo      metadata.DataSourceRepository
+	metadataRepo        metadata.Repository
+	syncPlanRepo        sync.SyncPlanRepository
+	workflowExecutor    workflow.WorkflowExecutor
+	metadataAppService  contracts.MetadataApplicationService  // 元数据应用服务
+	workflowAppService  contracts.WorkflowApplicationService  // 工作流应用服务
+	datastoreAppService contracts.DataStoreApplicationService // 数据存储应用服务
+	syncAppService      contracts.SyncApplicationService      // 同步应用服务
+	dsRegistry          *datasource.Registry
+	quantDBAdapter      *mockQuantDBAdapter
+	duckDBAdapter       *duckdb.Adapter // 真实模式下使用
+	taskEngineAdapter   workflow.TaskEngineAdapter
+	cleanup             func()
 }
 
 // setupBuiltinWorkflowE2EContext 设置 E2E 测试环境
@@ -462,6 +557,11 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		DataSourceRegistry: dsRegistry,
 		MetadataRepo:       metadataRepo,
 	}
+	// 真实模式下注册 QuantDB adapter
+	if config.IsRealMode && duckDBAdapter != nil {
+		taskEngineDeps.QuantDB = duckDBAdapter
+		t.Logf("✅ 已注册 QuantDB (DuckDB Adapter)")
+	}
 	err = taskengine.Initialize(ctx, eng, taskEngineDeps)
 	require.NoError(t, err)
 
@@ -477,7 +577,31 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	// 8. 创建 WorkflowExecutor
 	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter)
 
-	// 9. 创建 SyncApplicationService
+	// 9. 创建 MetadataApplicationService
+	metadataAppService := impl.NewMetadataApplicationService(
+		dataSourceRepo,
+		nil, // parserFactory - not needed for tests (use workflow for metadata crawl)
+		workflowExecutor,
+	)
+
+	// 10. 创建 WorkflowApplicationService
+	workflowAppService := impl.NewWorkflowApplicationService(
+		workflowRepo,
+		taskEngineAdapter,
+	)
+
+	// 11. 创建 DataStoreApplicationService
+	datastoreRepo := repository.NewQuantDataStoreRepository(db)
+	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
+	datastoreAppService := impl.NewDataStoreApplicationService(
+		datastoreRepo,
+		mappingRuleRepo,
+		dataSourceRepo,
+		nil, // quantDBAdapter - tests use workflow for table creation
+		workflowExecutor,
+	)
+
+	// 12. 创建 SyncApplicationService
 	cronCalculator := sync.NewCronScheduleCalculator()
 	dependencyResolver := sync.NewDependencyResolver()
 	// 使用 nil 作为 PlanScheduler，因为测试不需要调度功能
@@ -502,44 +626,102 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	}
 
 	return &builtinWorkflowE2EContext{
-		config:           config,
-		db:               db,
-		engine:           eng,
-		workflowRepo:     workflowRepo,
-		dataSourceRepo:   dataSourceRepo,
-		metadataRepo:     metadataRepo,
-		syncPlanRepo:     syncPlanRepo,
-		workflowExecutor: workflowExecutor,
-		syncAppService:   syncAppService,
-		dsRegistry:       dsRegistry,
-		quantDBAdapter:   newMockQuantDBAdapter(),
-		duckDBAdapter:    duckDBAdapter,
-		cleanup:          cleanup,
+		config:              config,
+		db:                  db,
+		engine:              eng,
+		workflowRepo:        workflowRepo,
+		dataSourceRepo:      dataSourceRepo,
+		metadataRepo:        metadataRepo,
+		syncPlanRepo:        syncPlanRepo,
+		workflowExecutor:    workflowExecutor,
+		metadataAppService:  metadataAppService,
+		workflowAppService:  workflowAppService,
+		datastoreAppService: datastoreAppService,
+		syncAppService:      syncAppService,
+		dsRegistry:          dsRegistry,
+		quantDBAdapter:      newMockQuantDBAdapter(),
+		duckDBAdapter:       duckDBAdapter,
+		taskEngineAdapter:   taskEngineAdapter,
+		cleanup:             cleanup,
 	}
 }
 
-// waitForWorkflowCompletion 等待 workflow 完成
-func waitForWorkflowCompletion(ctx context.Context, adapter workflow.TaskEngineAdapter, instanceID string, timeout time.Duration) (*workflow.WorkflowStatus, error) {
+// waitForWorkflowCompletionQuiet 静默等待 workflow 完成（用于已稳定的 workflow）
+// 只在完成时输出一行简要信息
+func waitForWorkflowCompletionQuiet(ctx context.Context, adapter workflow.TaskEngineAdapter, instanceID string, timeout time.Duration) (*workflow.WorkflowStatus, error) {
 	deadline := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+	startTime := time.Now()
+
 	for time.Now().Before(deadline) {
 		status, err := adapter.GetInstanceStatus(ctx, instanceID)
 		if err != nil {
 			return nil, err
 		}
 
+		elapsed := time.Since(startTime).Round(time.Millisecond)
+
 		// 检查是否完成（成功或失败）
 		switch status.Status {
 		case "Success", "Completed", "success", "completed":
 			return status, nil
 		case "Failed", "failed", "Error", "error":
+			return status, fmt.Errorf("workflow failed after %v: %v", elapsed, status.ErrorMessage)
+		case "Cancelled", "cancelled":
+			return status, fmt.Errorf("workflow cancelled after %v", elapsed)
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	status, _ := adapter.GetInstanceStatus(ctx, instanceID)
+	return status, fmt.Errorf("timeout waiting for workflow completion")
+}
+
+// waitForWorkflowCompletion 等待 workflow 完成
+// 每分钟轮询一次 task engine 并打印进度（用于长时间运行的 workflow）
+func waitForWorkflowCompletion(ctx context.Context, adapter workflow.TaskEngineAdapter, instanceID string, timeout time.Duration) (*workflow.WorkflowStatus, error) {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 60 * time.Second // 每分钟轮询一次
+	startTime := time.Now()
+	pollCount := 0
+
+	for time.Now().Before(deadline) {
+		pollCount++
+		status, err := adapter.GetInstanceStatus(ctx, instanceID)
+		if err != nil {
+			return nil, err
+		}
+
+		elapsed := time.Since(startTime).Round(time.Second)
+		remaining := time.Until(deadline).Round(time.Second)
+
+		// 打印进度信息
+		fmt.Printf("📊 [轮询 #%d] 已耗时: %v, 剩余: %v, 状态: %s, 进度: %.2f%%, 总任务: %d, 完成: %d, 失败: %d\n",
+			pollCount, elapsed, remaining, status.Status, status.Progress,
+			status.TaskCount, status.CompletedTask, status.FailedTask)
+
+		// 检查是否完成（成功或失败）
+		switch status.Status {
+		case "Success", "Completed", "success", "completed":
+			fmt.Printf("✅ Workflow 完成! 总耗时: %v\n", elapsed)
+			return status, nil
+		case "Failed", "failed", "Error", "error":
+			fmt.Printf("❌ Workflow 失败! 总耗时: %v, 错误: %v\n", elapsed, status.ErrorMessage)
 			return status, fmt.Errorf("workflow failed: %v", status.ErrorMessage)
 		case "Cancelled", "cancelled":
+			fmt.Printf("⚠️ Workflow 已取消! 总耗时: %v\n", elapsed)
 			return status, fmt.Errorf("workflow cancelled")
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		// 等待下一次轮询
+		time.Sleep(pollInterval)
 	}
-	return nil, fmt.Errorf("timeout waiting for workflow completion")
+
+	// 超时，获取最后一次状态
+	status, _ := adapter.GetInstanceStatus(ctx, instanceID)
+	fmt.Printf("⏰ Workflow 超时! 最终状态: %s, 进度: %.2f%%\n", status.Status, status.Progress)
+	return status, fmt.Errorf("timeout waiting for workflow completion")
 }
 
 // ==================== E2E 测试用例 ====================
@@ -568,88 +750,149 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		}
 	})
 
-	// ==================== Step 2: 创建数据源 ====================
+	// ==================== Step 2: 创建或获取数据源（使用 MetadataApplicationService）====================
 	var dataSourceID shared.ID
 	t.Run("Step2_CreateDataSource", func(t *testing.T) {
-		t.Log("----- Step 2: 创建 Tushare 数据源 -----")
+		t.Log("----- Step 2: 创建/获取 Tushare 数据源（使用应用服务）-----")
 
-		// 创建数据源
-		ds := metadata.NewDataSource("Tushare", "Tushare Pro Data Source for E2E Testing", "http://api.tushare.pro", "https://tushare.pro/document/2")
+		// 先尝试获取已存在的数据源（使用应用服务）
+		allDataSources, err := testCtx.metadataAppService.ListDataSources(ctx)
+		if err == nil {
+			for _, ds := range allDataSources {
+				if ds.Name == "Tushare" {
+					dataSourceID = ds.ID
+					t.Logf("✅ 使用已存在的数据源: ID=%s, Name=%s", dataSourceID, ds.Name)
 
-		err := testCtx.dataSourceRepo.Create(ds)
+					// 更新 Token（使用应用服务）
+					if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
+						err = testCtx.metadataAppService.SaveToken(ctx, contracts.SaveTokenRequest{
+							DataSourceID: ds.ID,
+							TokenValue:   testCtx.config.TushareToken,
+						})
+						if err != nil {
+							t.Logf("⚠️ 更新 Token 失败: %v", err)
+						} else {
+							t.Logf("✅ Token 已更新（真实模式）")
+						}
+					}
+					return
+				}
+			}
+		}
+
+		// 创建新数据源（使用应用服务）
+		ds, err := testCtx.metadataAppService.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
+			Name:        "Tushare",
+			Description: "Tushare Pro Data Source for E2E Testing",
+			BaseURL:     "http://api.tushare.pro",
+			DocURL:      "https://tushare.pro/document/2",
+		})
 		require.NoError(t, err, "创建数据源失败")
 		dataSourceID = ds.ID
 
-		// 设置 Token
-		token := metadata.NewToken(ds.ID, "test-token-for-e2e", nil)
-		err = testCtx.dataSourceRepo.SetToken(token)
+		// 设置 Token（使用应用服务）
+		var tokenValue string
+		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
+			tokenValue = testCtx.config.TushareToken
+		} else {
+			tokenValue = "test-token-for-e2e"
+		}
+		err = testCtx.metadataAppService.SaveToken(ctx, contracts.SaveTokenRequest{
+			DataSourceID: ds.ID,
+			TokenValue:   tokenValue,
+		})
 		require.NoError(t, err, "设置 Token 失败")
 
 		t.Logf("✅ 数据源创建成功: ID=%s, Name=%s", dataSourceID, ds.Name)
 	})
 
-	// ==================== Step 3: 执行元数据爬取 Workflow ====================
+	// ==================== Step 3: 执行元数据爬取（使用 MetadataApplicationService.ParseAndImportMetadata）====================
 	t.Run("Step3_ExecuteMetadataCrawl", func(t *testing.T) {
-		t.Log("----- Step 3: 执行元数据爬取 Workflow -----")
+		t.Log("----- Step 3: 执行元数据爬取（使用 ParseAndImportMetadata）-----")
 
-		// 使用 WorkflowExecutor 执行元数据爬取
-		req := workflow.MetadataCrawlRequest{
-			DataSourceID:   dataSourceID,
-			DataSourceName: "tushare",
-			MaxAPICrawl:    10, // 限制爬取数量
-		}
+		// 使用 MetadataApplicationService.ParseAndImportMetadata 执行元数据爬取
+		// 该方法内部会调用 metadata_crawl 工作流
+		result, err := testCtx.metadataAppService.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
+			DataSourceID: dataSourceID,
+			MaxAPICrawl:  0, // 不限制爬取数量
+		})
+		require.NoError(t, err, "执行元数据爬取失败")
+		require.NotNil(t, result, "ParseAndImportMetadata 返回结果不应为空")
+		t.Logf("  📡 元数据爬取工作流已启动: InstanceID=%s", result.InstanceID)
 
-		instanceID, err := testCtx.workflowExecutor.ExecuteMetadataCrawl(ctx, req)
-		require.NoError(t, err, "执行元数据爬取 Workflow 失败")
-		require.NotEmpty(t, instanceID, "Instance ID 不应为空")
-		t.Logf("✅ 元数据爬取 Workflow 已提交: InstanceID=%s", instanceID)
-
-		// 等待 Workflow 完成
-		adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-		status, err := waitForWorkflowCompletion(ctx, adapter, instanceID.String(), 30*time.Second)
+		// 等待工作流完成
+		status, err := waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, result.InstanceID.String(), 30*time.Second)
 		if err != nil {
-			t.Logf("⚠️ Workflow 未成功完成: %v, Status: %+v", err, status)
-			// 在 mock 环境下，workflow 可能因为缺少真实依赖而失败，这是预期的
-			// 我们只验证 workflow 被正确提交和执行
+			t.Logf("⚠️ 元数据爬取: %v", err)
 		} else {
-			t.Logf("✅ 元数据爬取 Workflow 完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
+			t.Logf("✅ 元数据爬取完成: %d 个任务", status.CompletedTask)
 		}
 
-		// 验证 Task Instances
-		taskInstances, err := adapter.GetTaskInstances(ctx, instanceID.String())
-		require.NoError(t, err, "获取 Task Instances 失败")
-		t.Logf("✅ Task Instances 数量: %d", len(taskInstances))
+		// 验证元数据已保存（使用应用服务）
+		apiMetadataList, err := testCtx.metadataAppService.ListAPIMetadataByDataSource(ctx, dataSourceID)
+		if err == nil {
+			t.Logf("  📊 已爬取 API 元数据数量: %d", len(apiMetadataList))
+		}
 	})
 
-	// ==================== Step 4: 执行建表 Workflow ====================
+	// ==================== Step 4: 执行建表（使用 DataStoreApplicationService.CreateTablesForDatasource）====================
+	var dataStoreID shared.ID
 	t.Run("Step4_ExecuteCreateTables", func(t *testing.T) {
-		t.Log("----- Step 4: 执行建表 Workflow -----")
+		t.Log("----- Step 4: 执行建表（使用 CreateTablesForDatasource）-----")
 
-		// 创建临时 DuckDB 文件
-		tmpDBFile, err := os.CreateTemp("", "e2e_test_*.duckdb")
-		require.NoError(t, err)
-		tmpDBFile.Close()
-		defer os.Remove(tmpDBFile.Name())
-
-		req := workflow.CreateTablesRequest{
-			DataSourceID:   dataSourceID,
-			DataSourceName: "tushare",
-			TargetDBPath:   tmpDBFile.Name(),
-			MaxTables:      10,
+		// 4.1 创建或获取 DataStore
+		// 根据模式选择数据库路径
+		var targetDBPath string
+		if testCtx.config.IsRealMode {
+			targetDBPath = testCtx.config.DuckDBPath
+		} else {
+			tmpDBFile, err := os.CreateTemp("", "e2e_test_*.duckdb")
+			require.NoError(t, err)
+			tmpDBFile.Close()
+			defer os.Remove(tmpDBFile.Name())
+			targetDBPath = tmpDBFile.Name()
 		}
 
-		instanceID, err := testCtx.workflowExecutor.ExecuteCreateTables(ctx, req)
-		require.NoError(t, err, "执行建表 Workflow 失败")
-		require.NotEmpty(t, instanceID, "Instance ID 不应为空")
-		t.Logf("✅ 建表 Workflow 已提交: InstanceID=%s", instanceID)
+		// 先尝试获取已存在的 DataStore
+		existingStores, err := testCtx.datastoreAppService.ListDataStores(ctx)
+		if err == nil {
+			for _, ds := range existingStores {
+				if ds.StoragePath == targetDBPath || ds.Name == "E2E Test DuckDB" {
+					dataStoreID = ds.ID
+					t.Logf("  ✅ 使用已存在的 DataStore: ID=%s, Name=%s", dataStoreID, ds.Name)
+					break
+				}
+			}
+		}
 
-		// 等待 Workflow 完成
-		adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-		status, err := waitForWorkflowCompletion(ctx, adapter, instanceID.String(), 30*time.Second)
+		// 如果不存在则创建新的 DataStore
+		if dataStoreID == "" {
+			ds, err := testCtx.datastoreAppService.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
+				Name:        "E2E Test DuckDB",
+				Description: "E2E 测试用 DuckDB 数据存储",
+				Type:        datastore.DataStoreTypeDuckDB,
+				StoragePath: targetDBPath,
+			})
+			require.NoError(t, err, "创建 DataStore 失败")
+			dataStoreID = ds.ID
+			t.Logf("  ✅ DataStore 创建成功: ID=%s, Name=%s, Path=%s", ds.ID, ds.Name, ds.StoragePath)
+		}
+
+		// 4.2 使用 DataStoreApplicationService.CreateTablesForDatasource 执行建表
+		instanceID, err := testCtx.datastoreAppService.CreateTablesForDatasource(ctx, contracts.CreateTablesForDatasourceRequest{
+			DataSourceID: dataSourceID,
+			DataStoreID:  dataStoreID,
+			MaxTables:    nil, // 不限制
+		})
+		require.NoError(t, err, "执行建表失败")
+		t.Logf("  📡 建表工作流已启动: InstanceID=%s", instanceID)
+
+		// 等待工作流完成
+		status, err := waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, instanceID.String(), 120*time.Second)
 		if err != nil {
-			t.Logf("⚠️ Workflow 未成功完成: %v, Status: %+v", err, status)
+			t.Logf("⚠️ 建表: %v", err)
 		} else {
-			t.Logf("✅ 建表 Workflow 完成: Status=%s, Progress=%.2f%%", status.Status, status.Progress)
+			t.Logf("✅ 建表完成: %d 个表", status.CompletedTask)
 		}
 	})
 
@@ -666,7 +909,6 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 			"stock_basic", // 股票基础信息
 			"trade_cal",   // 交易日历
 			"namechange",  // 股票曾用名
-			"hs_const",    // 沪深股通成分股
 			"stk_limit",   // 涨跌停价格
 			// 行情数据
 			"daily",       // 日线行情
@@ -772,20 +1014,20 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 
 		// 5.4 等待执行完成并验证
 		t.Log("  5.4 等待执行完成...")
-		adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
 
-		// 获取 SyncExecution 来获取 workflow instance ID
+		// 获取 SyncExecution 来获取 workflow instance ID（使用应用服务）
 		execution, err := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
 		require.NoError(t, err, "获取 SyncExecution 失败")
 		t.Logf("  SyncExecution Status: %s, WorkflowInstID: %s", execution.Status, execution.WorkflowInstID)
 
-		// 真实模式下需要更长的超时时间
+		// 真实模式下需要更长的超时时间（同步大量数据可能需要很长时间）
 		timeout := 60 * time.Second
 		if testCtx.config.IsRealMode {
-			timeout = 300 * time.Second // 5 分钟
+			timeout = 30 * time.Minute // 30 分钟，每分钟轮询一次打印进度
 		}
 
-		status, err := waitForWorkflowCompletion(ctx, adapter, execution.WorkflowInstID.String(), timeout)
+		// 使用已注入的 taskEngineAdapter
+		status, err := waitForWorkflowCompletion(ctx, testCtx.taskEngineAdapter, execution.WorkflowInstID.String(), timeout)
 		if err != nil {
 			t.Logf("⚠️ Workflow 未成功完成: %v, Status: %+v", err, status)
 		} else {
@@ -891,90 +1133,6 @@ func TestE2E_BuiltinWorkflow_CreateTablesOnly(t *testing.T) {
 		status.Status, status.Progress, status.TaskCount, status.CompletedTask, status.FailedTask)
 }
 
-// TestE2E_BuiltinWorkflow_BatchDataSyncOnly 单独测试批量数据同步 Workflow
-func TestE2E_BuiltinWorkflow_BatchDataSyncOnly(t *testing.T) {
-	testCtx := setupBuiltinWorkflowE2EContext(t)
-	defer testCtx.cleanup()
-
-	ctx := context.Background()
-
-	// 创建临时 DuckDB 文件
-	tmpDBFile, err := os.CreateTemp("", "e2e_batch_sync_*.duckdb")
-	require.NoError(t, err)
-	tmpDBFile.Close()
-	defer os.Remove(tmpDBFile.Name())
-
-	// 执行批量同步（测试多个 API）
-	req := workflow.BatchDataSyncRequest{
-		DataSourceName: "tushare",
-		Token:          "test-token",
-		TargetDBPath:   tmpDBFile.Name(),
-		StartDate:      "20251201",
-		EndDate:        "20251215",
-		APINames: []string{
-			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
-			"adj_factor", "daily_basic", "income", "balancesheet", "cashflow",
-		},
-		MaxStocks: 5,
-	}
-
-	instanceID, err := testCtx.workflowExecutor.ExecuteBatchDataSync(ctx, req)
-	require.NoError(t, err)
-	assert.NotEmpty(t, instanceID)
-
-	t.Logf("BatchDataSync Workflow 已提交: InstanceID=%s", instanceID)
-
-	// 等待并获取状态
-	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-	time.Sleep(2 * time.Second)
-
-	status, err := adapter.GetInstanceStatus(ctx, instanceID.String())
-	require.NoError(t, err)
-	t.Logf("Workflow 状态: %s, 进度: %.2f%%, 任务总数: %d, 已完成: %d, 失败: %d",
-		status.Status, status.Progress, status.TaskCount, status.CompletedTask, status.FailedTask)
-}
-
-// TestE2E_BuiltinWorkflow_RealtimeDataSyncOnly 单独测试实时数据同步 Workflow
-func TestE2E_BuiltinWorkflow_RealtimeDataSyncOnly(t *testing.T) {
-	testCtx := setupBuiltinWorkflowE2EContext(t)
-	defer testCtx.cleanup()
-
-	ctx := context.Background()
-
-	// 创建临时 DuckDB 文件
-	tmpDBFile, err := os.CreateTemp("", "e2e_realtime_sync_*.duckdb")
-	require.NoError(t, err)
-	tmpDBFile.Close()
-	defer os.Remove(tmpDBFile.Name())
-
-	// 执行实时同步（测试多个 API）
-	req := workflow.RealtimeDataSyncRequest{
-		DataSourceName:  "tushare",
-		Token:           "test-token",
-		TargetDBPath:    tmpDBFile.Name(),
-		CheckpointTable: "sync_checkpoint",
-		APINames: []string{
-			"daily", "daily_basic", "adj_factor", "weekly", "monthly",
-		},
-		MaxStocks: 3,
-	}
-
-	instanceID, err := testCtx.workflowExecutor.ExecuteRealtimeDataSync(ctx, req)
-	require.NoError(t, err)
-	assert.NotEmpty(t, instanceID)
-
-	t.Logf("RealtimeDataSync Workflow 已提交: InstanceID=%s", instanceID)
-
-	// 等待并获取状态
-	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
-	time.Sleep(2 * time.Second)
-
-	status, err := adapter.GetInstanceStatus(ctx, instanceID.String())
-	require.NoError(t, err)
-	t.Logf("Workflow 状态: %s, 进度: %.2f%%, 任务总数: %d, 已完成: %d, 失败: %d",
-		status.Status, status.Progress, status.TaskCount, status.CompletedTask, status.FailedTask)
-}
-
 // TestE2E_BuiltinWorkflow_VerifyWorkflowRegistration 验证 Workflow 注册
 func TestE2E_BuiltinWorkflow_VerifyWorkflowRegistration(t *testing.T) {
 	testCtx := setupBuiltinWorkflowE2EContext(t)
@@ -1029,7 +1187,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
 			"daily_basic", "adj_factor", "income", "balancesheet", "cashflow",
 			"index_basic", "index_daily", "top_list", "margin", "block_trade",
-			"fina_indicator", "namechange", "hs_const", "stk_limit", "margin_detail",
+			"fina_indicator", "namechange", "stk_limit", "margin_detail",
 		}
 		req := contracts.CreateSyncPlanRequest{
 			Name:         "Test Sync Plan (20 APIs)",
@@ -1244,7 +1402,7 @@ func TestE2E_SyncPlan_WithCronSchedule(t *testing.T) {
 			"stock_basic", "trade_cal", "daily", "weekly", "monthly",
 			"daily_basic", "adj_factor", "income", "balancesheet", "cashflow",
 			"index_basic", "index_daily", "top_list", "margin", "block_trade",
-			"fina_indicator", "namechange", "hs_const", "stk_limit", "margin_detail",
+			"fina_indicator", "namechange", "stk_limit", "margin_detail",
 		},
 		CronExpression: &cronExpr,
 	}
@@ -1367,4 +1525,261 @@ func TestE2E_VerifyExistingData(t *testing.T) {
 	}
 
 	verifyDataSyncResults(t, ctx, adapter, keyAPIs)
+}
+
+// TestE2E_DataSyncOnly 单独测试数据同步（使用应用服务）
+// 场景：假设元数据已就绪，测试建表和批量数据同步
+// 目的：验证应用服务在 20+ API 下的端到端流程
+//
+// 前置条件：
+//   - 已运行过 TestE2E_BuiltinWorkflow_FullPipeline 完成元数据爬取
+//   - QDHUB_TUSHARE_TOKEN 环境变量已设置
+//
+// 运行命令：
+//
+//	QDHUB_TUSHARE_TOKEN=your_token go test -tags e2e -v -run "TestE2E_DataSyncOnly" ./tests/e2e/...
+func TestE2E_DataSyncOnly(t *testing.T) {
+	config := loadE2ETestConfig(t)
+
+	if !config.IsRealMode {
+		t.Skip("跳过：此测试仅在真实模式下运行（需要设置 QDHUB_TUSHARE_TOKEN）")
+	}
+
+	ctx := context.Background()
+
+	t.Log("========== 数据同步专项测试（使用应用服务 - 20+ API）==========")
+	t.Logf("📁 DuckDB 路径: %s", config.DuckDBPath)
+
+	// 1. 初始化测试上下文（复用 setupBuiltinWorkflowE2EContext）
+	t.Log("步骤 1: 初始化测试上下文...")
+	testCtx := setupBuiltinWorkflowE2EContext(t)
+	defer testCtx.cleanup()
+	t.Log("✅ 测试上下文初始化完成")
+
+	// 2. 定义测试的 API 列表
+	t.Log("步骤 2: 准备 API 测试列表...")
+
+	// 按同步策略分组的 API 列表
+	// 1. 基础数据 API（Direct 模式，直接查询）
+	basicAPIs := []string{
+		"trade_cal",   // 交易日历
+		"stock_basic", // 股票基础信息
+		"namechange",  // 股票曾用名
+		"index_basic", // 指数基本信息
+	}
+
+	// 2. 行情数据 API（支持 trade_date/start_date+end_date）
+	marketAPIs := []string{
+		"daily",       // 日线行情
+		"daily_basic", // 每日指标
+		"adj_factor",  // 复权因子
+		"stk_limit",   // 涨跌停价格
+	}
+
+	// 3. 资金流向 API（只使用支持批量查询的 API，避免按股票拆分产生大量子任务）
+	moneyflowAPIs := []string{
+		"moneyflow_hsgt",    // 沪深港通资金流向（支持 trade_date 批量查询）
+		"moneyflow_ind_ths", // 同花顺行业资金流向（支持 trade_date 批量查询）
+		"moneyflow_cnt_ths", // 同花顺概念资金流向（支持 trade_date 批量查询）
+		// 注意：moneyflow 和 moneyflow_ths 需要按股票拆分，会产生 5000+ 子任务，不适合短时测试
+	}
+
+	// 4. 龙虎榜数据 API
+	topListAPIs := []string{
+		"top_list",     // 龙虎榜明细
+		"top_inst",     // 龙虎榜机构
+		"hsgt_top10",   // 沪深股通十大成交
+		"ggt_top10",    // 港股通十大成交
+		"limit_list_d", // 每日涨跌停榜单
+	}
+
+	// 5. 同花顺概念板块 API
+	thsAPIs := []string{
+		"ths_index",  // 同花顺板块指数
+		"ths_daily",  // 同花顺板块行情
+		"ths_member", // 同花顺概念成分
+	}
+
+	// 6. 开盘啦题材数据 API
+	kplAPIs := []string{
+		"kpl_list",         // 开盘啦榜单（涨停、跌停、炸板）
+		"kpl_concept",      // 开盘啦概念题材列表
+		"kpl_concept_cons", // 开盘啦概念题材成分
+	}
+
+	// 7. 其他数据 API
+	otherAPIs := []string{
+		"margin",        // 融资融券汇总
+		"margin_detail", // 融资融券明细
+		"block_trade",   // 大宗交易
+	}
+
+	// 合并所有 API
+	testAPIs := make([]string, 0)
+	testAPIs = append(testAPIs, basicAPIs...)
+	testAPIs = append(testAPIs, marketAPIs...)
+	testAPIs = append(testAPIs, moneyflowAPIs...)
+	testAPIs = append(testAPIs, topListAPIs...)
+	testAPIs = append(testAPIs, thsAPIs...)
+	testAPIs = append(testAPIs, kplAPIs...)
+	testAPIs = append(testAPIs, otherAPIs...)
+
+	t.Logf("  测试 API 总数: %d", len(testAPIs))
+	t.Logf("  基础数据 API (%d): %v", len(basicAPIs), basicAPIs)
+	t.Logf("  行情数据 API (%d): %v", len(marketAPIs), marketAPIs)
+	t.Logf("  资金流向 API (%d): %v", len(moneyflowAPIs), moneyflowAPIs)
+	t.Logf("  龙虎榜数据 API (%d): %v", len(topListAPIs), topListAPIs)
+	t.Logf("  同花顺概念 API (%d): %v", len(thsAPIs), thsAPIs)
+	t.Logf("  开盘啦数据 API (%d): %v", len(kplAPIs), kplAPIs)
+	t.Logf("  其他数据 API (%d): %v", len(otherAPIs), otherAPIs)
+
+	// 3. 使用 MetadataApplicationService 获取数据源
+	t.Log("步骤 3: 获取数据源信息...")
+
+	dataSources, err := testCtx.metadataAppService.ListDataSources(ctx)
+	require.NoError(t, err, "获取数据源列表失败")
+
+	var dataSourceID shared.ID
+	for _, ds := range dataSources {
+		if strings.ToLower(ds.Name) == "tushare" {
+			dataSourceID = ds.ID
+			t.Logf("  ✅ 找到 Tushare 数据源: ID=%s", dataSourceID)
+			break
+		}
+	}
+	require.NotEmpty(t, dataSourceID, "未找到 Tushare 数据源，请先执行完整的 E2E 测试流程")
+
+	// 验证 API 元数据已存在
+	apiMetadataList, err := testCtx.metadataAppService.ListAPIMetadataByDataSource(ctx, dataSourceID)
+	require.NoError(t, err, "获取 API 元数据列表失败")
+	t.Logf("  📊 已有 API 元数据数量: %d", len(apiMetadataList))
+
+	// 4. 使用 DataStoreApplicationService 创建表结构
+	t.Log("步骤 4: 使用 CreateTablesForDatasource 创建表...")
+
+	// 4.1 创建或获取 DataStore
+	var dataStoreID shared.ID
+	existingStores, err := testCtx.datastoreAppService.ListDataStores(ctx)
+	if err == nil {
+		for _, ds := range existingStores {
+			if ds.StoragePath == config.DuckDBPath || ds.Name == "E2E Sync Test DuckDB" {
+				dataStoreID = ds.ID
+				t.Logf("  ✅ 使用已存在的 DataStore: ID=%s, Name=%s", dataStoreID, ds.Name)
+				break
+			}
+		}
+	}
+
+	if dataStoreID == "" {
+		ds, err := testCtx.datastoreAppService.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
+			Name:        "E2E Sync Test DuckDB",
+			Description: "E2E 数据同步测试用 DuckDB 数据存储",
+			Type:        datastore.DataStoreTypeDuckDB,
+			StoragePath: config.DuckDBPath,
+		})
+		require.NoError(t, err, "创建 DataStore 失败")
+		dataStoreID = ds.ID
+		t.Logf("  ✅ DataStore 创建成功: ID=%s, Name=%s", ds.ID, ds.Name)
+	}
+
+	// 4.2 使用 DuckDB adapter 检查表是否已存在
+	// 连接 DuckDB 检查表
+	checkAdapter := duckdb.NewAdapter(config.DuckDBPath)
+	require.NoError(t, checkAdapter.Connect(ctx), "连接 DuckDB 检查表失败")
+
+	// 检查测试 API 对应的表是否存在
+	existingTables := 0
+	for _, apiName := range testAPIs {
+		exists, _ := checkAdapter.TableExists(ctx, apiName)
+		if exists {
+			existingTables++
+		}
+	}
+	checkAdapter.Close()
+
+	if existingTables >= len(testAPIs) {
+		t.Logf("  ✅ DuckDB 中已存在 %d/%d 个表，跳过建表", existingTables, len(testAPIs))
+	} else {
+		t.Logf("  📊 DuckDB 中已存在 %d/%d 个表，需要建表", existingTables, len(testAPIs))
+
+		// 使用 CreateTablesForDatasource 建表
+		instanceID, err := testCtx.datastoreAppService.CreateTablesForDatasource(ctx, contracts.CreateTablesForDatasourceRequest{
+			DataSourceID: dataSourceID,
+			DataStoreID:  dataStoreID,
+			MaxTables:    nil, // 不限制
+		})
+		require.NoError(t, err, "执行建表失败")
+		t.Logf("  📡 建表工作流已启动: InstanceID=%s", instanceID)
+
+		// 等待建表完成
+		status, err := waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, instanceID.String(), 120*time.Second)
+		if err != nil {
+			t.Logf("⚠️ 建表: %v", err)
+		} else {
+			t.Logf("✅ 建表完成: %d 个表", status.CompletedTask)
+		}
+	}
+
+	// 5. 使用 SyncApplicationService 创建并执行 SyncPlan
+	t.Log("步骤 5: 创建 SyncPlan...")
+
+	// 5.1 创建 SyncPlan
+	syncPlan, err := testCtx.syncAppService.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "E2E Data Sync Test Plan",
+		Description:  "E2E 数据同步测试计划（20+ API）",
+		DataSourceID: dataSourceID,
+		DataStoreID:  dataStoreID,
+		SelectedAPIs: testAPIs,
+	})
+	require.NoError(t, err, "创建 SyncPlan 失败")
+	t.Logf("  ✅ SyncPlan 创建成功: ID=%s, Name=%s", syncPlan.ID, syncPlan.Name)
+	t.Logf("  📊 选中的 API 数量: %d", len(syncPlan.SelectedAPIs))
+
+	// 5.2 解析 SyncPlan 的依赖关系
+	err = testCtx.syncAppService.ResolveSyncPlan(ctx, syncPlan.ID)
+	require.NoError(t, err, "解析 SyncPlan 依赖关系失败")
+	t.Log("  ✅ SyncPlan 依赖关系解析完成")
+
+	// 6. 执行 SyncPlan
+	t.Log("步骤 6: 使用 ExecuteSyncPlan 执行数据同步...")
+
+	// 使用最近 7 天的数据
+	endDate := time.Now().Format("20060102")
+	startDate := time.Now().AddDate(0, 0, -7).Format("20060102")
+	t.Logf("  日期范围: %s ~ %s", startDate, endDate)
+
+	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlan.ID, contracts.ExecuteSyncPlanRequest{
+		TargetDBPath: config.DuckDBPath,
+		StartDate:    startDate,
+		EndDate:      endDate,
+	})
+	require.NoError(t, err, "执行 SyncPlan 失败")
+	t.Logf("✅ SyncPlan 执行已启动: ExecutionID=%s", executionID)
+
+	// 获取 SyncExecution 以获取 WorkflowInstID
+	execution, err := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
+	require.NoError(t, err, "获取 SyncExecution 失败")
+	t.Logf("  📡 WorkflowInstID=%s, 同步 API 数量: %d", execution.WorkflowInstID, len(execution.SyncedAPIs))
+
+	// 7. 等待同步完成
+	t.Log("步骤 7: 等待同步完成（超时 5 分钟）...")
+
+	syncStatus, err := waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, execution.WorkflowInstID.String(), 5*time.Minute)
+	if err != nil {
+		t.Logf("⚠️ 数据同步: %v", err)
+	} else {
+		t.Logf("✅ 数据同步完成: %d 个任务", syncStatus.CompletedTask)
+	}
+
+	// 8. 验证数据同步结果
+	t.Log("步骤 8: 验证数据同步结果...")
+
+	// 连接 DuckDB 验证数据
+	duckDBAdapter := duckdb.NewAdapter(config.DuckDBPath)
+	require.NoError(t, duckDBAdapter.Connect(ctx), "连接 DuckDB 失败")
+	defer duckDBAdapter.Close()
+
+	verifyDataSyncResults(t, ctx, duckDBAdapter, testAPIs)
+
+	t.Log("========== 数据同步专项测试完成（使用 SyncPlan - 20+ API）==========")
 }

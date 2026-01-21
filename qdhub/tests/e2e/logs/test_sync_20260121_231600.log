@@ -1,0 +1,17 @@
+=== RUN   TestE2E_DataSyncOnly
+    builtin_workflow_e2e_test.go:77: 🔥 真实模式: DuckDB=/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_quant.duckdb, SQLite=/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_app.db
+    builtin_workflow_e2e_test.go:1550: ========== 数据同步专项测试（使用应用服务 - 20+ API）==========
+    builtin_workflow_e2e_test.go:1551: 📁 DuckDB 路径: /Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_quant.duckdb
+    builtin_workflow_e2e_test.go:1554: 步骤 1: 初始化测试上下文...
+    builtin_workflow_e2e_test.go:77: 🔥 真实模式: DuckDB=/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_quant.duckdb, SQLite=/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_app.db
+    builtin_workflow_e2e_test.go:497: 
+        	Error Trace:	/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/builtin_workflow_e2e_test.go:497
+        	            				/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/builtin_workflow_e2e_test.go:1555
+        	Error:      	Received unexpected error:
+        	            	failed to open duckdb: database/sql/driver: could not connect to database: duckdb error: IO Error: Could not set lock on file "/Users/stevelan/Desktop/projects/qdhub/qdhub/tests/e2e/data/e2e_quant.duckdb": Conflicting lock is held in /Applications/DBeaver.app/Contents/MacOS/dbeaver (PID 66247) by user stevelan. See also https://duckdb.org/docs/connect/concurrency
+        	Test:       	TestE2E_DataSyncOnly
+        	Messages:   	连接 DuckDB 失败
+--- FAIL: TestE2E_DataSyncOnly (0.02s)
+FAIL
+FAIL	qdhub/tests/e2e	0.955s
+FAIL

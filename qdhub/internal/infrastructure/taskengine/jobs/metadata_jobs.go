@@ -183,7 +183,7 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 					if upstreamMap, ok := val.(map[string]interface{}); ok {
 						if content, ok := upstreamMap["catalog_content"].(string); ok {
 							catalogContent = content
-							logrus.Printf("Found catalog_content from %s", key)
+							logrus.Debugf("Found catalog_content from %s", key)
 							break
 						}
 					}
@@ -701,7 +701,7 @@ func SaveAPIMetadataJob(tc *task.TaskContext) (interface{}, error) {
 // Output:
 //   - saved_count: int - Number of API metadata saved
 func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
-	logrus.Printf("📋 [SaveAPIMetadataBatch] Job Function 执行, TaskID=%s", tc.TaskID)
+	logrus.Debugf("[SaveAPIMetadataBatch] Job Function 执行, TaskID=%s", tc.TaskID)
 
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -709,16 +709,16 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("data_source_id is required")
 	}
 
-	// 打印子任务统计信息（调试用）
+	// 子任务统计信息（调试用）
 	subTaskCount := tc.GetSubTaskCount()
 	allSucceeded := tc.AllSubTasksSucceeded()
-	logrus.Printf("📊 [SaveAPIMetadataBatch] 子任务统计: 总数=%d, 全部成功=%v", subTaskCount, allSucceeded)
+	logrus.Debugf("[SaveAPIMetadataBatch] 子任务统计: 总数=%d, 全部成功=%v", subTaskCount, allSucceeded)
 
 	// 打印失败的子任务（如果有）
 	failedResults := tc.GetFailedSubTaskResults()
 	if len(failedResults) > 0 {
 		for _, r := range failedResults {
-			logrus.Warnf("⚠️ [SaveAPIMetadataBatch] 子任务失败: name=%s, error=%s", r.TaskName, r.Error)
+			logrus.Warnf("[SaveAPIMetadataBatch] 子任务失败: name=%s, error=%s", r.TaskName, r.Error)
 		}
 	}
 
@@ -751,15 +751,15 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 		}
 		logrus.Debugf("SaveAPIMetadataBatchJob: Params keys: %v", keys)
 		return map[string]interface{}{
-			"saved_count":     0,
-			"message":         "No API metadata to save",
-			"subtask_count":   subTaskCount,
-			"success_count":   subTaskCount - len(failedResults),
-			"failed_count":    len(failedResults),
+			"saved_count":   0,
+			"message":       "No API metadata to save",
+			"subtask_count": subTaskCount,
+			"success_count": subTaskCount - len(failedResults),
+			"failed_count":  len(failedResults),
 		}, nil
 	}
 
-	logrus.Printf("✅ [SaveAPIMetadataBatch] 从子任务提取到 %d 个 API metadata", len(apiMetadataMaps))
+	logrus.Debugf("[SaveAPIMetadataBatch] 从子任务提取到 %d 个 API metadata", len(apiMetadataMaps))
 
 	// Convert maps to APIMetadata entities
 	apiMetadataList := make([]metadata.APIMetadata, 0, len(apiMetadataMaps))
@@ -950,7 +950,7 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 //   - generated: int - Number of sub-tasks generated
 //   - sub_tasks: []map[string]interface{} - Information about generated sub-tasks
 func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	logrus.Printf("📋 [GenerateAPIDetailFetchSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Debugf("[GenerateAPIDetailFetchSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -975,7 +975,7 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 	// Extract API URLs from upstream task result
 	apiURLs := extractAPIURLsFromUpstream(tc)
 	if len(apiURLs) == 0 {
-		logrus.Printf("⚠️ [GenerateAPIDetailFetchSubTasks] 未找到 api_urls，Params keys: %v", getParamKeys(tc.Params))
+		logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 未找到 api_urls，Params keys: %v", getParamKeys(tc.Params))
 		return map[string]interface{}{
 			"status":    "no_data",
 			"generated": 0,
@@ -985,11 +985,11 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 
 	// Apply limit if specified
 	if maxAPICrawl > 0 && len(apiURLs) > maxAPICrawl {
-		logrus.Printf("📡 [GenerateAPIDetailFetchSubTasks] 限制爬取数量从 %d 到 %d", len(apiURLs), maxAPICrawl)
+		logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 限制爬取数量从 %d 到 %d", len(apiURLs), maxAPICrawl)
 		apiURLs = apiURLs[:maxAPICrawl]
 	}
 
-	logrus.Printf("📡 [GenerateAPIDetailFetchSubTasks] 从上游任务获取到 %d 个 API URLs，开始生成子任务", len(apiURLs))
+	logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 从上游任务获取到 %d 个 API URLs", len(apiURLs))
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
@@ -1010,13 +1010,13 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 			WithTaskHandler(task.TaskStatusFailed, "MetadataRefreshFailure").
 			Build()
 		if err != nil {
-			logrus.Printf("❌ [GenerateAPIDetailFetchSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Warnf("[GenerateAPIDetailFetchSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
 		bgCtx := context.Background()
 		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			logrus.Printf("❌ [GenerateAPIDetailFetchSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
+			logrus.Warnf("[GenerateAPIDetailFetchSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
 			continue
 		}
 
@@ -1025,10 +1025,9 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 			"name":    subTaskName,
 			"api_url": apiURL,
 		})
-		logrus.Printf("✅ [GenerateAPIDetailFetchSubTasks] 子任务已添加: %s (url=%s)", subTaskName, apiURL)
 	}
 
-	logrus.Printf("✅ [GenerateAPIDetailFetchSubTasks] 共生成 %d 个子任务", generatedCount)
+	logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 共生成 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -1048,7 +1047,7 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 //   - status: string - Operation status
 //   - generated: int - Number of sub-tasks generated
 func GenerateAPIParseSubTasksJob(tc *task.TaskContext) (interface{}, error) {
-	logrus.Printf("📋 [GenerateAPIParseSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+	logrus.Debugf("[GenerateAPIParseSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
 
 	// Get parameters
 	dataSourceID := tc.GetParamString("data_source_id")
@@ -1117,7 +1116,7 @@ func GenerateAPIParseSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("[GenerateAPIParseSubTasks] failed to add sub-task: %w", err)
 	}
 
-	logrus.Printf("✅ [GenerateAPIParseSubTasks] 子任务已添加: %s", subTaskName)
+	logrus.Debugf("[GenerateAPIParseSubTasks] 子任务已添加: %s", subTaskName)
 
 	return map[string]interface{}{
 		"status":    "success",
