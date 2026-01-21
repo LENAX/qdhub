@@ -10,14 +10,14 @@ import (
 
 // DataSourceRow represents data_sources table row.
 type DataSourceRow struct {
-	ID          string       `db:"id"`
-	Name        string       `db:"name"`
-	Description string       `db:"description"`
-	BaseURL     string       `db:"base_url"`
-	DocURL      string       `db:"doc_url"`
-	Status      string       `db:"status"`
-	CreatedAt   time.Time    `db:"created_at"`
-	UpdatedAt   time.Time    `db:"updated_at"`
+	ID          string    `db:"id"`
+	Name        string    `db:"name"`
+	Description string    `db:"description"`
+	BaseURL     string    `db:"base_url"`
+	DocURL      string    `db:"doc_url"`
+	Status      string    `db:"status"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
 }
 
 // APICategoryRow represents api_categories table row.
@@ -34,20 +34,21 @@ type APICategoryRow struct {
 
 // APIMetadataRow represents api_metadata table row.
 type APIMetadataRow struct {
-	ID             string         `db:"id"`
-	DataSourceID   string         `db:"data_source_id"`
-	CategoryID     sql.NullString `db:"category_id"`
-	Name           string         `db:"name"`
-	DisplayName    string         `db:"display_name"`
-	Description    string         `db:"description"`
-	Endpoint       string         `db:"endpoint"`
-	RequestParams  string         `db:"request_params"`
-	ResponseFields string         `db:"response_fields"`
-	RateLimit      string         `db:"rate_limit"`
-	Permission     string         `db:"permission"`
-	Status         string         `db:"status"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
+	ID                string         `db:"id"`
+	DataSourceID      string         `db:"data_source_id"`
+	CategoryID        sql.NullString `db:"category_id"`
+	Name              string         `db:"name"`
+	DisplayName       string         `db:"display_name"`
+	Description       string         `db:"description"`
+	Endpoint          string         `db:"endpoint"`
+	RequestParams     string         `db:"request_params"`
+	ResponseFields    string         `db:"response_fields"`
+	RateLimit         string         `db:"rate_limit"`
+	Permission        string         `db:"permission"`
+	ParamDependencies sql.NullString `db:"param_dependencies"` // JSON: ParamDependency list
+	Status            string         `db:"status"`
+	CreatedAt         time.Time      `db:"created_at"`
+	UpdatedAt         time.Time      `db:"updated_at"`
 }
 
 // TokenRow represents tokens table row.
@@ -140,18 +141,18 @@ type SyncPlanRow struct {
 
 // SyncTaskRow represents sync_task table row.
 type SyncTaskRow struct {
-	ID            string         `db:"id"`
-	SyncPlanID    string         `db:"sync_plan_id"`
-	APIName       string         `db:"api_name"`
-	SyncMode      string         `db:"sync_mode"`
-	Params        string         `db:"params"`
-	ParamMappings string         `db:"param_mappings"`
-	Dependencies  string         `db:"dependencies"`
-	Level         int            `db:"level"`
-	SortOrder     int            `db:"sort_order"`
-	SyncFrequency int64          `db:"sync_frequency"`
-	LastSyncedAt  sql.NullTime   `db:"last_synced_at"`
-	CreatedAt     time.Time      `db:"created_at"`
+	ID            string       `db:"id"`
+	SyncPlanID    string       `db:"sync_plan_id"`
+	APIName       string       `db:"api_name"`
+	SyncMode      string       `db:"sync_mode"`
+	Params        string       `db:"params"`
+	ParamMappings string       `db:"param_mappings"`
+	Dependencies  string       `db:"dependencies"`
+	Level         int          `db:"level"`
+	SortOrder     int          `db:"sort_order"`
+	SyncFrequency int64        `db:"sync_frequency"`
+	LastSyncedAt  sql.NullTime `db:"last_synced_at"`
+	CreatedAt     time.Time    `db:"created_at"`
 }
 
 // ==================== Workflow Domain Models ====================

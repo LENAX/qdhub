@@ -42,20 +42,21 @@ CREATE INDEX IF NOT EXISTS idx_api_categories_parent ON api_categories(parent_id
 
 -- API Metadata table
 CREATE TABLE IF NOT EXISTS api_metadata (
-    id              VARCHAR(64) PRIMARY KEY,
-    data_source_id  VARCHAR(64) NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
-    category_id     VARCHAR(64) REFERENCES api_categories(id),
-    name            VARCHAR(128) NOT NULL,
-    display_name    VARCHAR(256),
-    description     TEXT,
-    endpoint        VARCHAR(512),
-    request_params  TEXT,  -- JSON
-    response_fields TEXT,  -- JSON
-    rate_limit      TEXT,  -- JSON
-    permission      VARCHAR(64),
-    status          VARCHAR(32) DEFAULT 'active',
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    id                 VARCHAR(64) PRIMARY KEY,
+    data_source_id     VARCHAR(64) NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+    category_id        VARCHAR(64) REFERENCES api_categories(id),
+    name               VARCHAR(128) NOT NULL,
+    display_name       VARCHAR(256),
+    description        TEXT,
+    endpoint           VARCHAR(512),
+    request_params     TEXT,  -- JSON
+    response_fields    TEXT,  -- JSON
+    rate_limit         TEXT,  -- JSON
+    permission         VARCHAR(64),
+    param_dependencies TEXT,  -- JSON: parameter dependencies for auto-resolving API dependencies
+    status             VARCHAR(32) DEFAULT 'active',
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(data_source_id, name)
 );
 

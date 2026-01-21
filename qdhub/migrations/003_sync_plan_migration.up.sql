@@ -4,12 +4,11 @@
 --   - Create sync_plan table (aggregate root)
 --   - Create sync_task table (aggregate internal entity)
 --   - Modify sync_execution table to reference sync_plan
---   - Add param_dependencies to api_metadata
 --   - Drop legacy sync_jobs table
-
--- ==================== Add param_dependencies to api_metadata ====================
-
-ALTER TABLE api_metadata ADD COLUMN param_dependencies TEXT;  -- JSON: [{param_name, source_api, source_field, is_list, filter_field, filter_value}]
+-- 
+-- Note: param_dependencies column was added to api_metadata in 001_init_schema.up.sql
+-- For existing databases that don't have this column, manually run:
+--   ALTER TABLE api_metadata ADD COLUMN param_dependencies TEXT;
 
 -- ==================== Create sync_plan table ====================
 

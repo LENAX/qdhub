@@ -62,6 +62,7 @@ func setupDAOTestDB(t *testing.T) (*persistence.DB, func()) {
 			response_fields TEXT,
 			rate_limit TEXT,
 			permission VARCHAR(64),
+			param_dependencies TEXT,
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

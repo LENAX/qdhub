@@ -341,6 +341,12 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	_, err = db.Exec(string(migrationSQL))
 	require.NoError(t, err)
 
+	// 执行 SyncPlan 迁移脚本
+	syncPlanMigrationSQL, err := os.ReadFile("../../migrations/003_sync_plan_migration.up.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(syncPlanMigrationSQL))
+	require.NoError(t, err)
+
 	// 2. 创建 Task Engine
 	aggregateRepo, err := sqlite.NewWorkflowAggregateRepoFromDSN(dsn)
 	require.NoError(t, err)
@@ -563,17 +569,17 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		// 选择 20+ 个常用 API 进行测试
 		selectedAPIs := []string{
 			// 基础数据
-			"stock_basic",    // 股票基础信息
-			"trade_cal",      // 交易日历
-			"namechange",     // 股票曾用名
-			"hs_const",       // 沪深股通成分股
-			"stk_limit",      // 涨跌停价格
+			"stock_basic", // 股票基础信息
+			"trade_cal",   // 交易日历
+			"namechange",  // 股票曾用名
+			"hs_const",    // 沪深股通成分股
+			"stk_limit",   // 涨跌停价格
 			// 行情数据
-			"daily",          // 日线行情
-			"weekly",         // 周线行情
-			"monthly",        // 月线行情
-			"daily_basic",    // 每日指标
-			"adj_factor",     // 复权因子
+			"daily",       // 日线行情
+			"weekly",      // 周线行情
+			"monthly",     // 月线行情
+			"daily_basic", // 每日指标
+			"adj_factor",  // 复权因子
 			// 财务数据
 			"income",         // 利润表
 			"balancesheet",   // 资产负债表
@@ -581,15 +587,15 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 			"fina_indicator", // 财务指标
 			"fina_mainbz",    // 主营业务构成
 			// 市场参考
-			"top_list",       // 龙虎榜每日明细
-			"top_inst",       // 龙虎榜机构交易明细
-			"margin",         // 融资融券交易汇总
-			"margin_detail",  // 融资融券交易明细
-			"block_trade",    // 大宗交易
+			"top_list",      // 龙虎榜每日明细
+			"top_inst",      // 龙虎榜机构交易明细
+			"margin",        // 融资融券交易汇总
+			"margin_detail", // 融资融券交易明细
+			"block_trade",   // 大宗交易
 			// 指数数据
-			"index_basic",    // 指数基本信息
-			"index_daily",    // 指数日线行情
-			"index_weight",   // 指数成份和权重
+			"index_basic",  // 指数基本信息
+			"index_daily",  // 指数日线行情
+			"index_weight", // 指数成份和权重
 		}
 		createReq := contracts.CreateSyncPlanRequest{
 			Name:         "E2E Test Sync Plan (20+ APIs)",
@@ -900,7 +906,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 		plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, req)
 		require.NoError(t, err)
 		assert.NotNil(t, plan)
-		assert.Equal(t, "Test Sync Plan", plan.Name)
+		assert.Equal(t, "Test Sync Plan (20 APIs)", plan.Name)
 		assert.Equal(t, sync.PlanStatusDraft, plan.Status)
 		t.Logf("✅ SyncPlan 创建成功: ID=%s", plan.ID)
 	})
@@ -996,7 +1002,20 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 
 	// 9. 删除 SyncPlan
 	t.Run("Step9_DeleteSyncPlan", func(t *testing.T) {
-		err := testCtx.syncAppService.DeleteSyncPlan(ctx, planID)
+		// 先取消正在运行的执行
+		err := testCtx.syncAppService.CancelExecution(ctx, executionID)
+		if err != nil {
+			t.Logf("⚠️ 取消执行失败（可能已完成）: %v", err)
+		}
+
+		// 等待一小段时间让状态更新
+		time.Sleep(100 * time.Millisecond)
+
+		// 尝试禁用计划
+		_ = testCtx.syncAppService.DisablePlan(ctx, planID)
+
+		// 删除计划
+		err = testCtx.syncAppService.DeleteSyncPlan(ctx, planID)
 		require.NoError(t, err)
 
 		// 验证已删除

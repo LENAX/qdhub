@@ -25,9 +25,9 @@ func NewAPIMetadataDAO(db *sqlx.DB) *APIMetadataDAO {
 // Create inserts a new API metadata record.
 func (d *APIMetadataDAO) Create(tx *sqlx.Tx, entity *metadata.APIMetadata) error {
 	query := `INSERT INTO api_metadata (id, data_source_id, category_id, name, display_name, description,
-		endpoint, request_params, response_fields, rate_limit, permission, status, created_at, updated_at)
+		endpoint, request_params, response_fields, rate_limit, permission, param_dependencies, status, created_at, updated_at)
 		VALUES (:id, :data_source_id, :category_id, :name, :display_name, :description,
-		:endpoint, :request_params, :response_fields, :rate_limit, :permission, :status, :created_at, :updated_at)`
+		:endpoint, :request_params, :response_fields, :rate_limit, :permission, :param_dependencies, :status, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
 	if err != nil {
@@ -63,7 +63,8 @@ func (d *APIMetadataDAO) Update(tx *sqlx.Tx, entity *metadata.APIMetadata) error
 	query := `UPDATE api_metadata SET
 		category_id = :category_id, name = :name, display_name = :display_name, description = :description,
 		endpoint = :endpoint, request_params = :request_params, response_fields = :response_fields,
-		rate_limit = :rate_limit, permission = :permission, status = :status, updated_at = :updated_at
+		rate_limit = :rate_limit, permission = :permission, param_dependencies = :param_dependencies, 
+		status = :status, updated_at = :updated_at
 		WHERE id = :id`
 
 	row, err := d.toRow(entity)
@@ -196,6 +197,11 @@ func (d *APIMetadataDAO) toRow(entity *metadata.APIMetadata) (*APIMetadataRow, e
 		return nil, fmt.Errorf("failed to marshal rate limit: %w", err)
 	}
 
+	paramDependencies, err := entity.MarshalParamDependenciesJSON()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal param dependencies: %w", err)
+	}
+
 	row := &APIMetadataRow{
 		ID:             entity.ID.String(),
 		DataSourceID:   entity.DataSourceID.String(),
@@ -214,6 +220,10 @@ func (d *APIMetadataDAO) toRow(entity *metadata.APIMetadata) (*APIMetadataRow, e
 
 	if entity.CategoryID != nil {
 		row.CategoryID = sql.NullString{String: entity.CategoryID.String(), Valid: true}
+	}
+
+	if paramDependencies != "" {
+		row.ParamDependencies = sql.NullString{String: paramDependencies, Valid: true}
 	}
 
 	return row, nil
@@ -254,6 +264,12 @@ func (d *APIMetadataDAO) toEntity(row *APIMetadataRow) (*metadata.APIMetadata, e
 	if row.RateLimit != "" {
 		if err := entity.UnmarshalRateLimitJSON(row.RateLimit); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal rate limit: %w", err)
+		}
+	}
+
+	if row.ParamDependencies.Valid && row.ParamDependencies.String != "" {
+		if err := entity.UnmarshalParamDependenciesJSON(row.ParamDependencies.String); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal param dependencies: %w", err)
 		}
 	}
 
