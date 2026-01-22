@@ -1089,12 +1089,17 @@ type InstanceProgress struct {
 
 ### 5.1 应用服务概览
 
-| 应用服务 | 职责 | 依赖的领域服务 |
-|---------|------|---------------|
-| `MetadataAppService` | 元数据管理用例编排 | MetadataService |
-| `DataStoreAppService` | 数据存储管理用例编排 | QuantDataStoreService |
-| `SyncAppService` | 同步任务管理用例编排 | SyncService, WorkflowService |
-| `WorkflowAppService` | 工作流管理用例编排 | WorkflowService |
+| 应用服务 | 职责 | 方法数量 | 依赖的领域服务 |
+|---------|------|---------|---------------|
+| `MetadataAppService` | 元数据管理用例编排，APISyncStrategy管理 | 11 | MetadataService, WorkflowExecutor |
+| `DataStoreAppService` | 数据存储管理用例编排 | 4 | QuantDataStoreService, WorkflowExecutor |
+| `SyncAppService` | 同步计划管理用例编排 | 7 | SyncService, WorkflowExecutor |
+| `WorkflowAppService` | 工作流实例查询和控制 | 5 | WorkflowService |
+
+**精简说明：**
+- 删除了未使用的CRUD方法，只保留Workflow执行的前置条件和核心入口
+- 所有同步操作统一通过SyncPlan执行
+- WorkflowAppService只保留查询和控制功能，工作流定义管理由系统初始化完成
 
 ### 5.2 元数据应用服务 (MetadataAppService)
 
@@ -1117,46 +1122,50 @@ type MetadataAppService interface {
     // ListDataSources 列出所有数据源
     ListDataSources(ctx context.Context) ([]DataSourceDTO, error)
     
-    // DeleteDataSource 删除数据源
-    // 用例流程：
-    //   1. 检查是否有关联的同步任务
-    //   2. 事务内删除数据源及其关联数据
-    DeleteDataSource(ctx context.Context, id string) error
+    // ==================== 元数据导入用例 ====================
     
-    // ==================== 元数据刷新用例 ====================
-    
-    // RefreshMetadata 刷新数据源元数据
+    // ParseAndImportMetadata 解析并导入元数据
     // 用例流程：
-    //   1. 验证数据源存在且 Token 有效
-    //   2. 调用领域服务触发刷新工作流
+    //   1. 验证数据源存在
+    //   2. 触发 metadata_crawl 内建工作流
     //   3. 返回工作流实例 ID
-    RefreshMetadata(ctx context.Context, dataSourceID string) (*RefreshResultDTO, error)
-    
-    // GetRefreshProgress 获取刷新进度
-    GetRefreshProgress(ctx context.Context, workflowInstID string) (*RefreshProgressDTO, error)
-    
-    // ==================== API 查询用例 ====================
-    
-    // GetAPIDetail 获取 API 详情
-    GetAPIDetail(ctx context.Context, apiID string) (*APIMetadataDTO, error)
-    
-    // ListAPIs 列出 API（支持分页、筛选）
-    ListAPIs(ctx context.Context, query ListAPIsQuery) (*PagedResult[APIMetadataDTO], error)
-    
-    // SearchAPIs 搜索 API
-    SearchAPIs(ctx context.Context, keyword string) ([]APIMetadataDTO, error)
+    ParseAndImportMetadata(ctx context.Context, req ParseMetadataRequest) (*ParseMetadataResult, error)
     
     // ==================== Token 管理用例 ====================
     
-    // SetToken 设置数据源 Token
+    // SaveToken 保存或更新数据源 Token
     // 用例流程：
     //   1. 加密 Token
-    //   2. 调用领域服务保存
-    //   3. 可选：验证 Token 有效性
-    SetToken(ctx context.Context, dataSourceID string, token string, validate bool) error
+    //   2. 调用领域服务保存（如果已存在则更新）
+    SaveToken(ctx context.Context, req SaveTokenRequest) error
     
-    // GetTokenStatus 获取 Token 状态
-    GetTokenStatus(ctx context.Context, dataSourceID string) (*TokenStatusDTO, error)
+    // GetToken 获取数据源 Token
+    // 用例流程：
+    //   1. 从仓储获取 Token
+    //   2. 解密后返回
+    GetToken(ctx context.Context, dataSourceID string) (*Token, error)
+    
+    // ==================== API 同步策略管理用例 ====================
+    
+    // CreateAPISyncStrategy 创建API同步策略
+    // 用例流程：
+    //   1. 验证数据源和API存在
+    //   2. 创建策略实体
+    //   3. 持久化
+    CreateAPISyncStrategy(ctx context.Context, req CreateAPISyncStrategyRequest) (*APISyncStrategy, error)
+    
+    // GetAPISyncStrategy 获取API同步策略
+    // 可通过ID或(DataSourceID, APIName)查询
+    GetAPISyncStrategy(ctx context.Context, req GetAPISyncStrategyRequest) (*APISyncStrategy, error)
+    
+    // UpdateAPISyncStrategy 更新API同步策略
+    UpdateAPISyncStrategy(ctx context.Context, id string, req UpdateAPISyncStrategyRequest) error
+    
+    // DeleteAPISyncStrategy 删除API同步策略
+    DeleteAPISyncStrategy(ctx context.Context, id string) error
+    
+    // ListAPISyncStrategies 列出数据源的所有API同步策略
+    ListAPISyncStrategies(ctx context.Context, dataSourceID string) ([]APISyncStrategy, error)
 }
 
 // ==================== 命令与查询对象 ====================
@@ -1191,9 +1200,7 @@ type DataStoreAppService interface {
     // CreateDataStore 创建数据存储配置
     // 用例流程：
     //   1. 验证输入参数
-    //   2. 测试连接有效性
-    //   3. 加密 DSN
-    //   4. 创建配置记录
+    //   2. 创建配置记录
     CreateDataStore(ctx context.Context, cmd CreateDataStoreCmd) (*DataStoreDTO, error)
     
     // GetDataStore 获取数据存储详情
@@ -1202,63 +1209,14 @@ type DataStoreAppService interface {
     // ListDataStores 列出所有数据存储
     ListDataStores(ctx context.Context) ([]DataStoreDTO, error)
     
-    // TestConnection 测试数据存储连接
-    TestConnection(ctx context.Context, id string) (*ConnectionTestResult, error)
-    
-    // DeleteDataStore 删除数据存储
-    // 用例流程：
-    //   1. 检查是否有关联的同步任务
-    //   2. 删除配置及关联的表结构定义
-    DeleteDataStore(ctx context.Context, id string) error
-    
-    // ==================== 表结构生成用例 ====================
-    
-    // GenerateSchema 生成单个 API 的表结构
-    // 用例流程：
-    //   1. 获取 API 元数据
-    //   2. 获取类型映射规则
-    //   3. 调用领域服务生成表结构
-    GenerateSchema(ctx context.Context, cmd GenerateSchemaCmd) (*TableSchemaDTO, error)
-    
-    // GenerateSchemaBatch 批量生成表结构
-    // 用例流程：
-    //   1. 获取数据源下所有 API
-    //   2. 批量生成表结构
-    //   3. 返回生成结果
-    GenerateSchemaBatch(ctx context.Context, cmd GenerateSchemaBatchCmd) (*BatchResultDTO, error)
-    
-    // GetSchema 获取表结构详情
-    GetSchema(ctx context.Context, schemaID string) (*TableSchemaDTO, error)
-    
-    // ListSchemas 列出数据存储的所有表结构
-    ListSchemas(ctx context.Context, dataStoreID string) ([]TableSchemaDTO, error)
-    
     // ==================== 建表用例 ====================
     
-    // CreateTable 执行建表
+    // CreateTablesForDatasource 为数据源创建所有API的表
     // 用例流程：
-    //   1. 获取表结构定义
-    //   2. 获取数据存储连接
-    //   3. 执行 DDL
-    //   4. 更新表结构状态
-    CreateTable(ctx context.Context, schemaID string) error
-    
-    // CreateTableBatch 批量建表
-    CreateTableBatch(ctx context.Context, schemaIDs []string) (*BatchResultDTO, error)
-    
-    // DropTable 删除表
-    DropTable(ctx context.Context, schemaID string) error
-    
-    // ==================== 类型映射规则用例 ====================
-    
-    // ListMappingRules 列出类型映射规则
-    ListMappingRules(ctx context.Context, query MappingRuleQuery) ([]DataTypeMappingRuleDTO, error)
-    
-    // CreateMappingRule 创建自定义映射规则
-    CreateMappingRule(ctx context.Context, cmd CreateMappingRuleCmd) (*DataTypeMappingRuleDTO, error)
-    
-    // DeleteMappingRule 删除映射规则
-    DeleteMappingRule(ctx context.Context, ruleID string) error
+    //   1. 验证数据源和数据存储存在
+    //   2. 触发 create_tables 内建工作流
+    //   3. 返回工作流实例 ID
+    CreateTablesForDatasource(ctx context.Context, req CreateTablesForDatasourceRequest) (string, error)
 }
 
 // ==================== 命令与查询对象 ====================
@@ -1300,82 +1258,78 @@ type CreateMappingRuleCmd struct {
 }
 ```
 
-### 5.4 同步任务应用服务 (SyncAppService)
+### 5.4 同步计划应用服务 (SyncAppService)
 
 ```go
-// SyncAppService 同步任务应用服务
-// 职责：编排同步任务管理相关用例
+// SyncAppService 同步计划应用服务
+// 职责：编排同步计划管理相关用例
+// 注意：所有同步操作现在统一通过SyncPlan执行，不再使用legacy的SyncDataSource方法
 type SyncAppService interface {
-    // ==================== 同步任务管理用例 ====================
+    // ==================== 同步计划管理用例 ====================
     
-    // CreateSyncJob 创建同步任务
+    // CreateSyncPlan 创建同步计划
     // 用例流程：
-    //   1. 验证 API 和数据存储存在
-    //   2. 验证表结构已创建
-    //   3. 创建或关联工作流定义
-    //   4. 创建同步任务
-    //   5. 如有 Cron 表达式，注册调度器
-    CreateSyncJob(ctx context.Context, cmd CreateSyncJobCmd) (*SyncJobDTO, error)
+    //   1. 验证数据源存在
+    //   2. 创建SyncPlan实体
+    //   3. 持久化
+    CreateSyncPlan(ctx context.Context, req CreateSyncPlanRequest) (*SyncPlan, error)
     
-    // GetSyncJob 获取同步任务详情
-    GetSyncJob(ctx context.Context, id string) (*SyncJobDTO, error)
+    // GetSyncPlan 获取同步计划详情
+    GetSyncPlan(ctx context.Context, id string) (*SyncPlan, error)
     
-    // ListSyncJobs 列出同步任务
-    ListSyncJobs(ctx context.Context, query ListSyncJobsQuery) (*PagedResult[SyncJobDTO], error)
+    // UpdateSyncPlan 更新同步计划
+    UpdateSyncPlan(ctx context.Context, id string, req UpdateSyncPlanRequest) error
     
-    // UpdateSyncJob 更新同步任务
+    // DeleteSyncPlan 删除同步计划
+    DeleteSyncPlan(ctx context.Context, id string) error
+    
+    // ListSyncPlans 列出所有同步计划
+    ListSyncPlans(ctx context.Context) ([]SyncPlan, error)
+    
+    // ResolveSyncPlan 解析同步计划的依赖关系
     // 用例流程：
-    //   1. 更新任务配置
-    //   2. 如 Cron 表达式变更，更新调度器
-    UpdateSyncJob(ctx context.Context, id string, cmd UpdateSyncJobCmd) (*SyncJobDTO, error)
+    //   1. 获取选择的API列表
+    //   2. 解析API依赖关系
+    //   3. 生成执行图
+    //   4. 更新SyncPlan状态
+    ResolveSyncPlan(ctx context.Context, planID string) error
     
-    // DeleteSyncJob 删除同步任务
+    // ==================== 计划执行用例 ====================
+    
+    // ExecuteSyncPlan 执行同步计划
     // 用例流程：
-    //   1. 取消调度器注册
-    //   2. 删除任务（保留历史记录）
-    DeleteSyncJob(ctx context.Context, id string) error
+    //   1. 验证计划状态
+    //   2. 根据执行图生成任务配置
+    //   3. 触发 batch_data_sync 工作流
+    //   4. 创建执行记录
+    //   5. 返回执行ID
+    ExecuteSyncPlan(ctx context.Context, planID string, req ExecuteSyncPlanRequest) (string, error)
     
-    // ==================== 任务控制用例 ====================
+    // GetSyncExecution 获取执行记录
+    GetSyncExecution(ctx context.Context, id string) (*SyncExecution, error)
     
-    // EnableSyncJob 启用同步任务
-    // 用例流程：
-    //   1. 更新任务状态
-    //   2. 注册 Cron 调度（如有）
-    EnableSyncJob(ctx context.Context, id string) error
-    
-    // DisableSyncJob 禁用同步任务
-    // 用例流程：
-    //   1. 更新任务状态
-    //   2. 取消 Cron 调度
-    DisableSyncJob(ctx context.Context, id string) error
-    
-    // ==================== 同步执行用例 ====================
-    
-    // TriggerSync 手动触发同步
-    // 用例流程：
-    //   1. 创建执行记录
-    //   2. 构建工作流实例
-    //   3. 提交到 Task Engine
-    //   4. 返回执行信息
-    TriggerSync(ctx context.Context, jobID string) (*SyncExecutionDTO, error)
-    
-    // TriggerSyncWithParams 使用自定义参数触发同步
-    TriggerSyncWithParams(ctx context.Context, jobID string, params map[string]any) (*SyncExecutionDTO, error)
-    
-    // GetExecutionProgress 获取执行进度
-    GetExecutionProgress(ctx context.Context, execID string) (*ExecutionProgressDTO, error)
-    
-    // ListExecutions 列出执行历史
-    ListExecutions(ctx context.Context, jobID string, limit int) ([]SyncExecutionDTO, error)
+    // ListPlanExecutions 列出计划的所有执行记录
+    ListPlanExecutions(ctx context.Context, planID string) ([]SyncExecution, error)
     
     // CancelExecution 取消执行
-    CancelExecution(ctx context.Context, execID string) error
+    CancelExecution(ctx context.Context, executionID string) error
     
-    // ==================== 参数预览用例 ====================
+    // ==================== 调度管理用例 ====================
     
-    // PreviewParams 预览参数组合
-    // 根据参数规则生成将要执行的参数列表
-    PreviewParams(ctx context.Context, jobID string) ([]map[string]any, error)
+    // EnablePlan 启用同步计划并注册调度
+    EnablePlan(ctx context.Context, planID string) error
+    
+    // DisablePlan 禁用同步计划并取消调度
+    DisablePlan(ctx context.Context, planID string) error
+    
+    // UpdatePlanSchedule 更新计划的Cron表达式
+    UpdatePlanSchedule(ctx context.Context, planID string, cronExpression string) error
+    
+    // ==================== 回调处理用例 ====================
+    
+    // HandleExecutionCallback 处理工作流执行回调
+    // 由工作流引擎调用，更新执行记录状态
+    HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error
 }
 
 // ==================== 命令与查询对象 ====================
@@ -1416,66 +1370,33 @@ type ListSyncJobsQuery struct {
 
 ```go
 // WorkflowAppService 工作流应用服务
-// 职责：编排工作流管理相关用例
+// 职责：工作流实例查询和控制
+// 注意：工作流定义管理由系统初始化完成（BuiltInWorkflowInitializer），
+//       应用服务层只提供实例查询和控制功能
 type WorkflowAppService interface {
-    // ==================== 工作流定义用例 ====================
+    // ==================== 工作流实例查询用例 ====================
     
-    // CreateWorkflowDefinition 创建工作流定义
-    CreateWorkflowDefinition(ctx context.Context, cmd CreateWorkflowDefCmd) (*WorkflowDefDTO, error)
+    // GetWorkflowInstance 获取工作流实例详情
+    GetWorkflowInstance(ctx context.Context, id string) (*WorkflowInstanceDTO, error)
     
-    // GetWorkflowDefinition 获取工作流定义
-    GetWorkflowDefinition(ctx context.Context, id string) (*WorkflowDefDTO, error)
+    // ListWorkflowInstances 列出工作流实例
+    // 支持按工作流定义ID和状态筛选
+    ListWorkflowInstances(ctx context.Context, workflowDefID string, status *WfInstStatus) ([]WorkflowInstanceDTO, error)
     
-    // ListWorkflowDefinitions 列出工作流定义
-    ListWorkflowDefinitions(ctx context.Context, category *string) ([]WorkflowDefDTO, error)
-    
-    // UpdateWorkflowDefinition 更新工作流定义
-    UpdateWorkflowDefinition(ctx context.Context, id string, cmd UpdateWorkflowDefCmd) (*WorkflowDefDTO, error)
-    
-    // DeleteWorkflowDefinition 删除工作流定义
-    DeleteWorkflowDefinition(ctx context.Context, id string) error
-    
-    // EnableWorkflowDefinition 启用工作流定义
-    EnableWorkflowDefinition(ctx context.Context, id string) error
-    
-    // DisableWorkflowDefinition 禁用工作流定义
-    DisableWorkflowDefinition(ctx context.Context, id string) error
-    
-    // ==================== 工作流执行用例 ====================
-    
-    // ExecuteWorkflow 执行工作流
-    // 用例流程：
-    //   1. 获取工作流定义
-    //   2. 验证参数
-    //   3. 创建工作流实例
-    //   4. 提交到 Task Engine
-    ExecuteWorkflow(ctx context.Context, defID string, params map[string]any) (*WorkflowInstanceDTO, error)
-    
-    // GetInstance 获取工作流实例
-    GetInstance(ctx context.Context, instID string) (*WorkflowInstanceDTO, error)
-    
-    // GetInstanceWithTasks 获取实例及任务列表
-    GetInstanceWithTasks(ctx context.Context, instID string) (*WorkflowInstanceDetailDTO, error)
-    
-    // ListInstances 列出工作流实例
-    ListInstances(ctx context.Context, query ListInstancesQuery) (*PagedResult[WorkflowInstanceDTO], error)
-    
-    // GetInstanceProgress 获取实例进度
-    GetInstanceProgress(ctx context.Context, instID string) (*InstanceProgressDTO, error)
+    // GetWorkflowStatus 获取工作流实例详细状态
+    // 包括进度、任务状态等
+    GetWorkflowStatus(ctx context.Context, instanceID string) (*WorkflowStatus, error)
     
     // ==================== 实例控制用例 ====================
     
-    // PauseInstance 暂停实例
-    PauseInstance(ctx context.Context, instID string) error
+    // CancelWorkflow 取消工作流实例
+    // 只能取消非终态实例
+    CancelWorkflow(ctx context.Context, instanceID string) error
     
-    // ResumeInstance 恢复实例
-    ResumeInstance(ctx context.Context, instID string) error
+    // ==================== 任务实例查询用例 ====================
     
-    // CancelInstance 取消实例
-    CancelInstance(ctx context.Context, instID string) error
-    
-    // RetryInstance 重试失败的实例
-    RetryInstance(ctx context.Context, instID string) error
+    // GetTaskInstances 获取工作流实例的所有任务实例
+    GetTaskInstances(ctx context.Context, workflowInstID string) ([]TaskInstance, error)
 }
 
 // ==================== 命令与查询对象 ====================

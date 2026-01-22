@@ -137,13 +137,11 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	// 创建 repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err)
 
 	// 创建 adapters
-	quantDBAdapter := &e2eQuantDBAdapter{}
 	parserFactory := newE2EDocumentParserFactory()
 	taskEngineAdapter := newE2ETaskEngineAdapter()
 	ctx.TaskEngineAdapter = taskEngineAdapter
@@ -154,8 +152,9 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	dependencyResolver := sync.NewDependencyResolver()
 
 	// 创建 application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
+	metadataRepo := repository.NewMetadataRepository(ctx.DB)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 

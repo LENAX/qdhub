@@ -40,16 +40,6 @@ func (m *MockMetadataService) GetDataSource(ctx context.Context, id shared.ID) (
 	return args.Get(0).(*metadata.DataSource), args.Error(1)
 }
 
-func (m *MockMetadataService) UpdateDataSource(ctx context.Context, id shared.ID, req contracts.UpdateDataSourceRequest) error {
-	args := m.Called(ctx, id, req)
-	return args.Error(0)
-}
-
-func (m *MockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-
 func (m *MockMetadataService) ListDataSources(ctx context.Context) ([]*metadata.DataSource, error) {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
@@ -66,38 +56,38 @@ func (m *MockMetadataService) ParseAndImportMetadata(ctx context.Context, req co
 	return args.Get(0).(*contracts.ParseMetadataResult), args.Error(1)
 }
 
-func (m *MockMetadataService) CreateAPIMetadata(ctx context.Context, req contracts.CreateAPIMetadataRequest) (*metadata.APIMetadata, error) {
+func (m *MockMetadataService) CreateAPISyncStrategy(ctx context.Context, req contracts.CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*metadata.APIMetadata), args.Error(1)
+	return args.Get(0).(*metadata.APISyncStrategy), args.Error(1)
 }
 
-func (m *MockMetadataService) GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error) {
-	args := m.Called(ctx, id)
+func (m *MockMetadataService) GetAPISyncStrategy(ctx context.Context, req contracts.GetAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
+	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*metadata.APIMetadata), args.Error(1)
+	return args.Get(0).(*metadata.APISyncStrategy), args.Error(1)
 }
 
-func (m *MockMetadataService) UpdateAPIMetadata(ctx context.Context, id shared.ID, req contracts.UpdateAPIMetadataRequest) error {
+func (m *MockMetadataService) UpdateAPISyncStrategy(ctx context.Context, id shared.ID, req contracts.UpdateAPISyncStrategyRequest) error {
 	args := m.Called(ctx, id, req)
 	return args.Error(0)
 }
 
-func (m *MockMetadataService) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+func (m *MockMetadataService) DeleteAPISyncStrategy(ctx context.Context, id shared.ID) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
 }
 
-func (m *MockMetadataService) ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
+func (m *MockMetadataService) ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error) {
 	args := m.Called(ctx, dataSourceID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*metadata.APIMetadata), args.Error(1)
+	return args.Get(0).([]*metadata.APISyncStrategy), args.Error(1)
 }
 
 func (m *MockMetadataService) SaveToken(ctx context.Context, req contracts.SaveTokenRequest) error {
@@ -111,11 +101,6 @@ func (m *MockMetadataService) GetToken(ctx context.Context, dataSourceID shared.
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*metadata.Token), args.Error(1)
-}
-
-func (m *MockMetadataService) DeleteToken(ctx context.Context, dataSourceID shared.ID) error {
-	args := m.Called(ctx, dataSourceID)
-	return args.Error(0)
 }
 
 func setupMetadataRouter(mockSvc *MockMetadataService) *gin.Engine {
@@ -236,23 +221,6 @@ func TestGetDataSourceNotFound(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestDeleteDataSource(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	// Setup expectations
-	mockSvc.On("DeleteDataSource", mock.Anything, shared.ID("test-id")).Return(nil)
-
-	// Make request
-	req, _ := http.NewRequest("DELETE", "/api/v1/datasources/test-id", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Assertions
-	assert.Equal(t, http.StatusNoContent, w.Code)
-
-	mockSvc.AssertExpectations(t)
-}
 
 func TestCreateDataSourceInvalidBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -277,132 +245,13 @@ func TestCreateDataSourceInvalidBody(t *testing.T) {
 	assert.Equal(t, 400, resp.Code)
 }
 
-func TestUpdateDataSource(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
 
-	mockSvc.On("UpdateDataSource", mock.Anything, shared.ID("test-id"), mock.Anything).Return(nil)
+// Note: Tests for deleted routes (ListAPIsByDataSource, GetCategories, etc.)
+// have been removed as these routes are no longer part of the MetadataHandler.
 
-	body := map[string]interface{}{
-		"name":        "updated-name",
-		"description": "Updated Description",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("PUT", "/api/v1/datasources/test-id", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
-func TestListAPIsByDataSource(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
 
-	apis := []*metadata.APIMetadata{
-		metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "Daily Data", "Daily stock data", "/daily"),
-	}
-	mockSvc.On("ListAPIMetadataByDataSource", mock.Anything, shared.ID("ds-1")).Return(apis, nil)
-
-	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/apis", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestGetCategories(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	apis := []*metadata.APIMetadata{}
-	mockSvc.On("ListAPIMetadataByDataSource", mock.Anything, shared.ID("ds-1")).Return(apis, nil)
-
-	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/categories", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestGetAPIMetadata(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	api := metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "Daily Data", "Daily stock data", "/daily")
-	mockSvc.On("GetAPIMetadata", mock.Anything, shared.ID("api-1")).Return(api, nil)
-
-	req, _ := http.NewRequest("GET", "/api/v1/apis/api-1", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestCreateAPIMetadata(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	api := metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "Daily Data", "Daily stock data", "/daily")
-	mockSvc.On("CreateAPIMetadata", mock.Anything, mock.MatchedBy(func(req contracts.CreateAPIMetadataRequest) bool {
-		return req.Name == "daily"
-	})).Return(api, nil)
-
-	body := map[string]interface{}{
-		"data_source_id": "ds-1",
-		"name":           "daily",
-		"display_name":   "Daily Data",
-		"description":    "Daily stock data",
-		"endpoint":       "/daily",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestUpdateAPIMetadata(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("UpdateAPIMetadata", mock.Anything, shared.ID("api-1"), mock.Anything).Return(nil)
-
-	body := map[string]interface{}{
-		"display_name": "Updated Daily Data",
-		"description":  "Updated description",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("PUT", "/api/v1/apis/api-1", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestDeleteAPIMetadata(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("DeleteAPIMetadata", mock.Anything, shared.ID("api-1")).Return(nil)
-
-	req, _ := http.NewRequest("DELETE", "/api/v1/apis/api-1", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
 func TestSetToken(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -440,19 +289,6 @@ func TestGetToken(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestDeleteToken(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("DeleteToken", mock.Anything, shared.ID("ds-1")).Return(nil)
-
-	req, _ := http.NewRequest("DELETE", "/api/v1/datasources/ds-1/token", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
 func TestRefreshMetadata(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -517,50 +353,8 @@ func TestCreateDataSourceServiceError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestUpdateDataSourceInvalidBody(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
 
-	req, _ := http.NewRequest("PUT", "/api/v1/datasources/test-id", bytes.NewBuffer([]byte("invalid json")))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestUpdateDataSourceServiceError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("UpdateDataSource", mock.Anything, shared.ID("test-id"), mock.Anything).Return(shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil))
-
-	body := map[string]interface{}{
-		"name": "updated-name",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("PUT", "/api/v1/datasources/test-id", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestDeleteDataSourceError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("DeleteDataSource", mock.Anything, shared.ID("test-id")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil))
-
-	req, _ := http.NewRequest("DELETE", "/api/v1/datasources/test-id", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
 func TestRefreshMetadataWithOptionalBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -610,177 +404,13 @@ func TestRefreshMetadataError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestGetCategoriesError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
 
-	mockSvc.On("ListAPIMetadataByDataSource", mock.Anything, shared.ID("ds-1")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil))
 
-	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/categories", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
-func TestGetCategoriesWithCategoryID(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
 
-	catID := shared.ID("cat-1")
-	apis := []*metadata.APIMetadata{
-		{ID: "api-1", CategoryID: &catID, Name: "daily"},
-	}
-	mockSvc.On("ListAPIMetadataByDataSource", mock.Anything, shared.ID("ds-1")).Return(apis, nil)
 
-	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/categories", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestListAPIsByDataSourceError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("ListAPIMetadataByDataSource", mock.Anything, shared.ID("ds-1")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil))
-
-	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/apis", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestGetAPIMetadataError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("GetAPIMetadata", mock.Anything, shared.ID("api-1")).Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "api not found", nil))
-
-	req, _ := http.NewRequest("GET", "/api/v1/apis/api-1", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestCreateAPIMetadataInvalidBody(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	// Missing required fields
-	body := map[string]interface{}{
-		"description": "Daily stock data",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestCreateAPIMetadataServiceError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("CreateAPIMetadata", mock.Anything, mock.Anything).Return(nil, shared.NewDomainError(shared.ErrCodeConflict, "api already exists", nil))
-
-	body := map[string]interface{}{
-		"data_source_id": "ds-1",
-		"name":           "daily",
-		"display_name":   "Daily Data",
-		"description":    "Daily stock data",
-		"endpoint":       "/daily",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestCreateAPIMetadataWithCategoryID(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	api := metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "Daily Data", "Daily stock data", "/daily")
-	mockSvc.On("CreateAPIMetadata", mock.Anything, mock.MatchedBy(func(req contracts.CreateAPIMetadataRequest) bool {
-		return req.CategoryID != nil && *req.CategoryID == shared.ID("cat-1")
-	})).Return(api, nil)
-
-	body := map[string]interface{}{
-		"data_source_id": "ds-1",
-		"category_id":    "cat-1",
-		"name":           "daily",
-		"display_name":   "Daily Data",
-		"description":    "Daily stock data",
-		"endpoint":       "/daily",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestUpdateAPIMetadataInvalidBody(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	req, _ := http.NewRequest("PUT", "/api/v1/apis/api-1", bytes.NewBuffer([]byte("invalid json")))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestUpdateAPIMetadataServiceError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("UpdateAPIMetadata", mock.Anything, shared.ID("api-1"), mock.Anything).Return(shared.NewDomainError(shared.ErrCodeNotFound, "api not found", nil))
-
-	body := map[string]interface{}{
-		"display_name": "Updated Daily Data",
-	}
-	jsonBody, _ := json.Marshal(body)
-	req, _ := http.NewRequest("PUT", "/api/v1/apis/api-1", bytes.NewBuffer(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
-
-func TestDeleteAPIMetadataError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("DeleteAPIMetadata", mock.Anything, shared.ID("api-1")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "api not found", nil))
-
-	req, _ := http.NewRequest("DELETE", "/api/v1/apis/api-1", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}
 
 func TestSetTokenInvalidBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -832,16 +462,3 @@ func TestGetTokenError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-func TestDeleteTokenError(t *testing.T) {
-	mockSvc := new(MockMetadataService)
-	router := setupMetadataRouter(mockSvc)
-
-	mockSvc.On("DeleteToken", mock.Anything, shared.ID("ds-1")).Return(shared.NewDomainError(shared.ErrCodeNotFound, "token not found", nil))
-
-	req, _ := http.NewRequest("DELETE", "/api/v1/datasources/ds-1/token", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-	mockSvc.AssertExpectations(t)
-}

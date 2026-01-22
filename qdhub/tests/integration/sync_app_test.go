@@ -5,280 +5,344 @@ package integration
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
-	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/scheduler"
-	"qdhub/internal/infrastructure/taskengine"
-
-	"github.com/LENAX/task-engine/pkg/core/engine"
-	"github.com/LENAX/task-engine/pkg/storage/sqlite"
-	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
 )
 
-// ==================== Integration Test Helpers ====================
+// MockSyncWorkflowExecutor is a mock workflow executor for sync integration testing.
+type MockSyncWorkflowExecutor struct{}
 
-type syncTestContext struct {
-	db             *persistence.DB
-	engine         *engine.Engine
-	syncJobRepo    *repository.SyncJobRepositoryImpl
-	wfDefRepo      *repository.WorkflowDefinitionRepositoryImpl
-	adapter        workflow.TaskEngineAdapter
-	syncAppService contracts.SyncApplicationService
-	wfAppService   contracts.WorkflowApplicationService
-	cleanup        func()
+func (m *MockSyncWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-func setupSyncTestContext(t *testing.T) *syncTestContext {
-	t.Helper()
+func (m *MockSyncWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
 
-	// Create temp database file
-	tmpfile, err := os.CreateTemp("", "sync_app_test_*.db")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+func (m *MockSyncWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockSyncWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockSyncWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockSyncWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+// MockSyncPlanScheduler is a mock plan scheduler for testing.
+type MockSyncPlanScheduler struct {
+	scheduledPlans map[string]string
+}
+
+func NewMockSyncPlanScheduler() *MockSyncPlanScheduler {
+	return &MockSyncPlanScheduler{
+		scheduledPlans: make(map[string]string),
 	}
-	tmpfile.Close()
-	dbPath := tmpfile.Name()
+}
 
-	// Create database connection
-	db, err := persistence.NewDB(dbPath)
-	if err != nil {
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create database: %v", err)
+func (m *MockSyncPlanScheduler) SchedulePlan(planID string, cronExpr string) error {
+	m.scheduledPlans[planID] = cronExpr
+	return nil
+}
+
+func (m *MockSyncPlanScheduler) UnschedulePlan(planID string) {
+	delete(m.scheduledPlans, planID)
+}
+
+func (m *MockSyncPlanScheduler) GetNextRunTime(planID string) *interface{} {
+	return nil
+}
+
+// MockSyncDependencyResolver is a mock dependency resolver for testing.
+type MockSyncDependencyResolver struct{}
+
+func (m *MockSyncDependencyResolver) Resolve(selectedAPIs []string, allAPIDependencies map[string][]sync.ParamDependency) (*sync.ExecutionGraph, []string, error) {
+	graph := &sync.ExecutionGraph{
+		Levels:      [][]string{selectedAPIs},
+		TaskConfigs: make(map[string]*sync.TaskConfig),
 	}
-
-	// Run migrations
-	migrationSQL, err := os.ReadFile("../../migrations/001_init_schema.up.sql")
-	if err != nil {
-		db.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to read migration file: %v", err)
+	for _, api := range selectedAPIs {
+		graph.TaskConfigs[api] = &sync.TaskConfig{
+			APIName:  api,
+			SyncMode: sync.TaskSyncModeDirect,
+		}
 	}
-	if _, err := db.Exec(string(migrationSQL)); err != nil {
-		db.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to execute migration: %v", err)
-	}
-
-	// Create Task Engine
-	sqlxDB, err := sqlx.Connect("sqlite3", dbPath)
-	if err != nil {
-		db.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create sqlx connection: %v", err)
-	}
-
-	aggregateRepo, err := sqlite.NewWorkflowAggregateRepo(sqlxDB)
-	if err != nil {
-		db.Close()
-		sqlxDB.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create aggregate repo: %v", err)
-	}
-
-	eng, err := engine.NewEngineWithAggregateRepo(5, 30, aggregateRepo)
-	if err != nil {
-		db.Close()
-		sqlxDB.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create engine: %v", err)
-	}
-
-	// Start engine
-	ctx := context.Background()
-	if err := eng.Start(ctx); err != nil {
-		db.Close()
-		sqlxDB.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to start engine: %v", err)
-	}
-
-	// Create repositories
-	syncJobRepo := repository.NewSyncJobRepository(db)
-	wfDefRepo, err := repository.NewWorkflowDefinitionRepository(db)
-	if err != nil {
-		eng.Stop()
-		db.Close()
-		sqlxDB.Close()
-		os.Remove(dbPath)
-		t.Fatalf("Failed to create workflow definition repository: %v", err)
-	}
-
-	// Create adapter
-	adapter := taskengine.NewTaskEngineAdapter(eng)
-	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
-
-	// Create a simple scheduler that doesn't actually schedule (for testing)
-	jobScheduler := scheduler.NewCronScheduler(nil)
-
-	// Create services
-	syncAppService := impl.NewSyncApplicationService(syncJobRepo, wfDefRepo, adapter, cronCalculator, jobScheduler)
-	wfAppService := impl.NewWorkflowApplicationService(wfDefRepo, adapter)
-
-	return &syncTestContext{
-		db:             db,
-		engine:         eng,
-		syncJobRepo:    syncJobRepo,
-		wfDefRepo:      wfDefRepo,
-		adapter:        adapter,
-		syncAppService: syncAppService,
-		wfAppService:   wfAppService,
-		cleanup: func() {
-			eng.Stop()
-			db.Close()
-			sqlxDB.Close()
-			os.Remove(dbPath)
-		},
-	}
+	return graph, selectedAPIs, nil
 }
 
 // ==================== Integration Tests ====================
 
-// Note: SyncJob integration tests are skipped because they require complex
-// foreign key dependencies (data_source, api_metadata, quant_data_store).
-// The core SyncApplicationService logic is tested in unit tests with mocks.
-// Workflow integration tests below test the actual Task Engine integration.
-
-func TestWorkflowApplicationService_Integration_CreateAndGetWorkflowDefinition(t *testing.T) {
-	tc := setupSyncTestContext(t)
-	defer tc.cleanup()
+func TestSyncApplicationService_Integration_CreateAndGetSyncPlan(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
 
 	ctx := context.Background()
 
-	// Create workflow definition
-	req := contracts.CreateWorkflowDefinitionRequest{
-		Name:           "Integration Test Workflow",
-		Description:    "A workflow for integration testing",
-		Category:       workflow.WfCategorySync,
-		DefinitionYAML: "name: test\ntasks: []",
-		IsSystem:       false,
+	// Create repositories
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Create a data source first
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
 	}
 
-	def, err := tc.wfAppService.CreateWorkflowDefinition(ctx, req)
-	if err != nil {
-		t.Fatalf("CreateWorkflowDefinition failed: %v", err)
-	}
-	if def == nil {
-		t.Fatal("Expected definition to be non-nil")
+	// Create sync plan
+	req := contracts.CreateSyncPlanRequest{
+		Name:         "Integration Test Plan",
+		Description:  "A sync plan for integration testing",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"daily", "stock_basic"},
 	}
 
-	// Get workflow definition
-	retrieved, err := tc.wfAppService.GetWorkflowDefinition(ctx, shared.ID(def.ID()))
+	plan, err := svc.CreateSyncPlan(ctx, req)
 	if err != nil {
-		t.Fatalf("GetWorkflowDefinition failed: %v", err)
+		t.Fatalf("CreateSyncPlan failed: %v", err)
 	}
-	if retrieved.Workflow.Name != req.Name {
-		t.Errorf("Expected name %s, got %s", req.Name, retrieved.Workflow.Name)
+	if plan == nil {
+		t.Fatal("Expected sync plan to be non-nil")
+	}
+
+	// Get sync plan
+	retrieved, err := svc.GetSyncPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("GetSyncPlan failed: %v", err)
+	}
+	if retrieved.Name != req.Name {
+		t.Errorf("Expected name %s, got %s", req.Name, retrieved.Name)
+	}
+	if len(retrieved.SelectedAPIs) != len(req.SelectedAPIs) {
+		t.Errorf("Expected %d selected APIs, got %d", len(req.SelectedAPIs), len(retrieved.SelectedAPIs))
 	}
 }
 
-func TestWorkflowApplicationService_Integration_EnableDisableWorkflow(t *testing.T) {
-	tc := setupSyncTestContext(t)
-	defer tc.cleanup()
+func TestSyncApplicationService_Integration_ListSyncPlans(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
 
 	ctx := context.Background()
 
-	// Create workflow definition
-	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
-		Name:           "Test Workflow",
-		Description:    "Test",
-		Category:       workflow.WfCategorySync,
-		DefinitionYAML: "name: test\ntasks: []",
-		IsSystem:       false,
-	})
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
 
-	// Enable workflow
-	if err := tc.wfAppService.EnableWorkflow(ctx, shared.ID(def.ID())); err != nil {
-		t.Fatalf("EnableWorkflow failed: %v", err)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Create a data source first
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
 	}
 
-	enabled, _ := tc.wfAppService.GetWorkflowDefinition(ctx, shared.ID(def.ID()))
-	if !enabled.IsEnabled() {
-		t.Error("Expected workflow to be enabled")
-	}
-
-	// Disable workflow
-	if err := tc.wfAppService.DisableWorkflow(ctx, shared.ID(def.ID())); err != nil {
-		t.Fatalf("DisableWorkflow failed: %v", err)
-	}
-
-	disabled, _ := tc.wfAppService.GetWorkflowDefinition(ctx, shared.ID(def.ID()))
-	if disabled.IsEnabled() {
-		t.Error("Expected workflow to be disabled")
-	}
-}
-
-func TestWorkflowApplicationService_Integration_ListWorkflowDefinitions(t *testing.T) {
-	tc := setupSyncTestContext(t)
-	defer tc.cleanup()
-
-	ctx := context.Background()
-
-	// Create multiple workflow definitions
+	// Create multiple sync plans
 	for i := 0; i < 3; i++ {
-		tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
-			Name:           "Test Workflow",
-			Description:    "Test",
-			Category:       workflow.WfCategorySync,
-			DefinitionYAML: "name: test\ntasks: []",
-			IsSystem:       false,
+		svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+			Name:         "Test Plan",
+			Description:  "Test",
+			DataSourceID: dataSource.ID,
+			SelectedAPIs: []string{"daily"},
 		})
 	}
 
-	// List definitions
-	defs, err := tc.wfAppService.ListWorkflowDefinitions(ctx, nil)
+	// List sync plans
+	plans, err := svc.ListSyncPlans(ctx)
 	if err != nil {
-		t.Fatalf("ListWorkflowDefinitions failed: %v", err)
+		t.Fatalf("ListSyncPlans failed: %v", err)
 	}
-	if len(defs) != 3 {
-		t.Errorf("Expected 3 definitions, got %d", len(defs))
+	if len(plans) != 3 {
+		t.Errorf("Expected 3 plans, got %d", len(plans))
 	}
 }
 
-func TestWorkflowApplicationService_Integration_ExecuteWorkflow(t *testing.T) {
-	tc := setupSyncTestContext(t)
-	defer tc.cleanup()
+func TestSyncApplicationService_Integration_UpdateSyncPlan(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
 
 	ctx := context.Background()
 
-	// Create workflow definition
-	def, _ := tc.wfAppService.CreateWorkflowDefinition(ctx, contracts.CreateWorkflowDefinitionRequest{
-		Name:           "Test Workflow",
-		Description:    "Test",
-		Category:       workflow.WfCategorySync,
-		DefinitionYAML: "name: test\ntasks: []",
-		IsSystem:       false,
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Create a data source
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
+	}
+
+	// Create sync plan
+	plan, _ := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Test Plan",
+		Description:  "Test",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"daily"},
 	})
 
-	// Enable workflow
-	tc.wfAppService.EnableWorkflow(ctx, shared.ID(def.ID()))
-
-	// Execute workflow
-	instID, err := tc.wfAppService.ExecuteWorkflow(ctx, contracts.ExecuteWorkflowRequest{
-		WorkflowDefID: shared.ID(def.ID()),
-		TriggerType:   workflow.TriggerTypeManual,
-		TriggerParams: map[string]interface{}{"test": "value"},
+	// Update sync plan
+	newName := "Updated Plan"
+	newDesc := "Updated description"
+	err := svc.UpdateSyncPlan(ctx, plan.ID, contracts.UpdateSyncPlanRequest{
+		Name:        &newName,
+		Description: &newDesc,
 	})
 	if err != nil {
-		t.Fatalf("ExecuteWorkflow failed: %v", err)
-	}
-	if instID.IsEmpty() {
-		t.Error("Expected non-empty instance ID")
+		t.Fatalf("UpdateSyncPlan failed: %v", err)
 	}
 
-	// Get workflow status
-	status, err := tc.wfAppService.GetWorkflowStatus(ctx, instID)
-	if err != nil {
-		t.Fatalf("GetWorkflowStatus failed: %v", err)
+	// Verify update
+	updated, _ := svc.GetSyncPlan(ctx, plan.ID)
+	if updated.Name != newName {
+		t.Errorf("Expected name %s, got %s", newName, updated.Name)
 	}
-	if status == nil {
-		t.Fatal("Expected status to be non-nil")
+	if updated.Description != newDesc {
+		t.Errorf("Expected description %s, got %s", newDesc, updated.Description)
+	}
+}
+
+func TestSyncApplicationService_Integration_DeleteSyncPlan(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Create a data source
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
+	}
+
+	// Create sync plan
+	plan, _ := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Test Plan",
+		Description:  "Test",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"daily"},
+	})
+
+	// Delete sync plan
+	err := svc.DeleteSyncPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("DeleteSyncPlan failed: %v", err)
+	}
+
+	// Verify deletion
+	_, err = svc.GetSyncPlan(ctx, plan.ID)
+	if err == nil {
+		t.Fatal("Expected error for deleted sync plan")
+	}
+}
+
+func TestSyncApplicationService_Integration_EnableDisablePlan(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Create a data source
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("Failed to create data source: %v", err)
+	}
+
+	// Create sync plan
+	plan, _ := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Test Plan",
+		Description:  "Test",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"daily"},
+	})
+
+	// Resolve dependencies first (required before enabling)
+	if err := svc.ResolveSyncPlan(ctx, plan.ID); err != nil {
+		t.Fatalf("ResolveSyncPlan failed: %v", err)
+	}
+
+	// Enable plan
+	if err := svc.EnablePlan(ctx, plan.ID); err != nil {
+		t.Fatalf("EnablePlan failed: %v", err)
+	}
+
+	enabled, _ := svc.GetSyncPlan(ctx, plan.ID)
+	if enabled.Status != sync.PlanStatusEnabled {
+		t.Errorf("Expected plan status enabled, got %s", enabled.Status)
+	}
+
+	// Disable plan
+	if err := svc.DisablePlan(ctx, plan.ID); err != nil {
+		t.Fatalf("DisablePlan failed: %v", err)
+	}
+
+	disabled, _ := svc.GetSyncPlan(ctx, plan.ID)
+	if disabled.Status != sync.PlanStatusDisabled {
+		t.Errorf("Expected plan status disabled, got %s", disabled.Status)
+	}
+}
+
+func TestSyncApplicationService_Integration_CreateSyncPlan_DataSourceNotFound(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+
+	// Try to create sync plan with non-existent data source
+	_, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Test Plan",
+		Description:  "Test",
+		DataSourceID: shared.NewID(), // Non-existent
+		SelectedAPIs: []string{"daily"},
+	})
+	if err == nil {
+		t.Error("Expected error for non-existent data source")
 	}
 }

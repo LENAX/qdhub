@@ -22,22 +22,105 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
-	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 	httpserver "qdhub/internal/interfaces/http"
 )
 
-// Container holds all application dependencies.
+// DependencyContainer defines the interface for dependency injection container.
+type DependencyContainer interface {
+	// Infrastructure
+	GetDB() *persistence.DB
+	GetHTTPServer() *httpserver.Server
+
+	// Repositories
+	GetDataSourceRepo() metadata.DataSourceRepository
+	GetDataStoreRepo() datastore.QuantDataStoreRepository
+	GetMappingRuleRepo() datastore.DataTypeMappingRuleRepository
+	GetSyncPlanRepo() sync.SyncPlanRepository
+	GetWorkflowRepo() workflow.WorkflowDefinitionRepository
+	GetMetadataRepo() metadata.Repository
+
+	// Task Engine
+	GetTaskEngine() *engine.Engine
+	GetTaskEngineAdapter() workflow.TaskEngineAdapter
+	GetWorkflowFactory() *workflows.WorkflowFactory
+	GetWorkflowExecutor() workflow.WorkflowExecutor
+	GetDataSourceRegistry() *datasource.Registry
+
+	// Scheduler
+	GetCronCalculator() sync.CronScheduleCalculator
+	GetPlanScheduler() sync.PlanScheduler
+
+	// Domain Services
+	GetDependencyResolver() sync.DependencyResolver
+
+	// Application Services
+	GetMetadataSvc() contracts.MetadataApplicationService
+	GetDataStoreSvc() contracts.DataStoreApplicationService
+	GetSyncSvc() contracts.SyncApplicationService
+	GetWorkflowSvc() contracts.WorkflowApplicationService
+
+	// Built-in Workflow Initializer
+	GetBuiltInInitializer() *impl.BuiltInWorkflowInitializer
+
+	// Lifecycle
+	Initialize(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
+
+// infrastructureModule holds infrastructure-related dependencies.
+type infrastructureModule struct {
+	DB         *persistence.DB
+	HTTPServer *httpserver.Server
+}
+
+// repositoryModule holds all repository dependencies.
+type repositoryModule struct {
+	DataSourceRepo  metadata.DataSourceRepository
+	DataStoreRepo   datastore.QuantDataStoreRepository
+	MappingRuleRepo datastore.DataTypeMappingRuleRepository
+	SyncPlanRepo    sync.SyncPlanRepository
+	WorkflowRepo    workflow.WorkflowDefinitionRepository
+	MetadataRepo    metadata.Repository
+}
+
+// taskEngineModule holds task engine related dependencies.
+type taskEngineModule struct {
+	TaskEngine         *engine.Engine
+	TaskEngineAdapter  workflow.TaskEngineAdapter
+	WorkflowFactory    *workflows.WorkflowFactory
+	WorkflowExecutor   workflow.WorkflowExecutor
+	DataSourceRegistry *datasource.Registry
+}
+
+// schedulerModule holds scheduler related dependencies.
+type schedulerModule struct {
+	CronCalculator     sync.CronScheduleCalculator
+	PlanScheduler      sync.PlanScheduler
+	DependencyResolver sync.DependencyResolver
+}
+
+// applicationServiceModule holds application service dependencies.
+type applicationServiceModule struct {
+	MetadataSvc  contracts.MetadataApplicationService
+	DataStoreSvc contracts.DataStoreApplicationService
+	SyncSvc      contracts.SyncApplicationService
+	WorkflowSvc  contracts.WorkflowApplicationService
+}
+
+// Container holds all application dependencies and implements DependencyContainer interface.
+// For backward compatibility, all fields are directly accessible.
 type Container struct {
 	// Configuration
 	config Config
 
-	// Infrastructure
-	DB *persistence.DB
+	// Infrastructure (backward compatibility: direct field access)
+	DB         *persistence.DB
+	HTTPServer *httpserver.Server
 
-	// Repositories
+	// Repositories (backward compatibility: direct field access)
 	DataSourceRepo  metadata.DataSourceRepository
 	DataStoreRepo   datastore.QuantDataStoreRepository
 	MappingRuleRepo datastore.DataTypeMappingRuleRepository
@@ -45,21 +128,19 @@ type Container struct {
 	WorkflowRepo    workflow.WorkflowDefinitionRepository
 	MetadataRepo    metadata.Repository
 
-	// Task Engine
+	// Task Engine (backward compatibility: direct field access)
 	TaskEngine         *engine.Engine
 	TaskEngineAdapter  workflow.TaskEngineAdapter
 	WorkflowFactory    *workflows.WorkflowFactory
-	WorkflowExecutor   workflow.WorkflowExecutor // 领域服务：执行内建工作流
+	WorkflowExecutor   workflow.WorkflowExecutor
 	DataSourceRegistry *datasource.Registry
 
-	// Scheduler
-	CronCalculator sync.CronScheduleCalculator
-	PlanScheduler  sync.PlanScheduler
-
-	// Domain Services
+	// Scheduler (backward compatibility: direct field access)
+	CronCalculator     sync.CronScheduleCalculator
+	PlanScheduler      sync.PlanScheduler
 	DependencyResolver sync.DependencyResolver
 
-	// Application Services
+	// Application Services (backward compatibility: direct field access)
 	MetadataSvc  contracts.MetadataApplicationService
 	DataStoreSvc contracts.DataStoreApplicationService
 	SyncSvc      contracts.SyncApplicationService
@@ -67,9 +148,6 @@ type Container struct {
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
-
-	// HTTP Server
-	HTTPServer *httpserver.Server
 }
 
 // Config holds container configuration.
@@ -116,7 +194,7 @@ func NewContainer(config Config) *Container {
 func (c *Container) Initialize(ctx context.Context) error {
 	logrus.Info("Initializing dependency container...")
 
-	// Step 1: Initialize database
+	// Step 1: Initialize infrastructure (database)
 	if err := c.initDatabase(); err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
@@ -161,7 +239,114 @@ func (c *Container) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// initDatabase initializes the database connection.
+// DependencyContainer interface implementation
+
+// GetDB returns the database instance.
+func (c *Container) GetDB() *persistence.DB {
+	return c.DB
+}
+
+// GetHTTPServer returns the HTTP server instance.
+func (c *Container) GetHTTPServer() *httpserver.Server {
+	return c.HTTPServer
+}
+
+// GetDataSourceRepo returns the data source repository.
+func (c *Container) GetDataSourceRepo() metadata.DataSourceRepository {
+	return c.DataSourceRepo
+}
+
+// GetDataStoreRepo returns the data store repository.
+func (c *Container) GetDataStoreRepo() datastore.QuantDataStoreRepository {
+	return c.DataStoreRepo
+}
+
+// GetMappingRuleRepo returns the mapping rule repository.
+func (c *Container) GetMappingRuleRepo() datastore.DataTypeMappingRuleRepository {
+	return c.MappingRuleRepo
+}
+
+// GetSyncPlanRepo returns the sync plan repository.
+func (c *Container) GetSyncPlanRepo() sync.SyncPlanRepository {
+	return c.SyncPlanRepo
+}
+
+// GetWorkflowRepo returns the workflow repository.
+func (c *Container) GetWorkflowRepo() workflow.WorkflowDefinitionRepository {
+	return c.WorkflowRepo
+}
+
+// GetMetadataRepo returns the metadata repository.
+func (c *Container) GetMetadataRepo() metadata.Repository {
+	return c.MetadataRepo
+}
+
+// GetTaskEngine returns the task engine instance.
+func (c *Container) GetTaskEngine() *engine.Engine {
+	return c.TaskEngine
+}
+
+// GetTaskEngineAdapter returns the task engine adapter.
+func (c *Container) GetTaskEngineAdapter() workflow.TaskEngineAdapter {
+	return c.TaskEngineAdapter
+}
+
+// GetWorkflowFactory returns the workflow factory.
+func (c *Container) GetWorkflowFactory() *workflows.WorkflowFactory {
+	return c.WorkflowFactory
+}
+
+// GetWorkflowExecutor returns the workflow executor.
+func (c *Container) GetWorkflowExecutor() workflow.WorkflowExecutor {
+	return c.WorkflowExecutor
+}
+
+// GetDataSourceRegistry returns the data source registry.
+func (c *Container) GetDataSourceRegistry() *datasource.Registry {
+	return c.DataSourceRegistry
+}
+
+// GetCronCalculator returns the cron calculator.
+func (c *Container) GetCronCalculator() sync.CronScheduleCalculator {
+	return c.CronCalculator
+}
+
+// GetPlanScheduler returns the plan scheduler.
+func (c *Container) GetPlanScheduler() sync.PlanScheduler {
+	return c.PlanScheduler
+}
+
+// GetDependencyResolver returns the dependency resolver.
+func (c *Container) GetDependencyResolver() sync.DependencyResolver {
+	return c.DependencyResolver
+}
+
+// GetMetadataSvc returns the metadata application service.
+func (c *Container) GetMetadataSvc() contracts.MetadataApplicationService {
+	return c.MetadataSvc
+}
+
+// GetDataStoreSvc returns the data store application service.
+func (c *Container) GetDataStoreSvc() contracts.DataStoreApplicationService {
+	return c.DataStoreSvc
+}
+
+// GetSyncSvc returns the sync application service.
+func (c *Container) GetSyncSvc() contracts.SyncApplicationService {
+	return c.SyncSvc
+}
+
+// GetWorkflowSvc returns the workflow application service.
+func (c *Container) GetWorkflowSvc() contracts.WorkflowApplicationService {
+	return c.WorkflowSvc
+}
+
+// GetBuiltInInitializer returns the built-in workflow initializer.
+func (c *Container) GetBuiltInInitializer() *impl.BuiltInWorkflowInitializer {
+	return c.BuiltInInitializer
+}
+
+// initDatabase initializes the database connection (infrastructure module).
 func (c *Container) initDatabase() error {
 	// Ensure data directory exists for SQLite
 	if c.config.DBDriver == "sqlite" {
@@ -199,7 +384,7 @@ func (c *Container) runMigrations() error {
 	return nil
 }
 
-// initRepositories initializes all repositories.
+// initRepositories initializes all repositories (repository module).
 func (c *Container) initRepositories() error {
 	c.DataSourceRepo = repository.NewDataSourceRepository(c.DB)
 	c.DataStoreRepo = repository.NewQuantDataStoreRepository(c.DB)
@@ -219,7 +404,7 @@ func (c *Container) initRepositories() error {
 	return nil
 }
 
-// initTaskEngine initializes Task Engine and related components.
+// initTaskEngine initializes Task Engine and related components (task engine module).
 func (c *Container) initTaskEngine(ctx context.Context) error {
 	// Create Task Engine aggregate repository
 	taskEngineDSN := c.DB.DSN()
@@ -276,7 +461,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	return nil
 }
 
-// initScheduler initializes the scheduler.
+// initScheduler initializes the scheduler (scheduler module).
 func (c *Container) initScheduler() error {
 	c.CronCalculator = scheduler.NewCronSchedulerCalculatorAdapter()
 	c.PlanScheduler = scheduler.NewCronScheduler(nil) // TODO: Add plan trigger callback
@@ -289,7 +474,7 @@ func (c *Container) initScheduler() error {
 	return nil
 }
 
-// initApplicationServices initializes all application services.
+// initApplicationServices initializes all application services (application service module).
 func (c *Container) initApplicationServices() error {
 	// Workflow service (for workflow management API)
 	c.WorkflowSvc = impl.NewWorkflowApplicationService(c.WorkflowRepo, c.TaskEngineAdapter)
@@ -297,15 +482,13 @@ func (c *Container) initApplicationServices() error {
 	// Metadata service
 	// 注意：MetadataSvc 使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc（应用服务）
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
-	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, nil, c.WorkflowExecutor)
+	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor)
 
 	// DataStore service
 	// 注意：DataStoreSvc 现在使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
-		c.MappingRuleRepo,
 		c.DataSourceRepo,
-		quantdb.NewQuantDBAdapter(),
 		c.WorkflowExecutor,
 	)
 
@@ -340,7 +523,7 @@ func (c *Container) initBuiltInWorkflows(ctx context.Context) error {
 	return nil
 }
 
-// initHTTPServer initializes the HTTP server.
+// initHTTPServer initializes the HTTP server (infrastructure module).
 func (c *Container) initHTTPServer() error {
 	serverConfig := httpserver.ServerConfig{
 		Host:         c.config.ServerHost,

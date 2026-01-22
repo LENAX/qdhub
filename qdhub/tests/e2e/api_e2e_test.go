@@ -262,13 +262,11 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	// Create repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err)
 
 	// Create adapters
-	quantDBAdapter := &e2eQuantDBAdapter{}
 	parserFactory := newE2EDocumentParserFactory()
 	taskEngineAdapter := newE2ETaskEngineAdapter()
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
@@ -279,8 +277,9 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	dependencyResolver := sync.NewDependencyResolver()
 
 	// Create application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
+	metadataRepo := repository.NewMetadataRepository(db)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 

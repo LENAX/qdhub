@@ -629,6 +629,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	// 9. 创建 MetadataApplicationService
 	metadataAppService := impl.NewMetadataApplicationService(
 		dataSourceRepo,
+		metadataRepo,
 		nil, // parserFactory - not needed for tests (use workflow for metadata crawl)
 		workflowExecutor,
 	)
@@ -641,12 +642,9 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 
 	// 11. 创建 DataStoreApplicationService
 	datastoreRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
 	datastoreAppService := impl.NewDataStoreApplicationService(
 		datastoreRepo,
-		mappingRuleRepo,
 		dataSourceRepo,
-		nil, // quantDBAdapter - tests use workflow for table creation
 		workflowExecutor,
 	)
 
@@ -883,8 +881,8 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 			t.Logf("✅ 元数据爬取完成: %d 个任务", status.CompletedTask)
 		}
 
-		// 验证元数据已保存（使用应用服务）
-		apiMetadataList, err := testCtx.metadataAppService.ListAPIMetadataByDataSource(ctx, dataSourceID)
+		// 验证元数据已保存（使用 repository）
+		apiMetadataList, err := testCtx.metadataRepo.ListAPIMetadataByDataSource(ctx, dataSourceID)
 		if err == nil {
 			t.Logf("  📊 已爬取 API 元数据数量: %d", len(apiMetadataList))
 		}
@@ -1717,7 +1715,7 @@ func TestE2E_DataSyncOnly(t *testing.T) {
 	require.NotEmpty(t, dataSourceID, "未找到 Tushare 数据源，请先执行完整的 E2E 测试流程")
 
 	// 验证 API 元数据已存在
-	apiMetadataList, err := testCtx.metadataAppService.ListAPIMetadataByDataSource(ctx, dataSourceID)
+	apiMetadataList, err := testCtx.metadataRepo.ListAPIMetadataByDataSource(ctx, dataSourceID)
 	require.NoError(t, err, "获取 API 元数据列表失败")
 	t.Logf("  📊 已有 API 元数据数量: %d", len(apiMetadataList))
 
@@ -1908,7 +1906,7 @@ func TestE2E_GGT_Top10(t *testing.T) {
 	require.NotEmpty(t, dataSourceID, "未找到 Tushare 数据源，请先执行完整的 E2E 测试流程")
 
 	// 验证 ggt_top10 API 元数据已存在
-	apiMetadataList, err := testCtx.metadataAppService.ListAPIMetadataByDataSource(ctx, dataSourceID)
+	apiMetadataList, err := testCtx.metadataRepo.ListAPIMetadataByDataSource(ctx, dataSourceID)
 	require.NoError(t, err, "获取 API 元数据列表失败")
 
 	var ggtTop10Exists bool

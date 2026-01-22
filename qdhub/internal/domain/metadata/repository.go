@@ -126,6 +126,9 @@ type Repository interface {
 	// SaveAPISyncStrategyBatch batch saves API sync strategies.
 	SaveAPISyncStrategyBatch(ctx context.Context, strategies []*APISyncStrategy) error
 
+	// GetAPISyncStrategyByID retrieves a sync strategy by ID.
+	GetAPISyncStrategyByID(ctx context.Context, id shared.ID) (*APISyncStrategy, error)
+
 	// GetAPISyncStrategyByAPIName retrieves a sync strategy by data source ID and API name.
 	GetAPISyncStrategyByAPIName(ctx context.Context, dataSourceID shared.ID, apiName string) (*APISyncStrategy, error)
 

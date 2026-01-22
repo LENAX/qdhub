@@ -32,57 +32,31 @@ import (
 
 // ==================== Mock Implementations ====================
 
-// MockHTTPQuantDBAdapter implements impl.QuantDBAdapter for HTTP integration tests.
-type MockHTTPQuantDBAdapter struct{}
+// MockHTTPWorkflowExecutor implements workflow.WorkflowExecutor for HTTP integration tests.
+type MockHTTPWorkflowExecutor struct{}
 
-func (m *MockHTTPQuantDBAdapter) TestConnection(ctx context.Context, ds *datastore.QuantDataStore) error {
-	return nil
+func (m *MockHTTPWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-func (m *MockHTTPQuantDBAdapter) ExecuteDDL(ctx context.Context, ds *datastore.QuantDataStore, ddl string) error {
-	return nil
+func (m *MockHTTPWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-func (m *MockHTTPQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.QuantDataStore, tableName string) (bool, error) {
-	return false, nil
+func (m *MockHTTPWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-// MockHTTPDocumentParserFactory implements metadata.DocumentParserFactory for HTTP integration tests.
-type MockHTTPDocumentParserFactory struct {
-	parsers map[metadata.DocumentType]metadata.DocumentParser
+func (m *MockHTTPWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-func NewMockHTTPDocumentParserFactory() *MockHTTPDocumentParserFactory {
-	f := &MockHTTPDocumentParserFactory{
-		parsers: make(map[metadata.DocumentType]metadata.DocumentParser),
-	}
-	f.RegisterParser(&MockHTTPDocumentParser{})
-	return f
+func (m *MockHTTPWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
-func (f *MockHTTPDocumentParserFactory) GetParser(docType metadata.DocumentType) (metadata.DocumentParser, error) {
-	if parser, ok := f.parsers[docType]; ok {
-		return parser, nil
-	}
-	return &MockHTTPDocumentParser{}, nil
-}
-
-func (f *MockHTTPDocumentParserFactory) RegisterParser(parser metadata.DocumentParser) {
-	f.parsers[parser.SupportedType()] = parser
-}
-
-type MockHTTPDocumentParser struct{}
-
-func (m *MockHTTPDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
-	return []metadata.APICategory{}, []string{}, nil
-}
-
-func (m *MockHTTPDocumentParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
-	return nil, nil
-}
-
-func (m *MockHTTPDocumentParser) SupportedType() metadata.DocumentType {
-	return metadata.DocumentTypeHTML
+func (m *MockHTTPWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
 }
 
 // MockHTTPTaskEngineAdapter implements workflow.TaskEngineAdapter for HTTP integration tests.
@@ -136,39 +110,21 @@ func (m *MockHTTPTaskEngineAdapter) GetFunctionRegistry() interface{} {
 	return nil
 }
 
-// MockHTTPJobScheduler is a mock implementation of sync.JobScheduler.
-type MockHTTPJobScheduler struct {
-	scheduledJobs map[string]string
-}
+// MockHTTPDependencyResolver is a mock dependency resolver for HTTP testing.
+type MockHTTPDependencyResolver struct{}
 
-func NewMockHTTPJobScheduler() *MockHTTPJobScheduler {
-	return &MockHTTPJobScheduler{
-		scheduledJobs: make(map[string]string),
+func (m *MockHTTPDependencyResolver) Resolve(selectedAPIs []string, allAPIDependencies map[string][]sync.ParamDependency) (*sync.ExecutionGraph, []string, error) {
+	graph := &sync.ExecutionGraph{
+		Levels:      [][]string{selectedAPIs},
+		TaskConfigs: make(map[string]*sync.TaskConfig),
 	}
-}
-
-func (m *MockHTTPJobScheduler) Start() {}
-
-func (m *MockHTTPJobScheduler) Stop() context.Context {
-	return context.Background()
-}
-
-func (m *MockHTTPJobScheduler) ScheduleJob(jobID string, cronExpr string) error {
-	m.scheduledJobs[jobID] = cronExpr
-	return nil
-}
-
-func (m *MockHTTPJobScheduler) UnscheduleJob(jobID string) {
-	delete(m.scheduledJobs, jobID)
-}
-
-func (m *MockHTTPJobScheduler) IsScheduled(jobID string) bool {
-	_, exists := m.scheduledJobs[jobID]
-	return exists
-}
-
-func (m *MockHTTPJobScheduler) GetNextRunTime(jobID string) *time.Time {
-	return nil
+	for _, api := range selectedAPIs {
+		graph.TaskConfigs[api] = &sync.TaskConfig{
+			APIName:  api,
+			SyncMode: sync.TaskSyncModeDirect,
+		}
+	}
+	return graph, selectedAPIs, nil
 }
 
 // ==================== Test Setup ====================
@@ -183,7 +139,7 @@ type httpTestContext struct {
 	workflowSvc    contracts.WorkflowApplicationService
 	dataSourceRepo *repository.DataSourceRepositoryImpl
 	dsRepo         *repository.QuantDataStoreRepositoryImpl
-	syncJobRepo    *repository.SyncJobRepositoryImpl
+	syncPlanRepo   *repository.SyncPlanRepositoryImpl
 	workflowRepo   *repository.WorkflowDefinitionRepositoryImpl
 }
 
@@ -195,8 +151,8 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	// Create repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncJobRepo := repository.NewSyncJobRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	if err != nil {
 		cleanup()
@@ -204,16 +160,15 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	}
 
 	// Create mock adapters
-	quantDBAdapter := &MockHTTPQuantDBAdapter{}
-	parserFactory := NewMockHTTPDocumentParserFactory()
+	workflowExecutor := &MockHTTPWorkflowExecutor{}
 	taskEngineAdapter := &MockHTTPTaskEngineAdapter{}
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
-	jobScheduler := NewMockHTTPJobScheduler()
+	dependencyResolver := &MockHTTPDependencyResolver{}
 
 	// Create application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, parserFactory)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server
@@ -233,7 +188,7 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 		workflowSvc:    workflowSvc,
 		dataSourceRepo: dataSourceRepo,
 		dsRepo:         dsRepo,
-		syncJobRepo:    syncJobRepo,
+		syncPlanRepo:   syncPlanRepo,
 		workflowRepo:   workflowRepo,
 	}, cleanup
 }
@@ -312,143 +267,6 @@ func TestHTTP_DataSource_CRUD(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
-
-	// Update data source
-	t.Run("UpdateDataSource", func(t *testing.T) {
-		ds := metadata.NewDataSource("Update Test", "Desc", "https://api.update.com", "https://doc.update.com")
-		err := ctx.dataSourceRepo.Create(ds)
-		require.NoError(t, err)
-
-		body := map[string]interface{}{
-			"name": "Updated Name",
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("PUT", "/api/v1/datasources/"+ds.ID.String(), bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Delete data source
-	t.Run("DeleteDataSource", func(t *testing.T) {
-		ds := metadata.NewDataSource("Delete Test", "Desc", "https://api.delete.com", "https://doc.delete.com")
-		err := ctx.dataSourceRepo.Create(ds)
-		require.NoError(t, err)
-
-		req, _ := http.NewRequest("DELETE", "/api/v1/datasources/"+ds.ID.String(), nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNoContent, w.Code)
-
-		// Verify deleted
-		deleted, _ := ctx.dataSourceRepo.Get(ds.ID)
-		assert.Nil(t, deleted)
-	})
-}
-
-// ==================== API Metadata Handler Tests ====================
-
-func TestHTTP_APIMetadata_CRUD(t *testing.T) {
-	ctx, cleanup := setupHTTPTestContext(t)
-	defer cleanup()
-
-	// Create data source first
-	ds := metadata.NewDataSource("Metadata Test DS", "Desc", "https://api.meta.com", "https://doc.meta.com")
-	err := ctx.dataSourceRepo.Create(ds)
-	require.NoError(t, err)
-
-	var apiID string
-
-	// Create API metadata
-	t.Run("CreateAPIMetadata", func(t *testing.T) {
-		body := map[string]interface{}{
-			"data_source_id": ds.ID.String(),
-			"name":           "test_api",
-			"display_name":   "Test API",
-			"description":    "Test API Description",
-			"endpoint":       "/test",
-			"response_fields": []map[string]interface{}{
-				{"name": "id", "type": "str", "description": "ID field"},
-				{"name": "value", "type": "float", "description": "Value field"},
-			},
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		if !assert.Equal(t, http.StatusCreated, w.Code) {
-			t.Logf("Response body: %s", w.Body.String())
-			return
-		}
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		data, ok := response["data"].(map[string]interface{})
-		if !ok {
-			t.Fatalf("Expected data map, got: %v", response)
-		}
-
-		id, ok := data["ID"]
-		if !ok {
-			id = data["id"]
-		}
-		apiID = fmt.Sprintf("%v", id)
-		assert.NotEmpty(t, apiID)
-	})
-
-	// Get API metadata
-	t.Run("GetAPIMetadata", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/apis/"+apiID, nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// List APIs by data source
-	t.Run("ListAPIsByDataSource", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/datasources/"+ds.ID.String()+"/apis", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-		data := response["data"].([]interface{})
-		assert.Len(t, data, 1)
-	})
-
-	// Update API metadata
-	t.Run("UpdateAPIMetadata", func(t *testing.T) {
-		body := map[string]interface{}{
-			"display_name": "Updated Display Name",
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("PUT", "/api/v1/apis/"+apiID, bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Delete API metadata
-	t.Run("DeleteAPIMetadata", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1/apis/"+apiID, nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNoContent, w.Code)
-	})
 }
 
 // ==================== Token Handler Tests ====================
@@ -483,15 +301,6 @@ func TestHTTP_Token_CRUD(t *testing.T) {
 		ctx.router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Delete token
-	t.Run("DeleteToken", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1/datasources/"+ds.ID.String()+"/token", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
 }
 
@@ -558,57 +367,18 @@ func TestHTTP_DataStore_CRUD(t *testing.T) {
 		assert.Len(t, data, 1)
 	})
 
-	// Update data store
-	t.Run("UpdateDataStore", func(t *testing.T) {
+	// Create tables for datasource
+	t.Run("CreateTablesForDatasource", func(t *testing.T) {
+		// Create a data source first
+		ds := metadata.NewDataSource("Tables Test DS", "Desc", "https://api.tables.com", "https://doc.tables.com")
+		err := ctx.dataSourceRepo.Create(ds)
+		require.NoError(t, err)
+
 		body := map[string]interface{}{
-			"name": "Updated DataStore",
+			"data_source_id": ds.ID.String(),
 		}
 		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("PUT", "/api/v1/datastores/"+dataStoreID, bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Test connection
-	t.Run("TestConnection", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "/api/v1/datastores/"+dataStoreID+"/test", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Delete data store
-	t.Run("DeleteDataStore", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1/datastores/"+dataStoreID, nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNoContent, w.Code)
-	})
-}
-
-// ==================== Workflow Handler Tests ====================
-
-func TestHTTP_Workflow_CRUD(t *testing.T) {
-	ctx, cleanup := setupHTTPTestContext(t)
-	defer cleanup()
-
-	var workflowID string
-
-	// Create workflow
-	t.Run("CreateWorkflow", func(t *testing.T) {
-		body := map[string]interface{}{
-			"name":            "Test Workflow",
-			"description":     "Test Description",
-			"category":        "sync",
-			"definition_yaml": "name: test_workflow\nversion: 1.0.0",
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/workflows", bytes.NewBuffer(jsonBody))
+		req, _ := http.NewRequest("POST", "/api/v1/datastores/"+dataStoreID+"/create-tables", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
@@ -616,88 +386,15 @@ func TestHTTP_Workflow_CRUD(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, w.Code)
 
 		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
-		data := response["data"].(map[string]interface{})
-		workflowID = data["id"].(string)
-		assert.NotEmpty(t, workflowID)
-	})
-
-	// Get workflow
-	t.Run("GetWorkflow", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/workflows/"+workflowID, nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// List workflows
-	t.Run("ListWorkflows", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/workflows", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-		data := response["data"].([]interface{})
-		assert.GreaterOrEqual(t, len(data), 1)
-	})
-
-	// Update workflow - skipped due to validation issue in business layer (category required)
-	// TODO: Fix workflow update validation to allow partial updates
-	t.Run("UpdateWorkflow", func(t *testing.T) {
-		t.Skip("Skipping - workflow update validation requires category")
-	})
-
-	// Enable workflow
-	t.Run("EnableWorkflow", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "/api/v1/workflows/"+workflowID+"/enable", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Execute workflow
-	t.Run("ExecuteWorkflow", func(t *testing.T) {
-		body := map[string]interface{}{
-			"trigger_type": "manual",
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/workflows/"+workflowID+"/execute", bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Disable workflow
-	t.Run("DisableWorkflow", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "/api/v1/workflows/"+workflowID+"/disable", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Delete workflow
-	t.Run("DeleteWorkflow", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1/workflows/"+workflowID, nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.NotEmpty(t, response["data"])
 	})
 }
 
-// ==================== Sync Job Handler Tests ====================
+// ==================== Sync Plan Handler Tests ====================
 
-func TestHTTP_SyncJob_CRUD(t *testing.T) {
+func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	ctx, cleanup := setupHTTPTestContext(t)
 	defer cleanup()
 
@@ -706,32 +403,23 @@ func TestHTTP_SyncJob_CRUD(t *testing.T) {
 	err := ctx.dataSourceRepo.Create(ds)
 	require.NoError(t, err)
 
-	api := metadata.NewAPIMetadata(ds.ID, "sync_api", "Sync API", "Sync API Desc", "/sync")
-	err = ctx.dataSourceRepo.AddAPIMetadata(api)
-	require.NoError(t, err)
-
 	dataStore := datastore.NewQuantDataStore("Sync Store", "Desc", datastore.DataStoreTypeDuckDB, "", "/tmp/sync.duckdb")
 	err = ctx.dsRepo.Create(dataStore)
 	require.NoError(t, err)
 
-	wfDef := workflow.NewWorkflowDefinition("Sync WF", "Desc", workflow.WfCategorySync, "name: sync_wf", false)
-	err = ctx.workflowRepo.Create(wfDef)
-	require.NoError(t, err)
+	var syncPlanID string
 
-	var syncJobID string
-
-	// Create sync job
-	t.Run("CreateSyncJob", func(t *testing.T) {
+	// Create sync plan
+	t.Run("CreateSyncPlan", func(t *testing.T) {
 		body := map[string]interface{}{
-			"name":            "Test Sync Job",
-			"description":     "Test Description",
-			"api_metadata_id": api.ID.String(),
-			"data_store_id":   dataStore.ID.String(),
-			"workflow_def_id": wfDef.ID(),
-			"mode":            "batch",
+			"name":           "Test Sync Plan",
+			"description":    "Test Description",
+			"data_source_id": ds.ID.String(),
+			"data_store_id":  dataStore.ID.String(),
+			"selected_apis":  []string{"daily", "stock_basic"},
 		}
 		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/sync-jobs", bytes.NewBuffer(jsonBody))
+		req, _ := http.NewRequest("POST", "/api/v1/sync-plans", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
@@ -754,44 +442,50 @@ func TestHTTP_SyncJob_CRUD(t *testing.T) {
 		if !ok {
 			id = data["id"]
 		}
-		syncJobID = fmt.Sprintf("%v", id)
-		assert.NotEmpty(t, syncJobID)
+		syncPlanID = fmt.Sprintf("%v", id)
+		assert.NotEmpty(t, syncPlanID)
 	})
 
-	// Get sync job
-	t.Run("GetSyncJob", func(t *testing.T) {
-		if syncJobID == "" {
-			t.Skip("Skipping - no sync job created")
+	// Get sync plan
+	t.Run("GetSyncPlan", func(t *testing.T) {
+		if syncPlanID == "" {
+			t.Skip("Skipping - no sync plan created")
 		}
-		req, _ := http.NewRequest("GET", "/api/v1/sync-jobs/"+syncJobID, nil)
+		req, _ := http.NewRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	// List sync jobs
-	t.Run("ListSyncJobs", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/sync-jobs", nil)
+	// List sync plans
+	t.Run("ListSyncPlans", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/v1/sync-plans", nil)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		if !assert.Equal(t, http.StatusOK, w.Code) {
+			t.Logf("Response: %s", w.Body.String())
+			return
+		}
 
 		var response map[string]interface{}
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
-		data := response["data"].([]interface{})
+		data, ok := response["data"].([]interface{})
+		if !ok {
+			t.Fatalf("Expected data array, got: %v", response)
+		}
 		assert.Len(t, data, 1)
 	})
 
-	// Update sync job
-	t.Run("UpdateSyncJob", func(t *testing.T) {
+	// Update sync plan
+	t.Run("UpdateSyncPlan", func(t *testing.T) {
 		body := map[string]interface{}{
-			"name": "Updated Sync Job",
+			"name": "Updated Sync Plan",
 		}
 		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("PUT", "/api/v1/sync-jobs/"+syncJobID, bytes.NewBuffer(jsonBody))
+		req, _ := http.NewRequest("PUT", "/api/v1/sync-plans/"+syncPlanID, bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
@@ -799,49 +493,40 @@ func TestHTTP_SyncJob_CRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	// Enable sync job
-	t.Run("EnableSyncJob", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "/api/v1/sync-jobs/"+syncJobID+"/enable", nil)
+	// Resolve sync plan dependencies (required before enabling)
+	t.Run("ResolveSyncPlan", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/resolve", nil)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Trigger sync job - skipped due to mock task engine adapter limitations
-	// The trigger requires actual workflow execution which mock doesn't fully support
-	t.Run("TriggerSyncJob", func(t *testing.T) {
-		t.Skip("Skipping - requires full task engine integration")
-	})
-
-	// List executions
-	t.Run("ListExecutions", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1/sync-jobs/"+syncJobID+"/executions", nil)
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Disable sync job
-	t.Run("DisableSyncJob", func(t *testing.T) {
-		// First get the job to ensure it's not running
-		job, _ := ctx.syncJobRepo.Get(shared.ID(syncJobID))
-		if job != nil && job.Status == sync.JobStatusRunning {
-			job.MarkCompleted(nil)
-			_ = ctx.syncJobRepo.Update(job)
+		if !assert.Equal(t, http.StatusOK, w.Code) {
+			t.Logf("Response: %s", w.Body.String())
 		}
+	})
 
-		req, _ := http.NewRequest("POST", "/api/v1/sync-jobs/"+syncJobID+"/disable", nil)
+	// Enable sync plan
+	t.Run("EnableSyncPlan", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/enable", nil)
+		w := httptest.NewRecorder()
+		ctx.router.ServeHTTP(w, req)
+
+		if !assert.Equal(t, http.StatusOK, w.Code) {
+			t.Logf("Response: %s", w.Body.String())
+		}
+	})
+
+	// Disable sync plan
+	t.Run("DisableSyncPlan", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/disable", nil)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	// Delete sync job
-	t.Run("DeleteSyncJob", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1/sync-jobs/"+syncJobID, nil)
+	// Delete sync plan
+	t.Run("DeleteSyncPlan", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", "/api/v1/sync-plans/"+syncPlanID, nil)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -930,30 +615,7 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		dataSourceID = extractID(t, w.Body.Bytes())
 	}
 
-	// 2. Create API metadata
-	var apiID string
-	{
-		body := map[string]interface{}{
-			"data_source_id": dataSourceID,
-			"name":           "e2e_api",
-			"display_name":   "E2E API",
-			"description":    "E2E API Description",
-			"endpoint":       "/e2e",
-			"response_fields": []map[string]interface{}{
-				{"name": "id", "type": "str", "description": "ID"},
-				{"name": "value", "type": "float", "description": "Value"},
-			},
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/apis", bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusCreated, w.Code)
-		apiID = extractID(t, w.Body.Bytes())
-	}
-
-	// 3. Create data store
+	// 2. Create data store
 	var dataStoreID string
 	{
 		body := map[string]interface{}{
@@ -971,55 +633,30 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		dataStoreID = extractID(t, w.Body.Bytes())
 	}
 
-	// 4. Create workflow
-	var workflowID string
+	// 3. Create sync plan
+	var syncPlanID string
 	{
 		body := map[string]interface{}{
-			"name":            "E2E Workflow",
-			"description":     "E2E Test",
-			"category":        "sync",
-			"definition_yaml": "name: e2e_workflow\nversion: 1.0.0",
+			"name":           "E2E Sync Plan",
+			"description":    "E2E Test",
+			"data_source_id": dataSourceID,
+			"data_store_id":  dataStoreID,
+			"selected_apis":  []string{"daily"},
 		}
 		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/workflows", bytes.NewBuffer(jsonBody))
+		req, _ := http.NewRequest("POST", "/api/v1/sync-plans", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusCreated, w.Code)
-		workflowID = extractID(t, w.Body.Bytes())
+		syncPlanID = extractID(t, w.Body.Bytes())
 	}
 
-	// 5. Create sync job
-	var syncJobID string
-	{
-		body := map[string]interface{}{
-			"name":            "E2E Sync Job",
-			"description":     "E2E Test",
-			"api_metadata_id": apiID,
-			"data_store_id":   dataStoreID,
-			"workflow_def_id": workflowID,
-			"mode":            "batch",
-		}
-		jsonBody, _ := json.Marshal(body)
-		req, _ := http.NewRequest("POST", "/api/v1/sync-jobs", bytes.NewBuffer(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusCreated, w.Code)
-		syncJobID = extractID(t, w.Body.Bytes())
-	}
-
-	// Verify all entities exist (skip trigger as it requires full task engine)
+	// Verify all entities exist
 	{
 		// Verify data source
 		req, _ := http.NewRequest("GET", "/api/v1/datasources/"+dataSourceID, nil)
 		w := httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		// Verify API
-		req, _ = http.NewRequest("GET", "/api/v1/apis/"+apiID, nil)
-		w = httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
@@ -1029,16 +666,47 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Verify workflow
-		req, _ = http.NewRequest("GET", "/api/v1/workflows/"+workflowID, nil)
-		w = httptest.NewRecorder()
-		ctx.router.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		// Verify sync job
-		req, _ = http.NewRequest("GET", "/api/v1/sync-jobs/"+syncJobID, nil)
+		// Verify sync plan
+		req, _ = http.NewRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
 		w = httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 	}
+}
+
+// ==================== Mock Job Scheduler (unused variable fix) ====================
+
+// MockHTTPJobScheduler is a mock implementation of sync.JobScheduler.
+type MockHTTPJobScheduler struct {
+	scheduledJobs map[string]string
+}
+
+func NewMockHTTPJobScheduler() *MockHTTPJobScheduler {
+	return &MockHTTPJobScheduler{
+		scheduledJobs: make(map[string]string),
+	}
+}
+
+func (m *MockHTTPJobScheduler) Start() {}
+
+func (m *MockHTTPJobScheduler) Stop() context.Context {
+	return context.Background()
+}
+
+func (m *MockHTTPJobScheduler) ScheduleJob(jobID string, cronExpr string) error {
+	m.scheduledJobs[jobID] = cronExpr
+	return nil
+}
+
+func (m *MockHTTPJobScheduler) UnscheduleJob(jobID string) {
+	delete(m.scheduledJobs, jobID)
+}
+
+func (m *MockHTTPJobScheduler) IsScheduled(jobID string) bool {
+	_, exists := m.scheduledJobs[jobID]
+	return exists
+}
+
+func (m *MockHTTPJobScheduler) GetNextRunTime(jobID string) *time.Time {
+	return nil
 }

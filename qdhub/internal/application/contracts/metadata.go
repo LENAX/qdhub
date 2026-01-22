@@ -23,40 +23,14 @@ type MetadataApplicationService interface {
 	// GetDataSource retrieves a data source by ID.
 	GetDataSource(ctx context.Context, id shared.ID) (*metadata.DataSource, error)
 
-	// UpdateDataSource updates a data source.
-	UpdateDataSource(ctx context.Context, id shared.ID, req UpdateDataSourceRequest) error
-
-	// DeleteDataSource deletes a data source and its related entities.
-	DeleteDataSource(ctx context.Context, id shared.ID) error
-
 	// ListDataSources lists all data sources.
 	ListDataSources(ctx context.Context) ([]*metadata.DataSource, error)
 
 	// ==================== API Metadata Management ====================
 
 	// ParseAndImportMetadata parses documentation and imports metadata.
-	// This is a complex use case involving:
-	//   1. Fetch documentation content
-	//   2. Parse using DocumentParser
-	//   3. Create/Update APICategory entities
-	//   4. Create/Update APIMetadata entities
-	//   5. Validate all entities
+	// This method uses the built-in metadata_crawl workflow to perform the operation.
 	ParseAndImportMetadata(ctx context.Context, req ParseMetadataRequest) (*ParseMetadataResult, error)
-
-	// CreateAPIMetadata creates a new API metadata.
-	CreateAPIMetadata(ctx context.Context, req CreateAPIMetadataRequest) (*metadata.APIMetadata, error)
-
-	// GetAPIMetadata retrieves an API metadata by ID.
-	GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error)
-
-	// UpdateAPIMetadata updates an API metadata.
-	UpdateAPIMetadata(ctx context.Context, id shared.ID, req UpdateAPIMetadataRequest) error
-
-	// DeleteAPIMetadata deletes an API metadata.
-	DeleteAPIMetadata(ctx context.Context, id shared.ID) error
-
-	// ListAPIMetadataByDataSource lists all API metadata for a data source.
-	ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APIMetadata, error)
 
 	// ==================== Token Management ====================
 
@@ -68,8 +42,22 @@ type MetadataApplicationService interface {
 	// The token value will be decrypted before return.
 	GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error)
 
-	// DeleteToken deletes a token.
-	DeleteToken(ctx context.Context, dataSourceID shared.ID) error
+	// ==================== API Sync Strategy Management ====================
+
+	// CreateAPISyncStrategy creates a new API sync strategy.
+	CreateAPISyncStrategy(ctx context.Context, req CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error)
+
+	// GetAPISyncStrategy retrieves an API sync strategy by ID or by (DataSourceID, APIName).
+	GetAPISyncStrategy(ctx context.Context, req GetAPISyncStrategyRequest) (*metadata.APISyncStrategy, error)
+
+	// UpdateAPISyncStrategy updates an API sync strategy.
+	UpdateAPISyncStrategy(ctx context.Context, id shared.ID, req UpdateAPISyncStrategyRequest) error
+
+	// DeleteAPISyncStrategy deletes an API sync strategy.
+	DeleteAPISyncStrategy(ctx context.Context, id shared.ID) error
+
+	// ListAPISyncStrategies lists all API sync strategies for a data source.
+	ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -80,14 +68,6 @@ type CreateDataSourceRequest struct {
 	Description string
 	BaseURL     string
 	DocURL      string
-}
-
-// UpdateDataSourceRequest represents a request to update a data source.
-type UpdateDataSourceRequest struct {
-	Name        *string
-	Description *string
-	BaseURL     *string
-	DocURL      *string
 }
 
 // ParseMetadataRequest represents a request to parse and import metadata.
@@ -106,34 +86,37 @@ type ParseMetadataResult struct {
 	APIsUpdated       int
 }
 
-// CreateAPIMetadataRequest represents a request to create API metadata.
-type CreateAPIMetadataRequest struct {
-	DataSourceID   shared.ID
-	CategoryID     *shared.ID
-	Name           string
-	DisplayName    string
-	Description    string
-	Endpoint       string
-	RequestParams  []metadata.ParamMeta
-	ResponseFields []metadata.FieldMeta
-	RateLimit      *metadata.RateLimit
-	Permission     string
-}
-
-// UpdateAPIMetadataRequest represents a request to update API metadata.
-type UpdateAPIMetadataRequest struct {
-	DisplayName    *string
-	Description    *string
-	Endpoint       *string
-	RequestParams  *[]metadata.ParamMeta
-	ResponseFields *[]metadata.FieldMeta
-	RateLimit      *metadata.RateLimit
-	Permission     *string
-}
-
 // SaveTokenRequest represents a request to save a token.
 type SaveTokenRequest struct {
 	DataSourceID shared.ID
 	TokenValue   string
 	ExpiresAt    *string // RFC3339 format
+}
+
+// CreateAPISyncStrategyRequest represents a request to create an API sync strategy.
+type CreateAPISyncStrategyRequest struct {
+	DataSourceID     shared.ID
+	APIName          string
+	PreferredParam   metadata.SyncParamType
+	SupportDateRange bool
+	RequiredParams   []string
+	Dependencies     []string
+	Description      string
+}
+
+// GetAPISyncStrategyRequest represents a request to get an API sync strategy.
+// Either ID or (DataSourceID + APIName) must be provided.
+type GetAPISyncStrategyRequest struct {
+	ID           *shared.ID
+	DataSourceID *shared.ID
+	APIName      *string
+}
+
+// UpdateAPISyncStrategyRequest represents a request to update an API sync strategy.
+type UpdateAPISyncStrategyRequest struct {
+	PreferredParam   *metadata.SyncParamType
+	SupportDateRange *bool
+	RequiredParams   *[]string
+	Dependencies     *[]string
+	Description      *string
 }

@@ -18,9 +18,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/persistence/repository"
-	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 )
 
@@ -54,15 +52,11 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
-	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// Create adapters
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
-	quantDBAdapter := &mockQuantDBAdapter{}
-	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 
 	// Initialize built-in workflows
 	builtInInitializer := impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter)
@@ -72,13 +66,9 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	// Create WorkflowExecutor
 	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
 
-	// Create dependency resolver
-	dependencyResolver := sync.NewDependencyResolver()
-
 	// Create application services with WorkflowExecutor
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, nil, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, workflowExecutor)
 
 	// ==================== MetadataApplicationService Tests ====================
 
@@ -161,99 +151,8 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	})
 
 	// ==================== SyncApplicationService Tests ====================
-
-	t.Run("SyncSvc - SyncDataSource validates data source exists", func(t *testing.T) {
-		_, err := syncSvc.SyncDataSource(ctx, contracts.SyncDataSourceRequest{
-			DataSourceID: shared.NewID(), // Non-existent
-			TargetDBPath: "/tmp/test.duckdb",
-			StartDate:    "20251201",
-			EndDate:      "20251231",
-			APINames:     []string{"daily"},
-		})
-		assert.Error(t, err, "Should return error for non-existent data source")
-		assert.Contains(t, err.Error(), "not found", "Error should indicate data source not found")
-	})
-
-	t.Run("SyncSvc - SyncDataSource validates token exists", func(t *testing.T) {
-		// Get existing data source (without token)
-		sources, _ := dataSourceRepo.List()
-		require.NotEmpty(t, sources)
-
-		_, err := syncSvc.SyncDataSource(ctx, contracts.SyncDataSourceRequest{
-			DataSourceID: sources[0].ID,
-			TargetDBPath: "/tmp/test.duckdb",
-			StartDate:    "20251201",
-			EndDate:      "20251231",
-			APINames:     []string{"daily"},
-		})
-		assert.Error(t, err, "Should return error when token not configured")
-		assert.Contains(t, err.Error(), "token", "Error should mention token")
-	})
-
-	t.Run("SyncSvc - SyncDataSource triggers workflow with valid token", func(t *testing.T) {
-		// Get existing data source
-		sources, _ := dataSourceRepo.List()
-		require.NotEmpty(t, sources)
-
-		// Add token for the data source
-		token := metadata.NewToken(sources[0].ID, "test-token-value", nil)
-		err := dataSourceRepo.SetToken(token)
-		require.NoError(t, err)
-
-		// Execute SyncDataSource
-		instanceID, err := syncSvc.SyncDataSource(ctx, contracts.SyncDataSourceRequest{
-			DataSourceID: sources[0].ID,
-			TargetDBPath: "/tmp/test.duckdb",
-			StartDate:    "20251201",
-			EndDate:      "20251231",
-			APINames:     []string{"daily"},
-			MaxStocks:    100,
-		})
-		assert.NoError(t, err, "Should not return error with valid token")
-		assert.NotEmpty(t, instanceID, "Instance ID should not be empty")
-	})
-
-	t.Run("SyncSvc - SyncDataSourceRealtime validates data source exists", func(t *testing.T) {
-		_, err := syncSvc.SyncDataSourceRealtime(ctx, contracts.SyncDataSourceRealtimeRequest{
-			DataSourceID: shared.NewID(), // Non-existent
-			TargetDBPath: "/tmp/test.duckdb",
-			APINames:     []string{"realtime_quote"},
-		})
-		assert.Error(t, err, "Should return error for non-existent data source")
-		assert.Contains(t, err.Error(), "not found")
-	})
-
-	t.Run("SyncSvc - SyncDataSourceRealtime triggers workflow with valid token", func(t *testing.T) {
-		// Get existing data source (already has token from previous test)
-		sources, _ := dataSourceRepo.List()
-		require.NotEmpty(t, sources)
-
-		// Execute SyncDataSourceRealtime
-		instanceID, err := syncSvc.SyncDataSourceRealtime(ctx, contracts.SyncDataSourceRealtimeRequest{
-			DataSourceID:    sources[0].ID,
-			TargetDBPath:    "/tmp/test.duckdb",
-			CheckpointTable: "sync_checkpoint",
-			APINames:        []string{"realtime_quote"},
-			MaxStocks:       50,
-		})
-		assert.NoError(t, err, "Should not return error with valid token")
-		assert.NotEmpty(t, instanceID, "Instance ID should not be empty")
-	})
-
-	t.Run("SyncSvc - SyncDataSourceRealtime uses default checkpoint table", func(t *testing.T) {
-		sources, _ := dataSourceRepo.List()
-		require.NotEmpty(t, sources)
-
-		// Execute with empty checkpoint table
-		instanceID, err := syncSvc.SyncDataSourceRealtime(ctx, contracts.SyncDataSourceRealtimeRequest{
-			DataSourceID:    sources[0].ID,
-			TargetDBPath:    "/tmp/test.duckdb",
-			CheckpointTable: "", // Should use default "sync_checkpoint"
-			APINames:        []string{"realtime_quote"},
-		})
-		assert.NoError(t, err)
-		assert.NotEmpty(t, instanceID)
-	})
+	// Note: SyncDataSource and SyncDataSourceRealtime methods have been removed.
+	// All sync operations should now go through SyncPlan.
 }
 
 // mockJobScheduler is a simple mock for testing

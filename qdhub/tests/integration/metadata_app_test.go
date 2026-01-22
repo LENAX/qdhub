@@ -5,14 +5,43 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence/repository"
 )
+
+// MockMetadataWorkflowExecutor is a mock workflow executor for metadata integration testing.
+type MockMetadataWorkflowExecutor struct{}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteMetadataCrawl(ctx context.Context, req workflow.MetadataCrawlRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req workflow.CreateTablesRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
+
+func (m *MockMetadataWorkflowExecutor) ExecuteFromExecutionGraph(ctx context.Context, req workflow.ExecutionGraphSyncRequest) (shared.ID, error) {
+	return shared.NewID(), nil
+}
 
 // MockIntegrationDocumentParserFactory is a mock parser factory for integration testing.
 type MockIntegrationDocumentParserFactory struct{}
@@ -54,9 +83,11 @@ func TestMetadataApplicationService_Integration_CreateAndGetDataSource(t *testin
 
 	// Create repositories
 	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
 
 	// Create data source
 	req := contracts.CreateDataSourceRequest{
@@ -84,75 +115,6 @@ func TestMetadataApplicationService_Integration_CreateAndGetDataSource(t *testin
 	}
 }
 
-func TestMetadataApplicationService_Integration_UpdateDataSource(t *testing.T) {
-	db, cleanup := setupIntegrationDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	dsRepo := repository.NewDataSourceRepository(db)
-	parserFactory := NewMockIntegrationDocumentParserFactory()
-
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
-
-	// Create data source
-	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
-		Name:        "Tushare",
-		Description: "Test",
-		BaseURL:     "https://api.tushare.pro",
-		DocURL:      "https://doc.tushare.pro",
-	})
-
-	// Update data source
-	newName := "Tushare Pro"
-	newDesc := "Updated description"
-	err := svc.UpdateDataSource(ctx, ds.ID, contracts.UpdateDataSourceRequest{
-		Name:        &newName,
-		Description: &newDesc,
-	})
-	if err != nil {
-		t.Fatalf("UpdateDataSource failed: %v", err)
-	}
-
-	// Verify update
-	updated, _ := svc.GetDataSource(ctx, ds.ID)
-	if updated.Name != newName {
-		t.Errorf("Expected name %s, got %s", newName, updated.Name)
-	}
-}
-
-func TestMetadataApplicationService_Integration_DeleteDataSource(t *testing.T) {
-	db, cleanup := setupIntegrationDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	dsRepo := repository.NewDataSourceRepository(db)
-	parserFactory := NewMockIntegrationDocumentParserFactory()
-
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
-
-	// Create data source
-	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
-		Name:        "Tushare",
-		Description: "Test",
-		BaseURL:     "https://api.tushare.pro",
-		DocURL:      "https://doc.tushare.pro",
-	})
-
-	// Delete data source
-	err := svc.DeleteDataSource(ctx, ds.ID)
-	if err != nil {
-		t.Fatalf("DeleteDataSource failed: %v", err)
-	}
-
-	// Verify deletion
-	_, err = svc.GetDataSource(ctx, ds.ID)
-	if err == nil {
-		t.Fatal("Expected error for deleted data source")
-	}
-}
-
 func TestMetadataApplicationService_Integration_ListDataSources(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()
@@ -160,18 +122,23 @@ func TestMetadataApplicationService_Integration_ListDataSources(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
 
 	// Create multiple data sources
 	for i := 0; i < 3; i++ {
-		svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
-			Name:        "Tushare",
+		_, err := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
+			Name:        fmt.Sprintf("Tushare-%d", i),
 			Description: "Test",
 			BaseURL:     "https://api.tushare.pro",
 			DocURL:      "https://doc.tushare.pro",
 		})
+		if err != nil {
+			t.Fatalf("CreateDataSource failed: %v", err)
+		}
 	}
 
 	// List data sources
@@ -184,89 +151,6 @@ func TestMetadataApplicationService_Integration_ListDataSources(t *testing.T) {
 	}
 }
 
-func TestMetadataApplicationService_Integration_APIMetadataLifecycle(t *testing.T) {
-	db, cleanup := setupIntegrationDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	dsRepo := repository.NewDataSourceRepository(db)
-	parserFactory := NewMockIntegrationDocumentParserFactory()
-
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
-
-	// Create data source first
-	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
-		Name:        "Tushare",
-		Description: "Test",
-		BaseURL:     "https://api.tushare.pro",
-		DocURL:      "https://doc.tushare.pro",
-	})
-
-	// Create API metadata
-	apiReq := contracts.CreateAPIMetadataRequest{
-		DataSourceID: ds.ID,
-		Name:         "daily",
-		DisplayName:  "日线行情",
-		Description:  "获取股票日线行情数据",
-		Endpoint:     "/api/daily",
-		RequestParams: []metadata.ParamMeta{
-			{Name: "ts_code", Type: "str", Required: true, Description: "股票代码"},
-		},
-		ResponseFields: []metadata.FieldMeta{
-			{Name: "ts_code", Type: "str", Description: "股票代码", IsPrimary: true},
-			{Name: "open", Type: "float", Description: "开盘价"},
-		},
-	}
-
-	api, err := svc.CreateAPIMetadata(ctx, apiReq)
-	if err != nil {
-		t.Fatalf("CreateAPIMetadata failed: %v", err)
-	}
-	if api == nil {
-		t.Fatal("Expected API to be non-nil")
-	}
-
-	// Get API metadata
-	retrieved, err := svc.GetAPIMetadata(ctx, api.ID)
-	if err != nil {
-		t.Fatalf("GetAPIMetadata failed: %v", err)
-	}
-	if retrieved.Name != apiReq.Name {
-		t.Errorf("Expected name %s, got %s", apiReq.Name, retrieved.Name)
-	}
-
-	// Update API metadata
-	newDisplayName := "每日行情"
-	err = svc.UpdateAPIMetadata(ctx, api.ID, contracts.UpdateAPIMetadataRequest{
-		DisplayName: &newDisplayName,
-	})
-	if err != nil {
-		t.Fatalf("UpdateAPIMetadata failed: %v", err)
-	}
-
-	// List API metadata
-	apis, err := svc.ListAPIMetadataByDataSource(ctx, ds.ID)
-	if err != nil {
-		t.Fatalf("ListAPIMetadataByDataSource failed: %v", err)
-	}
-	if len(apis) != 1 {
-		t.Errorf("Expected 1 API, got %d", len(apis))
-	}
-
-	// Delete API metadata
-	err = svc.DeleteAPIMetadata(ctx, api.ID)
-	if err != nil {
-		t.Fatalf("DeleteAPIMetadata failed: %v", err)
-	}
-
-	// Verify deletion
-	_, err = svc.GetAPIMetadata(ctx, api.ID)
-	if err == nil {
-		t.Fatal("Expected error for deleted API metadata")
-	}
-}
-
 func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()
@@ -274,9 +158,11 @@ func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -318,18 +204,6 @@ func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	if updated.TokenValue != "updated-token" {
 		t.Errorf("Expected token value 'updated-token', got %s", updated.TokenValue)
 	}
-
-	// Delete token
-	err = svc.DeleteToken(ctx, ds.ID)
-	if err != nil {
-		t.Fatalf("DeleteToken failed: %v", err)
-	}
-
-	// Verify deletion
-	_, err = svc.GetToken(ctx, ds.ID)
-	if err == nil {
-		t.Fatal("Expected error for deleted token")
-	}
 }
 
 func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testing.T) {
@@ -339,9 +213,11 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testin
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -351,7 +227,7 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testin
 		DocURL:      "https://doc.tushare.pro",
 	})
 
-	// Parse and import metadata
+	// Parse and import metadata (now async via workflow)
 	result, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
 		DataSourceID: ds.ID,
 		DocContent:   "<html>test content</html>",
@@ -360,23 +236,54 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testin
 	if err != nil {
 		t.Fatalf("ParseAndImportMetadata failed: %v", err)
 	}
-	if result.CategoriesCreated != 1 {
-		t.Errorf("Expected 1 category created, got %d", result.CategoriesCreated)
+	// Result shows 0 because workflow is async - just verify it returns without error
+	if result == nil {
+		t.Fatal("Expected result to be non-nil")
+	}
+	// Instance ID should be set
+	if result.InstanceID.IsEmpty() {
+		t.Error("Expected non-empty instance ID")
 	}
 }
 
-func TestMetadataApplicationService_Integration_DeleteDataSourceWithRelatedEntities(t *testing.T) {
+func TestMetadataApplicationService_Integration_ParseAndImportMetadata_DataSourceNotFound(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
 	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, parserFactory)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
 
-	// Create data source
+	// Try to parse with non-existent data source
+	_, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
+		DataSourceID: shared.NewID(), // Non-existent
+		DocContent:   "<html>test content</html>",
+		DocType:      metadata.DocumentTypeHTML,
+	})
+	if err == nil {
+		t.Error("Expected error for non-existent data source")
+	}
+}
+
+func TestMetadataApplicationService_Integration_APISyncStrategy(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	dsRepo := repository.NewDataSourceRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
+	parserFactory := NewMockIntegrationDocumentParserFactory()
+	workflowExecutor := &MockMetadataWorkflowExecutor{}
+
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+
+	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
 		Name:        "Tushare",
 		Description: "Test",
@@ -384,36 +291,59 @@ func TestMetadataApplicationService_Integration_DeleteDataSourceWithRelatedEntit
 		DocURL:      "https://doc.tushare.pro",
 	})
 
-	// Create API metadata
-	svc.CreateAPIMetadata(ctx, contracts.CreateAPIMetadataRequest{
-		DataSourceID: ds.ID,
-		Name:         "daily",
-		DisplayName:  "日线行情",
-		Description:  "日线数据",
-		Endpoint:     "/api/daily",
-	})
+	// Create API metadata using direct repository
+	api := metadata.NewAPIMetadata(ds.ID, "daily", "日线行情", "日线数据", "/api/daily")
+	if err := metadataRepo.SaveAPIMetadata(ctx, api); err != nil {
+		t.Fatalf("Failed to create API metadata: %v", err)
+	}
 
-	// Save token
-	svc.SaveToken(ctx, contracts.SaveTokenRequest{
-		DataSourceID: ds.ID,
-		TokenValue:   "test-token",
+	// Create API sync strategy
+	strategy, err := svc.CreateAPISyncStrategy(ctx, contracts.CreateAPISyncStrategyRequest{
+		DataSourceID:     ds.ID,
+		APIName:          "daily",
+		PreferredParam:   metadata.SyncParamTradeDate,
+		SupportDateRange: true,
+		Description:      "Test strategy",
 	})
-
-	// Delete data source (should also delete related entities)
-	err := svc.DeleteDataSource(ctx, ds.ID)
 	if err != nil {
-		t.Fatalf("DeleteDataSource failed: %v", err)
+		t.Fatalf("CreateAPISyncStrategy failed: %v", err)
+	}
+	if strategy == nil {
+		t.Fatal("Expected strategy to be non-nil")
 	}
 
-	// Verify API metadata is deleted
-	apis, _ := svc.ListAPIMetadataByDataSource(ctx, ds.ID)
-	if len(apis) != 0 {
-		t.Errorf("Expected 0 APIs after deletion, got %d", len(apis))
+	// Get API sync strategy
+	retrieved, err := svc.GetAPISyncStrategy(ctx, contracts.GetAPISyncStrategyRequest{
+		ID: &strategy.ID,
+	})
+	if err != nil {
+		t.Fatalf("GetAPISyncStrategy failed: %v", err)
+	}
+	if retrieved.APIName != "daily" {
+		t.Errorf("Expected API name 'daily', got %s", retrieved.APIName)
 	}
 
-	// Verify token is deleted
-	_, err = svc.GetToken(ctx, ds.ID)
-	if err == nil {
-		t.Error("Expected error for deleted token")
+	// List API sync strategies
+	strategies, err := svc.ListAPISyncStrategies(ctx, ds.ID)
+	if err != nil {
+		t.Fatalf("ListAPISyncStrategies failed: %v", err)
+	}
+	if len(strategies) != 1 {
+		t.Errorf("Expected 1 strategy, got %d", len(strategies))
+	}
+
+	// Update API sync strategy
+	newDesc := "Updated description"
+	err = svc.UpdateAPISyncStrategy(ctx, strategy.ID, contracts.UpdateAPISyncStrategyRequest{
+		Description: &newDesc,
+	})
+	if err != nil {
+		t.Fatalf("UpdateAPISyncStrategy failed: %v", err)
+	}
+
+	// Delete API sync strategy
+	err = svc.DeleteAPISyncStrategy(ctx, strategy.ID)
+	if err != nil {
+		t.Fatalf("DeleteAPISyncStrategy failed: %v", err)
 	}
 }

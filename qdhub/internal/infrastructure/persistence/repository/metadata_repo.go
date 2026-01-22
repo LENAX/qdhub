@@ -272,6 +272,11 @@ func (r *MetadataRepositoryImpl) SaveAPISyncStrategyBatch(ctx context.Context, s
 	})
 }
 
+// GetAPISyncStrategyByID retrieves a sync strategy by ID.
+func (r *MetadataRepositoryImpl) GetAPISyncStrategyByID(ctx context.Context, id shared.ID) (*metadata.APISyncStrategy, error) {
+	return r.apiSyncStrategyDAO.GetByID(nil, id)
+}
+
 // GetAPISyncStrategyByAPIName retrieves a sync strategy by data source ID and API name.
 func (r *MetadataRepositoryImpl) GetAPISyncStrategyByAPIName(ctx context.Context, dataSourceID shared.ID, apiName string) (*metadata.APISyncStrategy, error) {
 	return r.apiSyncStrategyDAO.GetByDataSourceAndAPIName(nil, dataSourceID, apiName)

@@ -26,24 +26,20 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/datasources", h.ListDataSources)
 	rg.POST("/datasources", h.CreateDataSource)
 	rg.GET("/datasources/:id", h.GetDataSource)
-	rg.PUT("/datasources/:id", h.UpdateDataSource)
-	rg.DELETE("/datasources/:id", h.DeleteDataSource)
 
 	// Metadata refresh
 	rg.POST("/datasources/:id/refresh", h.RefreshMetadata)
 
-	// API categories and metadata
-	rg.GET("/datasources/:id/categories", h.GetCategories)
-	rg.GET("/datasources/:id/apis", h.ListAPIsByDataSource)
-	rg.GET("/apis/:id", h.GetAPIMetadata)
-	rg.POST("/apis", h.CreateAPIMetadata)
-	rg.PUT("/apis/:id", h.UpdateAPIMetadata)
-	rg.DELETE("/apis/:id", h.DeleteAPIMetadata)
-
 	// Token management
 	rg.POST("/datasources/:id/token", h.SetToken)
 	rg.GET("/datasources/:id/token", h.GetToken)
-	rg.DELETE("/datasources/:id/token", h.DeleteToken)
+
+	// API Sync Strategy management
+	rg.POST("/datasources/:id/api-sync-strategies", h.CreateAPISyncStrategy)
+	rg.GET("/datasources/:id/api-sync-strategies", h.ListAPISyncStrategies)
+	rg.GET("/api-sync-strategies/:id", h.GetAPISyncStrategy)
+	rg.PUT("/api-sync-strategies/:id", h.UpdateAPISyncStrategy)
+	rg.DELETE("/api-sync-strategies/:id", h.DeleteAPISyncStrategy)
 }
 
 // ==================== Data Source Endpoints ====================
@@ -119,63 +115,6 @@ func (h *MetadataHandler) GetDataSource(c *gin.Context) {
 	Success(c, ds)
 }
 
-// UpdateDataSource handles PUT /api/v1/datasources/:id
-// @Summary      Update a data source
-// @Description  Update details of a specific data source
-// @Tags         DataSources
-// @Accept       json
-// @Produce      json
-// @Param        id       path      string              true  "Data source ID"
-// @Param        request  body      UpdateDataSourceReq true  "Updated data source details"
-// @Success      200      {object}  Response
-// @Failure      400      {object}  Response
-// @Failure      404      {object}  Response
-// @Failure      500      {object}  Response
-// @Router       /datasources/{id} [put]
-func (h *MetadataHandler) UpdateDataSource(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	var req UpdateDataSourceReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
-
-	err := h.metadataSvc.UpdateDataSource(c.Request.Context(), id, contracts.UpdateDataSourceRequest{
-		Name:        req.Name,
-		Description: req.Description,
-		BaseURL:     req.BaseURL,
-		DocURL:      req.DocURL,
-	})
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, nil)
-}
-
-// DeleteDataSource handles DELETE /api/v1/datasources/:id
-// @Summary      Delete a data source
-// @Description  Delete a specific data source and its associated metadata
-// @Tags         DataSources
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "Data source ID"
-// @Success      204  {object}  nil
-// @Failure      404  {object}  Response
-// @Failure      500  {object}  Response
-// @Router       /datasources/{id} [delete]
-func (h *MetadataHandler) DeleteDataSource(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	err := h.metadataSvc.DeleteDataSource(c.Request.Context(), id)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	NoContent(c)
-}
-
 // ==================== Metadata Refresh ====================
 
 // RefreshMetadata handles POST /api/v1/datasources/:id/refresh
@@ -210,193 +149,6 @@ func (h *MetadataHandler) RefreshMetadata(c *gin.Context) {
 		return
 	}
 	Success(c, result)
-}
-
-// ==================== API Category Endpoints ====================
-
-// GetCategories handles GET /api/v1/datasources/:id/categories
-// @Summary      Get API categories
-// @Description  Get all API categories for a data source
-// @Tags         DataSources
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "Data source ID"
-// @Success      200  {object}  Response
-// @Failure      404  {object}  Response
-// @Failure      500  {object}  Response
-// @Router       /datasources/{id}/categories [get]
-func (h *MetadataHandler) GetCategories(c *gin.Context) {
-	// Categories are retrieved via ListAPIMetadataByDataSource
-	// and then grouped by category. For simplicity, we return
-	// all APIs grouped by their CategoryID.
-	id := shared.ID(c.Param("id"))
-
-	apis, err := h.metadataSvc.ListAPIMetadataByDataSource(c.Request.Context(), id)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-
-	// Group by category
-	categories := make(map[string][]interface{})
-	for _, api := range apis {
-		catID := "uncategorized"
-		if api.CategoryID != nil {
-			catID = api.CategoryID.String()
-		}
-		categories[catID] = append(categories[catID], api)
-	}
-
-	Success(c, categories)
-}
-
-// ==================== API Metadata Endpoints ====================
-
-// ListAPIsByDataSource handles GET /api/v1/datasources/:id/apis
-// @Summary      List APIs by data source
-// @Description  Get all API metadata for a specific data source
-// @Tags         APIs
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "Data source ID"
-// @Success      200  {object}  Response
-// @Failure      404  {object}  Response
-// @Failure      500  {object}  Response
-// @Router       /datasources/{id}/apis [get]
-func (h *MetadataHandler) ListAPIsByDataSource(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	apis, err := h.metadataSvc.ListAPIMetadataByDataSource(c.Request.Context(), id)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, apis)
-}
-
-// GetAPIMetadata handles GET /api/v1/apis/:id
-// @Summary      Get API metadata
-// @Description  Get details of a specific API by ID
-// @Tags         APIs
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "API metadata ID"
-// @Success      200  {object}  Response
-// @Failure      404  {object}  Response
-// @Failure      500  {object}  Response
-// @Router       /apis/{id} [get]
-func (h *MetadataHandler) GetAPIMetadata(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	api, err := h.metadataSvc.GetAPIMetadata(c.Request.Context(), id)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, api)
-}
-
-// CreateAPIMetadata handles POST /api/v1/apis
-// @Summary      Create API metadata
-// @Description  Create a new API metadata entry
-// @Tags         APIs
-// @Accept       json
-// @Produce      json
-// @Param        request  body      CreateAPIMetadataReq  true  "API metadata details"
-// @Success      201      {object}  Response
-// @Failure      400      {object}  Response
-// @Failure      500      {object}  Response
-// @Router       /apis [post]
-func (h *MetadataHandler) CreateAPIMetadata(c *gin.Context) {
-	var req CreateAPIMetadataReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
-
-	var categoryID *shared.ID
-	if req.CategoryID != "" {
-		id := shared.ID(req.CategoryID)
-		categoryID = &id
-	}
-
-	api, err := h.metadataSvc.CreateAPIMetadata(c.Request.Context(), contracts.CreateAPIMetadataRequest{
-		DataSourceID:   shared.ID(req.DataSourceID),
-		CategoryID:     categoryID,
-		Name:           req.Name,
-		DisplayName:    req.DisplayName,
-		Description:    req.Description,
-		Endpoint:       req.Endpoint,
-		RequestParams:  req.RequestParams,
-		ResponseFields: req.ResponseFields,
-		RateLimit:      req.RateLimit,
-		Permission:     req.Permission,
-	})
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Created(c, api)
-}
-
-// UpdateAPIMetadata handles PUT /api/v1/apis/:id
-// @Summary      Update API metadata
-// @Description  Update details of a specific API metadata entry
-// @Tags         APIs
-// @Accept       json
-// @Produce      json
-// @Param        id       path      string              true  "API metadata ID"
-// @Param        request  body      UpdateAPIMetadataReq true  "Updated API metadata details"
-// @Success      200      {object}  Response
-// @Failure      400      {object}  Response
-// @Failure      404      {object}  Response
-// @Failure      500      {object}  Response
-// @Router       /apis/{id} [put]
-func (h *MetadataHandler) UpdateAPIMetadata(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	var req UpdateAPIMetadataReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
-
-	err := h.metadataSvc.UpdateAPIMetadata(c.Request.Context(), id, contracts.UpdateAPIMetadataRequest{
-		DisplayName:    req.DisplayName,
-		Description:    req.Description,
-		Endpoint:       req.Endpoint,
-		RequestParams:  req.RequestParams,
-		ResponseFields: req.ResponseFields,
-		RateLimit:      req.RateLimit,
-		Permission:     req.Permission,
-	})
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, nil)
-}
-
-// DeleteAPIMetadata handles DELETE /api/v1/apis/:id
-// @Summary      Delete API metadata
-// @Description  Delete a specific API metadata entry
-// @Tags         APIs
-// @Accept       json
-// @Produce      json
-// @Param        id   path      string  true  "API metadata ID"
-// @Success      204  {object}  nil
-// @Failure      404  {object}  Response
-// @Failure      500  {object}  Response
-// @Router       /apis/{id} [delete]
-func (h *MetadataHandler) DeleteAPIMetadata(c *gin.Context) {
-	id := shared.ID(c.Param("id"))
-
-	err := h.metadataSvc.DeleteAPIMetadata(c.Request.Context(), id)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	NoContent(c)
 }
 
 // ==================== Token Endpoints ====================
@@ -464,21 +216,149 @@ func (h *MetadataHandler) GetToken(c *gin.Context) {
 	})
 }
 
-// DeleteToken handles DELETE /api/v1/datasources/:id/token
-// @Summary      Delete data source token
-// @Description  Delete the authentication token for a data source
+// ==================== API Sync Strategy Endpoints ====================
+
+// CreateAPISyncStrategy handles POST /api/v1/datasources/:id/api-sync-strategies
+// @Summary      Create API sync strategy
+// @Description  Create a new API sync strategy for a data source
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "Data source ID"
+// @Param        request  body      CreateAPISyncStrategyReq  true  "API sync strategy details"
+// @Success      201      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /datasources/{id}/api-sync-strategies [post]
+func (h *MetadataHandler) CreateAPISyncStrategy(c *gin.Context) {
+	dataSourceID := shared.ID(c.Param("id"))
+
+	var req CreateAPISyncStrategyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	strategy, err := h.metadataSvc.CreateAPISyncStrategy(c.Request.Context(), contracts.CreateAPISyncStrategyRequest{
+		DataSourceID:     dataSourceID,
+		APIName:          req.APIName,
+		PreferredParam:   metadata.SyncParamType(req.PreferredParam),
+		SupportDateRange: req.SupportDateRange,
+		RequiredParams:   req.RequiredParams,
+		Dependencies:     req.Dependencies,
+		Description:      req.Description,
+	})
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Created(c, strategy)
+}
+
+// ListAPISyncStrategies handles GET /api/v1/datasources/:id/api-sync-strategies
+// @Summary      List API sync strategies
+// @Description  Get all API sync strategies for a data source
 // @Tags         DataSources
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "Data source ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /datasources/{id}/api-sync-strategies [get]
+func (h *MetadataHandler) ListAPISyncStrategies(c *gin.Context) {
+	dataSourceID := shared.ID(c.Param("id"))
+
+	strategies, err := h.metadataSvc.ListAPISyncStrategies(c.Request.Context(), dataSourceID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, strategies)
+}
+
+// GetAPISyncStrategy handles GET /api/v1/api-sync-strategies/:id
+// @Summary      Get API sync strategy
+// @Description  Get details of a specific API sync strategy by ID
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "API sync strategy ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /api-sync-strategies/{id} [get]
+func (h *MetadataHandler) GetAPISyncStrategy(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	strategy, err := h.metadataSvc.GetAPISyncStrategy(c.Request.Context(), contracts.GetAPISyncStrategyRequest{
+		ID: &id,
+	})
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, strategy)
+}
+
+// UpdateAPISyncStrategy handles PUT /api/v1/api-sync-strategies/:id
+// @Summary      Update API sync strategy
+// @Description  Update details of a specific API sync strategy
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "API sync strategy ID"
+// @Param        request  body      UpdateAPISyncStrategyReq  true  "Updated API sync strategy details"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Router       /api-sync-strategies/{id} [put]
+func (h *MetadataHandler) UpdateAPISyncStrategy(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	var req UpdateAPISyncStrategyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	var preferredParam *metadata.SyncParamType
+	if req.PreferredParam != nil {
+		pp := metadata.SyncParamType(*req.PreferredParam)
+		preferredParam = &pp
+	}
+
+	err := h.metadataSvc.UpdateAPISyncStrategy(c.Request.Context(), id, contracts.UpdateAPISyncStrategyRequest{
+		PreferredParam:   preferredParam,
+		SupportDateRange: req.SupportDateRange,
+		RequiredParams:   req.RequiredParams,
+		Dependencies:     req.Dependencies,
+		Description:      req.Description,
+	})
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, nil)
+}
+
+// DeleteAPISyncStrategy handles DELETE /api/v1/api-sync-strategies/:id
+// @Summary      Delete API sync strategy
+// @Description  Delete a specific API sync strategy
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "API sync strategy ID"
 // @Success      204  {object}  nil
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
-// @Router       /datasources/{id}/token [delete]
-func (h *MetadataHandler) DeleteToken(c *gin.Context) {
+// @Router       /api-sync-strategies/{id} [delete]
+func (h *MetadataHandler) DeleteAPISyncStrategy(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	err := h.metadataSvc.DeleteToken(c.Request.Context(), id)
+	err := h.metadataSvc.DeleteAPISyncStrategy(c.Request.Context(), id)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -496,14 +376,6 @@ type CreateDataSourceReq struct {
 	DocURL      string `json:"doc_url"`
 }
 
-// UpdateDataSourceReq represents the request body for updating a data source.
-type UpdateDataSourceReq struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	BaseURL     *string `json:"base_url"`
-	DocURL      *string `json:"doc_url"`
-}
-
 // RefreshMetadataReq represents the request body for refreshing metadata.
 // Note: These fields are optional and will be ignored - the workflow fetches documentation from the data source's DocURL.
 type RefreshMetadataReq struct {
@@ -511,33 +383,27 @@ type RefreshMetadataReq struct {
 	DocType    string `json:"doc_type"`    // Optional - workflow detects type automatically
 }
 
-// CreateAPIMetadataReq represents the request body for creating API metadata.
-type CreateAPIMetadataReq struct {
-	DataSourceID   string               `json:"data_source_id" binding:"required"`
-	CategoryID     string               `json:"category_id"`
-	Name           string               `json:"name" binding:"required"`
-	DisplayName    string               `json:"display_name"`
-	Description    string               `json:"description"`
-	Endpoint       string               `json:"endpoint"`
-	RequestParams  []metadata.ParamMeta `json:"request_params"`
-	ResponseFields []metadata.FieldMeta `json:"response_fields"`
-	RateLimit      *metadata.RateLimit  `json:"rate_limit"`
-	Permission     string               `json:"permission"`
-}
-
-// UpdateAPIMetadataReq represents the request body for updating API metadata.
-type UpdateAPIMetadataReq struct {
-	DisplayName    *string               `json:"display_name"`
-	Description    *string               `json:"description"`
-	Endpoint       *string               `json:"endpoint"`
-	RequestParams  *[]metadata.ParamMeta `json:"request_params"`
-	ResponseFields *[]metadata.FieldMeta `json:"response_fields"`
-	RateLimit      *metadata.RateLimit   `json:"rate_limit"`
-	Permission     *string               `json:"permission"`
-}
-
 // SetTokenReq represents the request body for setting a token.
 type SetTokenReq struct {
 	Token     string  `json:"token" binding:"required"`
 	ExpiresAt *string `json:"expires_at"`
+}
+
+// CreateAPISyncStrategyReq represents the request body for creating an API sync strategy.
+type CreateAPISyncStrategyReq struct {
+	APIName          string   `json:"api_name" binding:"required"`
+	PreferredParam   string   `json:"preferred_param" binding:"required"` // none/trade_date/ts_code
+	SupportDateRange bool     `json:"support_date_range"`
+	RequiredParams   []string `json:"required_params"`
+	Dependencies     []string `json:"dependencies"`
+	Description       string   `json:"description"`
+}
+
+// UpdateAPISyncStrategyReq represents the request body for updating an API sync strategy.
+type UpdateAPISyncStrategyReq struct {
+	PreferredParam   *string   `json:"preferred_param"`
+	SupportDateRange *bool      `json:"support_date_range"`
+	RequiredParams   *[]string `json:"required_params"`
+	Dependencies     *[]string  `json:"dependencies"`
+	Description       *string    `json:"description"`
 }

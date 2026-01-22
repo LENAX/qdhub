@@ -17,6 +17,7 @@ import (
 // MetadataApplicationServiceImpl implements MetadataApplicationService.
 type MetadataApplicationServiceImpl struct {
 	dataSourceRepo metadata.DataSourceRepository
+	metadataRepo   metadata.Repository // 用于APISyncStrategy操作
 
 	metadataValidator metadata.MetadataValidator
 	parserFactory     metadata.DocumentParserFactory
@@ -26,11 +27,13 @@ type MetadataApplicationServiceImpl struct {
 // NewMetadataApplicationService creates a new MetadataApplicationService implementation.
 func NewMetadataApplicationService(
 	dataSourceRepo metadata.DataSourceRepository,
+	metadataRepo metadata.Repository,
 	parserFactory metadata.DocumentParserFactory,
 	workflowExecutor workflow.WorkflowExecutor, // 使用领域服务接口，而非应用服务
 ) contracts.MetadataApplicationService {
 	return &MetadataApplicationServiceImpl{
 		dataSourceRepo:    dataSourceRepo,
+		metadataRepo:      metadataRepo,
 		metadataValidator: metadata.NewMetadataValidator(),
 		parserFactory:     parserFactory,
 		workflowExecutor:  workflowExecutor,
@@ -74,67 +77,6 @@ func (s *MetadataApplicationServiceImpl) GetDataSource(ctx context.Context, id s
 	return ds, nil
 }
 
-// UpdateDataSource updates a data source.
-func (s *MetadataApplicationServiceImpl) UpdateDataSource(ctx context.Context, id shared.ID, req contracts.UpdateDataSourceRequest) error {
-	ds, err := s.dataSourceRepo.Get(id)
-	if err != nil {
-		return fmt.Errorf("failed to get data source: %w", err)
-	}
-	if ds == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
-	}
-
-	// Apply updates
-	name := ds.Name
-	description := ds.Description
-	baseURL := ds.BaseURL
-	docURL := ds.DocURL
-
-	if req.Name != nil {
-		name = *req.Name
-	}
-	if req.Description != nil {
-		description = *req.Description
-	}
-	if req.BaseURL != nil {
-		baseURL = *req.BaseURL
-	}
-	if req.DocURL != nil {
-		docURL = *req.DocURL
-	}
-
-	ds.UpdateInfo(name, description, baseURL, docURL)
-
-	// Validate
-	if err := s.metadataValidator.ValidateDataSource(ds); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	// Persist
-	if err := s.dataSourceRepo.Update(ds); err != nil {
-		return fmt.Errorf("failed to update data source: %w", err)
-	}
-
-	return nil
-}
-
-// DeleteDataSource deletes a data source and its related entities.
-func (s *MetadataApplicationServiceImpl) DeleteDataSource(ctx context.Context, id shared.ID) error {
-	ds, err := s.dataSourceRepo.Get(id)
-	if err != nil {
-		return fmt.Errorf("failed to get data source: %w", err)
-	}
-	if ds == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
-	}
-
-	// Delete data source
-	if err := s.dataSourceRepo.Delete(id); err != nil {
-		return fmt.Errorf("failed to delete data source: %w", err)
-	}
-
-	return nil
-}
 
 // ListDataSources lists all data sources.
 func (s *MetadataApplicationServiceImpl) ListDataSources(ctx context.Context) ([]*metadata.DataSource, error) {
@@ -198,131 +140,6 @@ func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Cont
 	return result, nil
 }
 
-// CreateAPIMetadata creates a new API metadata.
-func (s *MetadataApplicationServiceImpl) CreateAPIMetadata(ctx context.Context, req contracts.CreateAPIMetadataRequest) (*metadata.APIMetadata, error) {
-	// Verify data source exists
-	ds, err := s.dataSourceRepo.Get(req.DataSourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get data source: %w", err)
-	}
-	if ds == nil {
-		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
-	}
-
-	// Create domain entity
-	api := metadata.NewAPIMetadata(
-		req.DataSourceID,
-		req.Name,
-		req.DisplayName,
-		req.Description,
-		req.Endpoint,
-	)
-
-	// Set optional fields
-	api.CategoryID = req.CategoryID
-	api.Permission = req.Permission
-	api.SetRequestParams(req.RequestParams)
-	api.SetResponseFields(req.ResponseFields)
-	api.SetRateLimit(req.RateLimit)
-
-	// Validate
-	if err := s.metadataValidator.ValidateAPIMetadata(api); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
-	}
-
-	// Persist
-	if err := s.dataSourceRepo.AddAPIMetadata(api); err != nil {
-		return nil, fmt.Errorf("failed to create API metadata: %w", err)
-	}
-
-	return api, nil
-}
-
-// GetAPIMetadata retrieves an API metadata by ID.
-func (s *MetadataApplicationServiceImpl) GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error) {
-	api, err := s.dataSourceRepo.GetAPIMetadata(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get API metadata: %w", err)
-	}
-	if api == nil {
-		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "API metadata not found", nil)
-	}
-	return api, nil
-}
-
-// UpdateAPIMetadata updates an API metadata.
-func (s *MetadataApplicationServiceImpl) UpdateAPIMetadata(ctx context.Context, id shared.ID, req contracts.UpdateAPIMetadataRequest) error {
-	api, err := s.dataSourceRepo.GetAPIMetadata(id)
-	if err != nil {
-		return fmt.Errorf("failed to get API metadata: %w", err)
-	}
-	if api == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "API metadata not found", nil)
-	}
-
-	// Apply updates
-	if req.DisplayName != nil {
-		api.DisplayName = *req.DisplayName
-	}
-	if req.Description != nil {
-		api.Description = *req.Description
-	}
-	if req.Endpoint != nil {
-		api.Endpoint = *req.Endpoint
-	}
-	if req.Permission != nil {
-		api.Permission = *req.Permission
-	}
-	if req.RequestParams != nil {
-		api.SetRequestParams(*req.RequestParams)
-	}
-	if req.ResponseFields != nil {
-		api.SetResponseFields(*req.ResponseFields)
-	}
-	if req.RateLimit != nil {
-		api.SetRateLimit(req.RateLimit)
-	}
-
-	api.UpdatedAt = shared.Now()
-
-	// Validate
-	if err := s.metadataValidator.ValidateAPIMetadata(api); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	// Persist
-	if err := s.dataSourceRepo.UpdateAPIMetadata(api); err != nil {
-		return fmt.Errorf("failed to update API metadata: %w", err)
-	}
-
-	return nil
-}
-
-// DeleteAPIMetadata deletes an API metadata.
-func (s *MetadataApplicationServiceImpl) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
-	api, err := s.dataSourceRepo.GetAPIMetadata(id)
-	if err != nil {
-		return fmt.Errorf("failed to get API metadata: %w", err)
-	}
-	if api == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "API metadata not found", nil)
-	}
-
-	if err := s.dataSourceRepo.DeleteAPIMetadata(id); err != nil {
-		return fmt.Errorf("failed to delete API metadata: %w", err)
-	}
-
-	return nil
-}
-
-// ListAPIMetadataByDataSource lists all API metadata for a data source.
-func (s *MetadataApplicationServiceImpl) ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
-	apis, err := s.dataSourceRepo.ListAPIMetadataByDataSource(dataSourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list API metadata: %w", err)
-	}
-	return apis, nil
-}
 
 // ==================== Token Management ====================
 
@@ -386,19 +203,142 @@ func (s *MetadataApplicationServiceImpl) GetToken(ctx context.Context, dataSourc
 	return token, nil
 }
 
-// DeleteToken deletes a token.
-func (s *MetadataApplicationServiceImpl) DeleteToken(ctx context.Context, dataSourceID shared.ID) error {
-	token, err := s.dataSourceRepo.GetTokenByDataSource(dataSourceID)
+// ==================== API Sync Strategy Management ====================
+
+// CreateAPISyncStrategy creates a new API sync strategy.
+func (s *MetadataApplicationServiceImpl) CreateAPISyncStrategy(ctx context.Context, req contracts.CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
+	// Verify data source exists
+	ds, err := s.dataSourceRepo.Get(req.DataSourceID)
 	if err != nil {
-		return fmt.Errorf("failed to get token: %w", err)
+		return nil, fmt.Errorf("failed to get data source: %w", err)
 	}
-	if token == nil {
-		return shared.NewDomainError(shared.ErrCodeNotFound, "token not found", nil)
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
 	}
 
-	if err := s.dataSourceRepo.DeleteToken(token.ID); err != nil {
-		return fmt.Errorf("failed to delete token: %w", err)
+	// Verify API exists by listing APIs for the data source
+	apis, err := s.metadataRepo.ListAPIMetadataByDataSource(ctx, req.DataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list API metadata: %w", err)
+	}
+	apiFound := false
+	for _, api := range apis {
+		if api.Name == req.APIName {
+			apiFound = true
+			break
+		}
+	}
+	if !apiFound {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, fmt.Sprintf("API metadata not found: %s", req.APIName), nil)
+	}
+
+	// Check if strategy already exists
+	existing, err := s.metadataRepo.GetAPISyncStrategyByAPIName(ctx, req.DataSourceID, req.APIName)
+	if err != nil && !shared.IsNotFoundError(err) {
+		return nil, fmt.Errorf("failed to check existing strategy: %w", err)
+	}
+	if existing != nil {
+		return nil, shared.NewDomainError(shared.ErrCodeInvalidState, fmt.Sprintf("API sync strategy already exists for API: %s", req.APIName), nil)
+	}
+
+	// Create domain entity
+	strategy := metadata.NewAPISyncStrategy(req.DataSourceID, req.APIName, req.PreferredParam)
+	strategy.SetSupportDateRange(req.SupportDateRange)
+	if len(req.RequiredParams) > 0 {
+		strategy.SetRequiredParams(req.RequiredParams)
+	}
+	if len(req.Dependencies) > 0 {
+		strategy.SetDependencies(req.Dependencies)
+	}
+	if req.Description != "" {
+		strategy.SetDescription(req.Description)
+	}
+
+	// Persist
+	if err := s.metadataRepo.SaveAPISyncStrategy(ctx, strategy); err != nil {
+		return nil, fmt.Errorf("failed to create API sync strategy: %w", err)
+	}
+
+	return strategy, nil
+}
+
+// GetAPISyncStrategy retrieves an API sync strategy by ID or by (DataSourceID, APIName).
+func (s *MetadataApplicationServiceImpl) GetAPISyncStrategy(ctx context.Context, req contracts.GetAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
+	if req.ID != nil {
+		strategy, err := s.metadataRepo.GetAPISyncStrategyByID(ctx, *req.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API sync strategy: %w", err)
+		}
+		if strategy == nil {
+			return nil, shared.NewDomainError(shared.ErrCodeNotFound, "API sync strategy not found", nil)
+		}
+		return strategy, nil
+	}
+
+	if req.DataSourceID == nil || req.APIName == nil {
+		return nil, fmt.Errorf("either ID or (DataSourceID + APIName) must be provided")
+	}
+
+	strategy, err := s.metadataRepo.GetAPISyncStrategyByAPIName(ctx, *req.DataSourceID, *req.APIName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get API sync strategy: %w", err)
+	}
+	if strategy == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "API sync strategy not found", nil)
+	}
+
+	return strategy, nil
+}
+
+// UpdateAPISyncStrategy updates an API sync strategy.
+func (s *MetadataApplicationServiceImpl) UpdateAPISyncStrategy(ctx context.Context, id shared.ID, req contracts.UpdateAPISyncStrategyRequest) error {
+	// Get existing strategy
+	strategy, err := s.metadataRepo.GetAPISyncStrategyByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to get API sync strategy: %w", err)
+	}
+	if strategy == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "API sync strategy not found", nil)
+	}
+
+	// Apply updates
+	if req.PreferredParam != nil {
+		strategy.PreferredParam = *req.PreferredParam
+	}
+	if req.SupportDateRange != nil {
+		strategy.SetSupportDateRange(*req.SupportDateRange)
+	}
+	if req.RequiredParams != nil {
+		strategy.SetRequiredParams(*req.RequiredParams)
+	}
+	if req.Dependencies != nil {
+		strategy.SetDependencies(*req.Dependencies)
+	}
+	if req.Description != nil {
+		strategy.SetDescription(*req.Description)
+	}
+
+	// Persist
+	if err := s.metadataRepo.SaveAPISyncStrategy(ctx, strategy); err != nil {
+		return fmt.Errorf("failed to update API sync strategy: %w", err)
 	}
 
 	return nil
+}
+
+// DeleteAPISyncStrategy deletes an API sync strategy.
+func (s *MetadataApplicationServiceImpl) DeleteAPISyncStrategy(ctx context.Context, id shared.ID) error {
+	if err := s.metadataRepo.DeleteAPISyncStrategy(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete API sync strategy: %w", err)
+	}
+	return nil
+}
+
+// ListAPISyncStrategies lists all API sync strategies for a data source.
+func (s *MetadataApplicationServiceImpl) ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error) {
+	strategies, err := s.metadataRepo.ListAPISyncStrategiesByDataSource(ctx, dataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list API sync strategies: %w", err)
+	}
+	return strategies, nil
 }
