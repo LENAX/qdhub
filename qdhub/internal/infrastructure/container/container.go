@@ -270,7 +270,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 
 	// Create WorkflowExecutor (domain service for executing built-in workflows)
 	// This avoids direct dependency between application services
-	c.WorkflowExecutor = taskengine.NewWorkflowExecutor(c.WorkflowRepo, c.TaskEngineAdapter)
+	c.WorkflowExecutor = taskengine.NewWorkflowExecutor(c.WorkflowRepo, c.TaskEngineAdapter, c.MetadataRepo)
 
 	logrus.Info("Task Engine initialized")
 	return nil

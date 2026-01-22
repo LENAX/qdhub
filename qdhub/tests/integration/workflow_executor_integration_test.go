@@ -60,8 +60,11 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err, "Failed to initialize built-in workflows")
 
+	// Create MetadataRepository for WorkflowExecutor
+	metadataRepo := repository.NewMetadataRepository(db)
+
 	// Create WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter)
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
 
 	t.Run("ExecuteMetadataCrawl - converts parameters correctly", func(t *testing.T) {
 		req := workflow.MetadataCrawlRequest{
@@ -210,7 +213,8 @@ func TestWorkflowExecutor_ParameterMapping(t *testing.T) {
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter)
+	metadataRepo := repository.NewMetadataRepository(db)
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
 
 	t.Run("MetadataCrawl - optional MaxAPICrawl not added when zero", func(t *testing.T) {
 		req := workflow.MetadataCrawlRequest{

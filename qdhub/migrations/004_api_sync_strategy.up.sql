@@ -370,10 +370,10 @@ SELECT
     ds.id,
     'ggt_top10',
     'trade_date',
-    1,
+    0,
     NULL,
     '["FetchTradeCal"]',
-    '港股通十大成交 - trade_date 或 start_date+end_date'
+    '港股通十大成交 - 必须提供 trade_date 参数（单日查询，不支持日期范围）'
 FROM data_sources ds WHERE LOWER(ds.name) = 'tushare';
 
 INSERT OR REPLACE INTO api_sync_strategies (id, data_source_id, api_name, preferred_param, support_date_range, required_params, dependencies, description)

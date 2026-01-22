@@ -18,6 +18,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
@@ -54,7 +55,8 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	mappingRuleRepo := repository.NewDataTypeMappingRuleRepository(db)
-	syncJobRepo := repository.NewSyncJobRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 
 	// Create adapters
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
@@ -68,15 +70,15 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter)
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
 
-	// Create mock job scheduler
-	jobScheduler := &mockJobScheduler{scheduledJobs: make(map[string]string)}
+	// Create dependency resolver
+	dependencyResolver := sync.NewDependencyResolver()
 
 	// Create application services with WorkflowExecutor
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, nil, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, mappingRuleRepo, dataSourceRepo, quantDBAdapter, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncJobRepo, workflowRepo, taskEngineAdapter, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver)
 
 	// ==================== MetadataApplicationService Tests ====================
 

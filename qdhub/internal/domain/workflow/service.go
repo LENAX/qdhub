@@ -71,15 +71,16 @@ type CreateTablesRequest struct {
 
 // BatchDataSyncRequest 批量同步请求参数
 type BatchDataSyncRequest struct {
-	DataSourceName string   // 数据源名称（必填）
-	Token          string   // API Token（必填）
-	TargetDBPath   string   // 目标数据库路径（必填）
-	StartDate      string   // 开始日期（必填，格式: "20251201"）
-	EndDate        string   // 结束日期（必填，格式: "20251231"）
-	StartTime      string   // 开始时间（可选，格式: "09:30:00"）
-	EndTime        string   // 结束时间（可选，格式: "15:00:00"）
-	APINames       []string // 需要同步的 API 列表（必填）
-	MaxStocks      int      // 最大股票数量（可选，0表示不限制）
+	DataSourceID   shared.ID // 数据源 ID（可选，用于查询策略）
+	DataSourceName string    // 数据源名称（必填）
+	Token          string    // API Token（必填）
+	TargetDBPath   string    // 目标数据库路径（必填）
+	StartDate      string    // 开始日期（必填，格式: "20251201"）
+	EndDate        string    // 结束日期（必填，格式: "20251231"）
+	StartTime      string    // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string    // 结束时间（可选，格式: "15:00:00"）
+	APINames       []string  // 需要同步的 API 列表（必填）
+	MaxStocks      int       // 最大股票数量（可选，0表示不限制）
 }
 
 // RealtimeDataSyncRequest 实时同步请求参数

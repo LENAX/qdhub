@@ -234,6 +234,18 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}, nil
 	}
 
+	// 如果是 trade_date，根据日期范围过滤交易日
+	if paramKey == "trade_date" {
+		startDate := tc.GetParamString("start_date")
+		endDate := tc.GetParamString("end_date")
+		if startDate != "" || endDate != "" {
+			filtered := filterDatesByRange(paramValues, startDate, endDate)
+			logrus.Printf("📅 [GenerateDataSyncSubTasks] 日期范围过滤: 原始 %d 个交易日 -> 过滤后 %d 个 (范围: %s ~ %s)",
+				len(paramValues), len(filtered), startDate, endDate)
+			paramValues = filtered
+		}
+	}
+
 	// 应用数量限制
 	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
 		logrus.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
@@ -911,6 +923,19 @@ func extractParamValuesFromSpecificUpstream(tc *task.TaskContext, taskName, para
 		return nil
 	}
 
+	// 特殊处理：trade_date 从 FetchTradeCal 任务中提取时，使用 cal_dates 字段
+	if paramKey == "trade_date" && taskName == "FetchTradeCal" {
+		if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+			if vals, ok := extracted["cal_dates"]; ok {
+				return convertToStringSlice(vals)
+			}
+		}
+		// 也尝试直接字段
+		if vals, ok := upstreamResult["cal_dates"]; ok {
+			return convertToStringSlice(vals)
+		}
+	}
+
 	// 优先从 extracted_data 获取（复数形式）
 	pluralKey := paramKey + "s"
 	if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
@@ -1038,4 +1063,33 @@ func parseGoMapString(s string) map[string]interface{} {
 	}
 
 	return result
+}
+
+// filterDatesByRange 根据日期范围过滤日期列表
+// dates: 日期列表（格式: "20260122"）
+// startDate: 开始日期（格式: "20260115"），为空则不限制开始
+// endDate: 结束日期（格式: "20260122"），为空则不限制结束
+func filterDatesByRange(dates []string, startDate, endDate string) []string {
+	if len(dates) == 0 {
+		return dates
+	}
+
+	// 如果开始和结束日期都为空，返回所有日期
+	if startDate == "" && endDate == "" {
+		return dates
+	}
+
+	filtered := make([]string, 0, len(dates))
+	for _, date := range dates {
+		// 检查是否在范围内
+		if startDate != "" && date < startDate {
+			continue
+		}
+		if endDate != "" && date > endDate {
+			continue
+		}
+		filtered = append(filtered, date)
+	}
+
+	return filtered
 }

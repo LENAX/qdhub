@@ -86,7 +86,9 @@ func (p *RepositoryStrategyProvider) GetStrategies(ctx context.Context, dataSour
 
 	result := make(map[string]*APISyncStrategy, len(entities))
 	for _, entity := range entities {
-		result[entity.APIName] = convertEntityToStrategy(entity)
+		strategy := convertEntityToStrategy(entity)
+		log.Printf("📋 [RepositoryStrategyProvider] 加载策略: API=%s, PreferredParam=%s, SupportDateRange=%v", entity.APIName, strategy.PreferredParam, strategy.SupportDateRange)
+		result[entity.APIName] = strategy
 	}
 	return result, nil
 }
@@ -149,7 +151,7 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 
 	// ========== 龙虎榜相关 API ==========
 	"hsgt_top10":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
-	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"limit_list_d": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 
 	// ========== 同花顺概念板块 API ==========
@@ -547,15 +549,23 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			apiNames = []string{"${api_names}"}
 		}
 
+		// 加载策略（如果有策略提供者）
+		ctx := context.Background()
+		if err := b.loadStrategies(ctx, apiNames); err != nil {
+			log.Printf("⚠️ [BuildWorkflow] 加载策略失败，将使用默认策略: %v", err)
+		}
+
 		for _, apiName := range apiNames {
 			// 跳过基础数据（已在 Level 0 处理）
 			if apiName == "trade_cal" || apiName == "stock_basic" {
+				log.Printf("⏭️ [BuildWorkflow] 跳过基础数据 API: %s", apiName)
 				continue
 			}
 
 			// 获取 API 同步策略（优先使用缓存的策略）
 			strategy := b.getStrategy(apiName)
 			taskName := "Sync_" + apiName
+			log.Printf("🔨 [BuildWorkflow] 开始构建任务: API=%s, TaskName=%s, PreferredParam=%s", apiName, taskName, strategy.PreferredParam)
 
 			var syncTask *task.Task
 			var err error
@@ -564,30 +574,43 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			case "trade_date":
 				// 支持 trade_date 的 API：使用 direct 模式，按日期查询全市场数据
 				// 根据 SupportDateRange 决定使用日期范围还是单日查询
-				var apiParams map[string]interface{}
 				if strategy.SupportDateRange {
 					// 支持日期范围查询：使用 start_date + end_date
-					apiParams = dateTimeParams
+					apiParams := dateTimeParams
 					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=true, params=%v", apiName, apiParams)
-				} else {
-					// 只支持单日查询：使用 end_date 作为 trade_date（最新日期）
-					// 注意：这类 API 在实际使用中通常需要配合交易日历遍历每个交易日
-					apiParams = map[string]interface{}{
-						"trade_date": endDateOnly, // 使用处理后的日期（去除时间部分）
-					}
-					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=false, trade_date=%s, params=%v", apiName, endDateOnly, apiParams)
-				}
 
-				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按日期）", b.registry).
-					WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-						"api_name": apiName,
-						"params":   apiParams,
-					})).
-					WithDependency("FetchTradeCal"). // 依赖交易日历
-					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-					WithCompensationFunction("CompensateSyncData").
-					Build()
+					syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按日期）", b.registry).
+						WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
+							"api_name": apiName,
+							"params":   apiParams,
+						})).
+						WithDependency("FetchTradeCal"). // 依赖交易日历
+						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+						WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+						WithCompensationFunction("CompensateSyncData").
+						Build()
+				} else {
+					// 只支持单日查询：使用模板任务遍历交易日历中的每个交易日
+					// 从 FetchTradeCal 任务中提取交易日列表，为每个交易日生成子任务
+					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=false, 使用模板任务遍历交易日", apiName)
+
+					syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按交易日）", b.registry).
+						WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+							"api_name":      apiName,
+							"param_key":     "trade_date",             // 使用 trade_date 作为参数键
+							"upstream_task": "FetchTradeCal",          // 从交易日历任务中提取交易日列表
+							"max_sub_tasks": params.MaxStocks,         // 可以限制子任务数量（0 表示不限制）
+							"start_date":    startDateOnly,            // 日期范围开始
+							"end_date":      endDateOnly,              // 日期范围结束
+							"extra_params":  map[string]interface{}{}, // 不需要额外参数
+						})).
+						WithDependency("FetchTradeCal"). // 依赖交易日历
+						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+						WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+						WithTemplate(true). // 标记为模板任务
+						WithCompensationFunction("CompensateSyncData").
+						Build()
+				}
 
 			case "none":
 				// 基础数据 API：直接查询，不需要拆分
@@ -662,8 +685,10 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			}
 
 			if err != nil {
+				log.Printf("❌ [BuildWorkflow] 构建任务失败: API=%s, TaskName=%s, Error=%v", apiName, taskName, err)
 				return nil, err
 			}
+			log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s", apiName, taskName)
 			tasks = append(tasks, syncTask)
 		}
 	}

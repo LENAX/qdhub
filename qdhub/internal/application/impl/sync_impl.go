@@ -309,6 +309,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 
 	// Execute workflow
 	instanceID, err := s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
+		DataSourceID:   plan.DataSourceID,
 		DataSourceName: ds.Name,
 		Token:          token.TokenValue,
 		TargetDBPath:   req.TargetDBPath,

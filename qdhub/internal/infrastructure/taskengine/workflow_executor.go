@@ -7,6 +7,7 @@ import (
 
 	"github.com/LENAX/task-engine/pkg/core/task"
 
+	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -18,16 +19,19 @@ import (
 type WorkflowExecutorImpl struct {
 	workflowRepo      workflow.WorkflowDefinitionRepository
 	taskEngineAdapter workflow.TaskEngineAdapter
+	metadataRepo      metadata.Repository
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
 func NewWorkflowExecutor(
 	workflowRepo workflow.WorkflowDefinitionRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
+	metadataRepo metadata.Repository,
 ) workflow.WorkflowExecutor {
 	return &WorkflowExecutorImpl{
 		workflowRepo:      workflowRepo,
 		taskEngineAdapter: taskEngineAdapter,
+		metadataRepo:      metadataRepo,
 	}
 }
 
@@ -149,6 +153,12 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 	// Add optional time parameters if set
 	if req.StartTime != "" || req.EndTime != "" {
 		wfBuilder.WithTimeRange(req.StartTime, req.EndTime)
+	}
+
+	// If DataSourceID is provided, create strategy provider and inject it
+	if !req.DataSourceID.IsEmpty() {
+		provider := workflows.NewRepositoryStrategyProvider(e.metadataRepo)
+		wfBuilder.WithStrategyProvider(provider, req.DataSourceID)
 	}
 
 	wf, err := wfBuilder.Build()
