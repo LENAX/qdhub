@@ -16,21 +16,23 @@ import (
 // MetadataRepositoryImpl implements metadata.Repository interface.
 // This is the aggregated repository used by task engine job functions.
 type MetadataRepositoryImpl struct {
-	db             *persistence.DB
-	dataSourceDAO  *dao.DataSourceDAO
-	categoryDAO    *dao.APICategoryDAO
-	apiMetadataDAO *dao.APIMetadataDAO
-	tokenDAO       *dao.TokenDAO
+	db                 *persistence.DB
+	dataSourceDAO      *dao.DataSourceDAO
+	categoryDAO        *dao.APICategoryDAO
+	apiMetadataDAO     *dao.APIMetadataDAO
+	tokenDAO           *dao.TokenDAO
+	apiSyncStrategyDAO *dao.APISyncStrategyDAO
 }
 
 // NewMetadataRepository creates a new MetadataRepositoryImpl.
 func NewMetadataRepository(db *persistence.DB) *MetadataRepositoryImpl {
 	return &MetadataRepositoryImpl{
-		db:             db,
-		dataSourceDAO:  dao.NewDataSourceDAO(db.DB),
-		categoryDAO:    dao.NewAPICategoryDAO(db.DB),
-		apiMetadataDAO: dao.NewAPIMetadataDAO(db.DB),
-		tokenDAO:       dao.NewTokenDAO(db.DB),
+		db:                 db,
+		dataSourceDAO:      dao.NewDataSourceDAO(db.DB),
+		categoryDAO:        dao.NewAPICategoryDAO(db.DB),
+		apiMetadataDAO:     dao.NewAPIMetadataDAO(db.DB),
+		tokenDAO:           dao.NewTokenDAO(db.DB),
+		apiSyncStrategyDAO: dao.NewAPISyncStrategyDAO(db.DB),
 	}
 }
 
@@ -222,6 +224,77 @@ func (r *MetadataRepositoryImpl) GetDataSourceByName(ctx context.Context, name s
 	}
 	// Note: Not loading aggregated entities for efficiency (only ID is needed for compensation)
 	return ds, nil
+}
+
+// ==================== API Sync Strategy 操作 ====================
+
+// SaveAPISyncStrategy saves or updates an API sync strategy.
+func (r *MetadataRepositoryImpl) SaveAPISyncStrategy(ctx context.Context, strategy *metadata.APISyncStrategy) error {
+	// Check if exists by unique constraint (data_source_id, api_name)
+	existing, err := r.apiSyncStrategyDAO.GetByDataSourceAndAPIName(nil, strategy.DataSourceID, strategy.APIName)
+	if err != nil {
+		return fmt.Errorf("failed to check strategy existence: %w", err)
+	}
+
+	if existing != nil {
+		// Update: use existing ID
+		strategy.ID = existing.ID
+		return r.apiSyncStrategyDAO.Update(nil, strategy)
+	}
+	// Insert
+	return r.apiSyncStrategyDAO.Create(nil, strategy)
+}
+
+// SaveAPISyncStrategyBatch batch saves API sync strategies.
+func (r *MetadataRepositoryImpl) SaveAPISyncStrategyBatch(ctx context.Context, strategies []*metadata.APISyncStrategy) error {
+	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
+		for _, strategy := range strategies {
+			// Check if exists by unique constraint (data_source_id, api_name)
+			existing, err := r.apiSyncStrategyDAO.GetByDataSourceAndAPIName(tx, strategy.DataSourceID, strategy.APIName)
+			if err != nil {
+				return fmt.Errorf("failed to check strategy existence: %w", err)
+			}
+
+			if existing != nil {
+				// Update: use existing ID
+				strategy.ID = existing.ID
+				if err := r.apiSyncStrategyDAO.Update(tx, strategy); err != nil {
+					return fmt.Errorf("failed to update strategy: %w", err)
+				}
+			} else {
+				// Insert
+				if err := r.apiSyncStrategyDAO.Create(tx, strategy); err != nil {
+					return fmt.Errorf("failed to create strategy: %w", err)
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// GetAPISyncStrategyByAPIName retrieves a sync strategy by data source ID and API name.
+func (r *MetadataRepositoryImpl) GetAPISyncStrategyByAPIName(ctx context.Context, dataSourceID shared.ID, apiName string) (*metadata.APISyncStrategy, error) {
+	return r.apiSyncStrategyDAO.GetByDataSourceAndAPIName(nil, dataSourceID, apiName)
+}
+
+// ListAPISyncStrategiesByDataSource retrieves all sync strategies for a data source.
+func (r *MetadataRepositoryImpl) ListAPISyncStrategiesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error) {
+	return r.apiSyncStrategyDAO.ListByDataSource(nil, dataSourceID)
+}
+
+// ListAPISyncStrategiesByAPINames retrieves sync strategies for specific API names.
+func (r *MetadataRepositoryImpl) ListAPISyncStrategiesByAPINames(ctx context.Context, dataSourceID shared.ID, apiNames []string) ([]*metadata.APISyncStrategy, error) {
+	return r.apiSyncStrategyDAO.ListByAPINames(nil, dataSourceID, apiNames)
+}
+
+// DeleteAPISyncStrategy deletes a sync strategy by ID.
+func (r *MetadataRepositoryImpl) DeleteAPISyncStrategy(ctx context.Context, id shared.ID) error {
+	return r.apiSyncStrategyDAO.DeleteByID(nil, id)
+}
+
+// DeleteAPISyncStrategiesByDataSource deletes all sync strategies for a data source.
+func (r *MetadataRepositoryImpl) DeleteAPISyncStrategiesByDataSource(ctx context.Context, dataSourceID shared.ID) error {
+	return r.apiSyncStrategyDAO.DeleteByDataSource(nil, dataSourceID)
 }
 
 // ==================== 辅助方法 ====================

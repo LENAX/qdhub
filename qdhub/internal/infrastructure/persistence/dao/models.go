@@ -104,6 +104,22 @@ type DataTypeMappingRuleRow struct {
 	UpdatedAt      time.Time      `db:"updated_at"`
 }
 
+// ==================== API Sync Strategy Models ====================
+
+// APISyncStrategyRow represents api_sync_strategies table row.
+type APISyncStrategyRow struct {
+	ID               string         `db:"id"`
+	DataSourceID     string         `db:"data_source_id"`
+	APIName          string         `db:"api_name"`
+	PreferredParam   string         `db:"preferred_param"`
+	SupportDateRange int            `db:"support_date_range"` // 0: false, 1: true
+	RequiredParams   sql.NullString `db:"required_params"`    // JSON array
+	Dependencies     sql.NullString `db:"dependencies"`       // JSON array
+	Description      sql.NullString `db:"description"`
+	CreatedAt        time.Time      `db:"created_at"`
+	UpdatedAt        time.Time      `db:"updated_at"`
+}
+
 // ==================== Sync Domain Models ====================
 
 // SyncExecutionRow represents sync_execution table row.

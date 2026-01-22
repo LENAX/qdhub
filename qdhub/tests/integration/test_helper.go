@@ -37,6 +37,19 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to execute migration: %v", err)
 	}
 
+	// Read and execute api_sync_strategy migration
+	strategyMigrationSQL, err := os.ReadFile("../../migrations/004_api_sync_strategy.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read api_sync_strategy migration file: %v", err)
+	}
+
+	_, err = db.Exec(string(strategyMigrationSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute api_sync_strategy migration: %v", err)
+	}
+
 	cleanup := func() {
 		db.Close()
 		os.Remove(dsn)

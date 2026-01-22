@@ -2,10 +2,13 @@
 package workflows
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 
+	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
@@ -23,7 +26,7 @@ var (
 	ErrEmptyEndDate        = errors.New("end_date is required")
 )
 
-// APISyncStrategy API 同步策略
+// APISyncStrategy API 同步策略（工作流内部使用的 DTO）
 // 定义每个 API 优先使用的同步维度
 type APISyncStrategy struct {
 	// PreferredParam 优先使用的参数
@@ -40,87 +43,155 @@ type APISyncStrategy struct {
 	Dependencies []string
 }
 
-// Tushare API 同步策略配置
+// APISyncStrategyProvider 策略提供者接口
+// 用于从外部（如数据库）获取 API 同步策略
+type APISyncStrategyProvider interface {
+	// GetStrategy 获取指定 API 的同步策略
+	// 如果找不到，返回 nil（调用方应使用默认策略）
+	GetStrategy(ctx context.Context, dataSourceID shared.ID, apiName string) (*APISyncStrategy, error)
+
+	// GetStrategies 批量获取同步策略
+	// 返回 map[apiName]strategy，不存在的 API 不会出现在 map 中
+	GetStrategies(ctx context.Context, dataSourceID shared.ID, apiNames []string) (map[string]*APISyncStrategy, error)
+}
+
+// RepositoryStrategyProvider 基于仓储的策略提供者
+type RepositoryStrategyProvider struct {
+	repo metadata.Repository
+}
+
+// NewRepositoryStrategyProvider 创建基于仓储的策略提供者
+func NewRepositoryStrategyProvider(repo metadata.Repository) *RepositoryStrategyProvider {
+	return &RepositoryStrategyProvider{repo: repo}
+}
+
+// GetStrategy 从仓储获取策略
+func (p *RepositoryStrategyProvider) GetStrategy(ctx context.Context, dataSourceID shared.ID, apiName string) (*APISyncStrategy, error) {
+	entity, err := p.repo.GetAPISyncStrategyByAPIName(ctx, dataSourceID, apiName)
+	if err != nil {
+		return nil, err
+	}
+	if entity == nil {
+		return nil, nil
+	}
+	return convertEntityToStrategy(entity), nil
+}
+
+// GetStrategies 批量获取策略
+func (p *RepositoryStrategyProvider) GetStrategies(ctx context.Context, dataSourceID shared.ID, apiNames []string) (map[string]*APISyncStrategy, error) {
+	entities, err := p.repo.ListAPISyncStrategiesByAPINames(ctx, dataSourceID, apiNames)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*APISyncStrategy, len(entities))
+	for _, entity := range entities {
+		result[entity.APIName] = convertEntityToStrategy(entity)
+	}
+	return result, nil
+}
+
+// convertEntityToStrategy 将领域实体转换为工作流 DTO
+func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy {
+	return &APISyncStrategy{
+		PreferredParam:   string(entity.PreferredParam),
+		SupportDateRange: entity.SupportDateRange,
+		RequiredParams:   entity.RequiredParams,
+		Dependencies:     entity.Dependencies,
+	}
+}
+
+// defaultAPISyncStrategies 默认的 Tushare API 同步策略配置（作为回退）
+// 当数据库中没有配置时使用这些默认值
+//
 // 根据 Tushare 官方文档中各 API 的必填参数来确定同步策略：
 // - "none": 无必填参数，直接查询即可
 // - "trade_date": 支持 trade_date 参数按日期查询全市场，效率最高
 // - "ts_code": 必须提供 ts_code，需要按股票代码拆分任务
-// - "special": 有其他必填参数，需要特殊处理
 //
 // SupportDateRange 说明：
 // - true: API 支持 start_date + end_date 日期范围查询（如 daily）
 // - false: API 只支持 trade_date 单日查询（如 weekly, monthly, top_list）
 //
 // 参考文档: https://tushare.pro/document/2
-var tushareAPISyncStrategies = map[string]APISyncStrategy{
+var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	// ========== 无必填参数（直接查询）==========
-	// 这些 API 没有必填参数，可以直接查询获取全部数据
-	"trade_cal":   {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},              // 交易日历 - 可选参数: exchange, start_date, end_date
-	"stock_basic": {PreferredParam: "none", Dependencies: nil},                                      // 股票基础信息 - 可选参数: list_status, exchange 等
-	"namechange":  {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},              // 股票曾用名 - 可选参数: ts_code, start_date, end_date
-	"index_basic": {PreferredParam: "none", RequiredParams: []string{"market"}, Dependencies: nil},  // 指数基本信息 - 必填: market (SSE/SZSE/...)
-	"hs_const":    {PreferredParam: "none", RequiredParams: []string{"hs_type"}, Dependencies: nil}, // 沪深港通成分 - 必填: hs_type (SH/SZ)
-	"stk_limit":   {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},              // 涨跌停价格 - 可选参数: ts_code, trade_date, start_date, end_date
+	"trade_cal":   {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},
+	"stock_basic": {PreferredParam: "none", Dependencies: nil},
+	"namechange":  {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},
+	"index_basic": {PreferredParam: "none", RequiredParams: []string{"market"}, Dependencies: nil},
+	"hs_const":    {PreferredParam: "none", RequiredParams: []string{"hs_type"}, Dependencies: nil},
+	"stk_limit":   {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},
 
 	// ========== 支持 trade_date（按日期查询全市场）==========
-	// 这些 API 支持 trade_date 参数，可以一次查询某一天的全市场数据
-	// SupportDateRange=true: 可以用 start_date+end_date 或 trade_date
-	// SupportDateRange=false: 只能用 trade_date（单日查询）
-	"daily":         {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 日线 - trade_date 或 start_date+end_date
-	"weekly":        {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},                                      // 周线 - 只支持 ts_code+trade_date
-	"monthly":       {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},                                      // 月线 - 只支持 ts_code+trade_date
-	"daily_basic":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 每日指标 - trade_date 或 start_date+end_date
-	"adj_factor":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 复权因子 - trade_date 或 start_date+end_date
-	"top_list":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},                                      // 龙虎榜 - trade_date 必填
-	"top_inst":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},                                      // 龙虎榜机构 - trade_date 必填
-	"margin":        {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 融资融券汇总 - 支持 start_date+end_date
-	"margin_detail": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 融资融券明细 - trade_date 或 start_date+end_date
-	"block_trade":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},                                       // 大宗交易 - trade_date 或 start_date+end_date
-	"index_daily":   {PreferredParam: "ts_code", SupportDateRange: true, RequiredParams: []string{"ts_code"}, Dependencies: []string{"FetchTradeCal"}},     // 指数日线 - ts_code 必填
-	"index_weight":  {PreferredParam: "ts_code", SupportDateRange: false, RequiredParams: []string{"index_code"}, Dependencies: []string{"FetchTradeCal"}}, // 指数权重 - index_code 必填
+	"daily":         {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"weekly":        {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"monthly":       {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"daily_basic":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"adj_factor":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"top_list":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"top_inst":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"margin":        {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"margin_detail": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"block_trade":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"index_daily":   {PreferredParam: "ts_code", SupportDateRange: true, RequiredParams: []string{"ts_code"}, Dependencies: []string{"FetchTradeCal"}},
+	"index_weight":  {PreferredParam: "ts_code", SupportDateRange: false, RequiredParams: []string{"index_code"}, Dependencies: []string{"FetchTradeCal"}},
 
 	// ========== 资金流向 API ==========
-	"moneyflow_hsgt":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 沪深港通资金流向 - trade_date 或 start_date+end_date
-	"moneyflow_ind_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 同花顺行业资金流向 - trade_date 必填
-	"moneyflow_cnt_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 同花顺概念资金流向 - trade_date 必填
-	"moneyflow_mkt_dc":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 东财大盘资金流向 - trade_date 或 start_date+end_date
-	"moneyflow_ind_dc":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 东财板块资金流向 - trade_date 必填
-	"moneyflow":         {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},  // 个股资金流向 - ts_code 必填
-	"moneyflow_ths":     {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},  // 同花顺个股资金流向 - ts_code 必填
-	"moneyflow_dc":      {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},  // 东财个股资金流向 - ts_code 必填
+	"moneyflow_hsgt":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"moneyflow_ind_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"moneyflow_cnt_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"moneyflow_mkt_dc":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"moneyflow_ind_dc":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"moneyflow":         {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},
+	"moneyflow_ths":     {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},
+	"moneyflow_dc":      {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},
 
 	// ========== 龙虎榜相关 API ==========
-	"hsgt_top10":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 沪深股通十大成交 - trade_date 或 start_date+end_date
-	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 港股通十大成交 - trade_date 或 start_date+end_date
-	"limit_list_d": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 每日涨跌停榜单 - trade_date 或 start_date+end_date
+	"hsgt_top10":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"limit_list_d": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 
 	// ========== 同花顺概念板块 API ==========
-	"ths_index":  {PreferredParam: "none", Dependencies: nil},                                                     // 同花顺板块指数 - 无必填参数
-	"ths_daily":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 同花顺板块行情 - trade_date 或 start_date+end_date
-	"ths_member": {PreferredParam: "none", RequiredParams: []string{"ts_code"}, Dependencies: nil},                // 同花顺概念成分 - ts_code（板块代码）必填
+	"ths_index":  {PreferredParam: "none", Dependencies: nil},
+	"ths_daily":  {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"ths_member": {PreferredParam: "none", RequiredParams: []string{"ts_code"}, Dependencies: nil},
 
 	// ========== 开盘啦题材数据 API ==========
-	"kpl_list":         {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 开盘啦榜单 - trade_date 或 start_date+end_date
-	"kpl_concept":      {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 开盘啦概念题材列表 - trade_date 或 start_date+end_date
-	"kpl_concept_cons": {PreferredParam: "none", RequiredParams: []string{"ts_code"}, Dependencies: nil},                // 开盘啦概念成分 - ts_code（概念代码）必填
+	"kpl_list":         {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"kpl_concept":      {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"kpl_concept_cons": {PreferredParam: "none", RequiredParams: []string{"ts_code"}, Dependencies: nil},
 
 	// ========== 必须提供 ts_code（按股票拆分）==========
-	// 这些 API 要求必须提供 ts_code 参数，需要按股票代码生成子任务
-	// 财务数据 API 通常属于这类
-	"income":         {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}}, // 利润表 - ts_code 必填
-	"balancesheet":   {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}}, // 资产负债表 - ts_code 必填
-	"cashflow":       {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}}, // 现金流量表 - ts_code 必填
-	"fina_indicator": {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}}, // 财务指标 - ts_code 必填
-	"fina_mainbz":    {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}}, // 主营业务构成 - ts_code 必填
+	"income":         {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+	"balancesheet":   {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+	"cashflow":       {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+	"fina_indicator": {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+	"fina_mainbz":    {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
 }
 
-// GetAPISyncStrategy 获取 API 的同步策略
+// GetAPISyncStrategy 获取 API 的同步策略（使用默认配置）
 // 如果没有配置，默认返回 ts_code 策略（保守策略）
 func GetAPISyncStrategy(apiName string) APISyncStrategy {
-	if strategy, ok := tushareAPISyncStrategies[apiName]; ok {
+	return GetAPISyncStrategyWithFallback(apiName, nil)
+}
+
+// GetAPISyncStrategyWithFallback 获取 API 的同步策略，支持外部策略缓存
+// strategies: 外部提供的策略缓存（通常从数据库加载），可以为 nil
+func GetAPISyncStrategyWithFallback(apiName string, strategies map[string]*APISyncStrategy) APISyncStrategy {
+	// 1. 先从外部策略缓存查找
+	if strategies != nil {
+		if strategy, ok := strategies[apiName]; ok && strategy != nil {
+			return *strategy
+		}
+	}
+
+	// 2. 从默认配置查找
+	if strategy, ok := defaultAPISyncStrategies[apiName]; ok {
 		return strategy
 	}
-	// 默认使用 ts_code 策略（需要按股票拆分）
+
+	// 3. 返回保守的默认策略（需要按股票拆分）
 	return APISyncStrategy{
 		PreferredParam: "ts_code",
 		Dependencies:   []string{"FetchStockBasic"},
@@ -199,8 +270,11 @@ func (p *BatchDataSyncParams) GetEndDateTime() string {
 
 // BatchDataSyncWorkflowBuilder 批量数据同步工作流构建器
 type BatchDataSyncWorkflowBuilder struct {
-	registry task.FunctionRegistry
-	params   BatchDataSyncParams
+	registry         task.FunctionRegistry
+	params           BatchDataSyncParams
+	strategyCache    map[string]*APISyncStrategy // 策略缓存（从数据库加载）
+	strategyProvider APISyncStrategyProvider     // 策略提供者（可选）
+	dataSourceID     shared.ID                   // 数据源 ID（用于从提供者获取策略）
 }
 
 // NewBatchDataSyncWorkflowBuilder 创建批量数据同步工作流构建器
@@ -208,6 +282,41 @@ func NewBatchDataSyncWorkflowBuilder(registry task.FunctionRegistry) *BatchDataS
 	return &BatchDataSyncWorkflowBuilder{
 		registry: registry,
 	}
+}
+
+// WithStrategyProvider 设置策略提供者和数据源 ID
+// 使用提供者时，会在构建工作流时从数据库加载策略
+func (b *BatchDataSyncWorkflowBuilder) WithStrategyProvider(provider APISyncStrategyProvider, dataSourceID shared.ID) *BatchDataSyncWorkflowBuilder {
+	b.strategyProvider = provider
+	b.dataSourceID = dataSourceID
+	return b
+}
+
+// WithStrategyCache 直接设置策略缓存
+// 用于已经从数据库加载好策略的场景
+func (b *BatchDataSyncWorkflowBuilder) WithStrategyCache(cache map[string]*APISyncStrategy) *BatchDataSyncWorkflowBuilder {
+	b.strategyCache = cache
+	return b
+}
+
+// loadStrategies 加载策略到缓存
+func (b *BatchDataSyncWorkflowBuilder) loadStrategies(ctx context.Context, apiNames []string) error {
+	if b.strategyProvider == nil || b.dataSourceID == "" {
+		return nil // 没有提供者，使用默认策略
+	}
+
+	strategies, err := b.strategyProvider.GetStrategies(ctx, b.dataSourceID, apiNames)
+	if err != nil {
+		return fmt.Errorf("failed to load strategies from provider: %w", err)
+	}
+
+	b.strategyCache = strategies
+	return nil
+}
+
+// getStrategy 获取 API 的同步策略
+func (b *BatchDataSyncWorkflowBuilder) getStrategy(apiName string) APISyncStrategy {
+	return GetAPISyncStrategyWithFallback(apiName, b.strategyCache)
 }
 
 // WithParams 设置工作流参数
@@ -444,8 +553,8 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				continue
 			}
 
-			// 获取 API 同步策略
-			strategy := GetAPISyncStrategy(apiName)
+			// 获取 API 同步策略（优先使用缓存的策略）
+			strategy := b.getStrategy(apiName)
 			taskName := "Sync_" + apiName
 
 			var syncTask *task.Task

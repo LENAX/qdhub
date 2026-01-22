@@ -117,4 +117,27 @@ type Repository interface {
 
 	// ListAPIMetadataByDataSource returns all API metadata for a data source.
 	ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]APIMetadata, error)
+
+	// ==================== API Sync Strategy 操作 ====================
+
+	// SaveAPISyncStrategy saves or updates an API sync strategy.
+	SaveAPISyncStrategy(ctx context.Context, strategy *APISyncStrategy) error
+
+	// SaveAPISyncStrategyBatch batch saves API sync strategies.
+	SaveAPISyncStrategyBatch(ctx context.Context, strategies []*APISyncStrategy) error
+
+	// GetAPISyncStrategyByAPIName retrieves a sync strategy by data source ID and API name.
+	GetAPISyncStrategyByAPIName(ctx context.Context, dataSourceID shared.ID, apiName string) (*APISyncStrategy, error)
+
+	// ListAPISyncStrategiesByDataSource retrieves all sync strategies for a data source.
+	ListAPISyncStrategiesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]*APISyncStrategy, error)
+
+	// ListAPISyncStrategiesByAPINames retrieves sync strategies for specific API names.
+	ListAPISyncStrategiesByAPINames(ctx context.Context, dataSourceID shared.ID, apiNames []string) ([]*APISyncStrategy, error)
+
+	// DeleteAPISyncStrategy deletes a sync strategy by ID.
+	DeleteAPISyncStrategy(ctx context.Context, id shared.ID) error
+
+	// DeleteAPISyncStrategiesByDataSource deletes all sync strategies for a data source.
+	DeleteAPISyncStrategiesByDataSource(ctx context.Context, dataSourceID shared.ID) error
 }

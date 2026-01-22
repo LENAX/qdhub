@@ -307,6 +307,90 @@ type ParamDependency struct {
 	FilterValue any    `json:"filter_value,omitempty"` // 过滤值（可选），如 1
 }
 
+// ==================== API 同步策略实体 ====================
+
+// SyncParamType 同步参数类型
+type SyncParamType string
+
+const (
+	// SyncParamNone 无必填参数，直接查询即可
+	SyncParamNone SyncParamType = "none"
+	// SyncParamTradeDate 支持 trade_date 参数，按日期查询全市场
+	SyncParamTradeDate SyncParamType = "trade_date"
+	// SyncParamTsCode 必须提供 ts_code，需要按股票代码拆分任务
+	SyncParamTsCode SyncParamType = "ts_code"
+)
+
+// APISyncStrategy API 同步策略实体
+// 定义每个 API 的同步方式，用于工作流构建
+// Belongs to: DataSource aggregate (通过 data_source_id + api_name 关联)
+type APISyncStrategy struct {
+	ID               shared.ID        // 主键
+	DataSourceID     shared.ID        // 关联的数据源 ID
+	APIName          string           // API 名称（与 api_metadata.name 对应）
+	PreferredParam   SyncParamType    // 优先使用的参数类型
+	SupportDateRange bool             // 是否支持日期范围查询（start_date/end_date）
+	RequiredParams   []string         // 必需的参数（除了 PreferredParam 之外）
+	Dependencies     []string         // 依赖的上游任务名称
+	Description      string           // 策略说明
+	CreatedAt        shared.Timestamp // 创建时间
+	UpdatedAt        shared.Timestamp // 更新时间
+}
+
+// NewAPISyncStrategy 创建新的 API 同步策略
+func NewAPISyncStrategy(dataSourceID shared.ID, apiName string, preferredParam SyncParamType) *APISyncStrategy {
+	now := shared.Now()
+	return &APISyncStrategy{
+		ID:               shared.NewID(),
+		DataSourceID:     dataSourceID,
+		APIName:          apiName,
+		PreferredParam:   preferredParam,
+		SupportDateRange: false,
+		RequiredParams:   []string{},
+		Dependencies:     []string{},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+}
+
+// SetSupportDateRange 设置是否支持日期范围查询
+func (s *APISyncStrategy) SetSupportDateRange(support bool) *APISyncStrategy {
+	s.SupportDateRange = support
+	s.UpdatedAt = shared.Now()
+	return s
+}
+
+// SetRequiredParams 设置必需参数
+func (s *APISyncStrategy) SetRequiredParams(params []string) *APISyncStrategy {
+	s.RequiredParams = params
+	s.UpdatedAt = shared.Now()
+	return s
+}
+
+// SetDependencies 设置依赖的上游任务
+func (s *APISyncStrategy) SetDependencies(deps []string) *APISyncStrategy {
+	s.Dependencies = deps
+	s.UpdatedAt = shared.Now()
+	return s
+}
+
+// SetDescription 设置策略说明
+func (s *APISyncStrategy) SetDescription(desc string) *APISyncStrategy {
+	s.Description = desc
+	s.UpdatedAt = shared.Now()
+	return s
+}
+
+// IsDirectSync 是否可以直接同步（无需拆分任务）
+func (s *APISyncStrategy) IsDirectSync() bool {
+	return s.PreferredParam == SyncParamNone || s.PreferredParam == SyncParamTradeDate
+}
+
+// NeedsStockSplit 是否需要按股票代码拆分任务
+func (s *APISyncStrategy) NeedsStockSplit() bool {
+	return s.PreferredParam == SyncParamTsCode
+}
+
 // ==================== 枚举类型 ====================
 
 // DocumentType represents the document type.
