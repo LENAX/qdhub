@@ -15,3 +15,18 @@ qdhub/tests/e2e/tests/data/e2e_app.db
 qdhub/tests/e2e/tests/data/e2e_app.db-shm
 
 qdhub/tests/e2e/tests/data/*
+qdhub/e2e.test
+qdhub/integration.test
+qdhub/data/qdhub.db
+qdhub/data/qdhub.db-shm
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_160210.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_160408.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_160505.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162106.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162223.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162423.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162531.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162620.log
+qdhub/tests/e2e/logs/test_ggt_top10_20260122_162955.log
+qdhub/data/qdhub.db
+qdhub/data/qdhub.db-shm
