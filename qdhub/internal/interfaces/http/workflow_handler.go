@@ -1,6 +1,10 @@
 package http
 
 import (
+	"encoding/json"
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"qdhub/internal/application/contracts"
@@ -27,6 +31,7 @@ func (h *WorkflowHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/instances/:id", h.GetInstance)
 	rg.GET("/instances/:id/tasks", h.GetTaskInstances)
 	rg.GET("/instances/:id/progress", h.GetInstanceProgress)
+	rg.GET("/instances/:id/progress-stream", h.StreamInstanceProgress)
 
 	// Instance control
 	rg.POST("/instances/:id/cancel", h.CancelInstance)
@@ -133,6 +138,76 @@ func (h *WorkflowHandler) GetInstanceProgress(c *gin.Context) {
 		return
 	}
 	Success(c, status)
+}
+
+// StreamInstanceProgress handles GET /api/v1/instances/:id/progress-stream
+// @Summary      Stream instance progress
+// @Description  Stream the progress status of a workflow instance via Server-Sent Events (SSE)
+// @Tags         Workflows
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        id   path      string  true  "Workflow instance ID"
+// @Success      200  {string}  string  "SSE stream of progress events"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /instances/{id}/progress-stream [get]
+func (h *WorkflowHandler) StreamInstanceProgress(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+
+	// Ensure the writer supports flushing
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		BadRequest(c, "streaming not supported")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			status, err := h.workflowSvc.GetWorkflowStatus(ctx, id)
+			if err != nil {
+				// Send an error event and stop the stream
+				c.Writer.Write([]byte("event: error\n"))
+				c.Writer.Write([]byte("data: {\"error\":\"" + err.Error() + "\"}\n\n"))
+				flusher.Flush()
+				return
+			}
+
+			// Serialize status as JSON
+			data, err := json.Marshal(status)
+			if err != nil {
+				c.Writer.Write([]byte("event: error\n"))
+				c.Writer.Write([]byte("data: {\"error\":\"failed to marshal status\"}\n\n"))
+				flusher.Flush()
+				return
+			}
+
+			c.Writer.Write([]byte("data: "))
+			c.Writer.Write(data)
+			c.Writer.Write([]byte("\n\n"))
+			flusher.Flush()
+
+			// Stop streaming when workflow reaches a terminal state
+			if status.FinishedAt != nil ||
+				status.Status == "Success" ||
+				status.Status == "Failed" ||
+				status.Status == "Terminated" ||
+				status.Status == "Completed" {
+				return
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
 
 // ==================== Instance Control Endpoints ====================

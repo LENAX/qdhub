@@ -72,6 +72,16 @@ type SyncApplicationService interface {
 	// HandleExecutionCallback handles execution result callback from workflow.
 	// This is called by workflow engine when sync execution completes.
 	HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error
+
+	// ==================== Progress Query ====================
+
+	// GetExecutionProgress retrieves aggregated progress for a specific sync execution.
+	// It combines SyncExecution domain state with underlying workflow instance progress.
+	GetExecutionProgress(ctx context.Context, executionID shared.ID) (*SyncExecutionProgress, error)
+
+	// GetPlanProgress retrieves aggregated progress for the latest execution of a sync plan.
+	// If the plan has never been executed, it returns a pending progress state.
+	GetPlanProgress(ctx context.Context, planID shared.ID) (*SyncExecutionProgress, error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -110,4 +120,30 @@ type ExecutionCallbackRequest struct {
 	Success      bool
 	RecordCount  int64
 	ErrorMessage *string
+}
+
+// SyncExecutionProgress represents aggregated progress information for a sync execution.
+// It combines SyncExecution state with underlying workflow instance progress.
+type SyncExecutionProgress struct {
+	// Identifiers
+	ExecutionID        shared.ID
+	PlanID             shared.ID
+	WorkflowInstanceID shared.ID
+
+	// High-level status (normalized)
+	Status sync.ExecStatus
+
+	// Workflow progress
+	Progress      float64
+	TaskCount     int
+	CompletedTask int
+	FailedTask    int
+
+	// Execution result
+	RecordCount  int64
+	ErrorMessage *string
+
+	// Timeline
+	StartedAt  shared.Timestamp
+	FinishedAt *shared.Timestamp
 }

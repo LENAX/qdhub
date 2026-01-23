@@ -4,7 +4,10 @@ package impl
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/metadata"
@@ -27,6 +30,9 @@ type SyncApplicationServiceImpl struct {
 
 	// 依赖：用于解析依赖关系
 	dependencyResolver sync.DependencyResolver
+
+	// 依赖：用于查询 workflow 实例进度（直接对接 Task Engine）
+	taskEngineAdapter workflow.TaskEngineAdapter
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -37,6 +43,7 @@ func NewSyncApplicationService(
 	dataSourceRepo metadata.DataSourceRepository,
 	workflowExecutor workflow.WorkflowExecutor,
 	dependencyResolver sync.DependencyResolver,
+	taskEngineAdapter workflow.TaskEngineAdapter,
 ) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncPlanRepo:       syncPlanRepo,
@@ -45,6 +52,7 @@ func NewSyncApplicationService(
 		dataSourceRepo:     dataSourceRepo,
 		workflowExecutor:   workflowExecutor,
 		dependencyResolver: dependencyResolver,
+		taskEngineAdapter:  taskEngineAdapter,
 	}
 }
 
@@ -632,6 +640,134 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 	}
 
 	return nil
+}
+
+// ==================== Progress Query ====================
+
+// GetExecutionProgress retrieves aggregated progress for a specific sync execution.
+func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, executionID shared.ID) (*contracts.SyncExecutionProgress, error) {
+	exec, err := s.syncPlanRepo.GetPlanExecution(executionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync execution: %w", err)
+	}
+	if exec == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
+	}
+
+	var wfStatus *workflow.WorkflowStatus
+	if s.taskEngineAdapter != nil && !exec.WorkflowInstID.IsEmpty() {
+		wfStatus, err = s.taskEngineAdapter.GetInstanceStatus(ctx, exec.WorkflowInstID.String())
+		if err != nil && !shared.IsNotFoundError(err) {
+			// 非致命错误：交给调用方决定是否容忍
+			return nil, fmt.Errorf("failed to get workflow status: %w", err)
+		}
+		// Debug: Log workflow status details
+		if wfStatus != nil && wfStatus.TaskCount == 0 {
+			logrus.Warnf("[DEBUG] GetExecutionProgress: executionID=%s, workflowInstID=%s, taskCount=0, progress=%.2f%%, status=%s",
+				executionID, exec.WorkflowInstID, wfStatus.Progress, wfStatus.Status)
+		}
+	} else {
+		// Debug: Log why we skipped getting workflow status
+		logrus.Warnf("[DEBUG] GetExecutionProgress: skipped workflow status - adapter=%v, workflowInstID=%s, isEmpty=%v",
+			s.taskEngineAdapter != nil, exec.WorkflowInstID, exec.WorkflowInstID.IsEmpty())
+	}
+
+	progress := &contracts.SyncExecutionProgress{
+		ExecutionID:        exec.ID,
+		PlanID:             exec.SyncPlanID,
+		WorkflowInstanceID: exec.WorkflowInstID,
+		Status:             exec.Status,
+		RecordCount:        exec.RecordCount,
+		ErrorMessage:       exec.ErrorMessage,
+		StartedAt:          exec.StartedAt,
+		FinishedAt:         exec.FinishedAt,
+	}
+
+	// Merge workflow status if available
+	if wfStatus != nil {
+		progress.Progress = wfStatus.Progress
+		progress.TaskCount = wfStatus.TaskCount
+		progress.CompletedTask = wfStatus.CompletedTask
+		progress.FailedTask = wfStatus.FailedTask
+
+		// Prefer workflow FinishedAt if execution.FinishedAt is nil
+		if progress.FinishedAt == nil && wfStatus.FinishedAt != nil {
+			progress.FinishedAt = wfStatus.FinishedAt
+		}
+
+		// If execution error is empty, but workflow has error, use it
+		if (progress.ErrorMessage == nil || *progress.ErrorMessage == "") && wfStatus.ErrorMessage != nil {
+			progress.ErrorMessage = wfStatus.ErrorMessage
+		}
+
+		// Sync workflow terminal status to SyncExecution if not already terminal
+		// This ensures SyncExecution.Status reflects workflow completion
+		if exec.Status == sync.ExecStatusRunning || exec.Status == sync.ExecStatusPending {
+			var newStatus sync.ExecStatus
+			statusUpper := strings.ToUpper(wfStatus.Status)
+			switch statusUpper {
+			case "SUCCESS", "COMPLETED":
+				newStatus = sync.ExecStatusSuccess
+			case "FAILED", "ERROR":
+				newStatus = sync.ExecStatusFailed
+			case "TERMINATED", "CANCELLED":
+				newStatus = sync.ExecStatusCancelled
+			}
+
+			if newStatus != "" && newStatus != exec.Status {
+				logrus.Infof("[SyncExecution] Auto-syncing status from workflow: executionID=%s, oldStatus=%s, newStatus=%s, workflowStatus=%s",
+					executionID, exec.Status, newStatus, wfStatus.Status)
+
+				// Update execution entity
+				switch newStatus {
+				case sync.ExecStatusSuccess:
+					exec.MarkSuccess(exec.RecordCount)
+				case sync.ExecStatusFailed:
+					errMsg := ""
+					if wfStatus.ErrorMessage != nil {
+						errMsg = *wfStatus.ErrorMessage
+					}
+					exec.MarkFailed(errMsg)
+				case sync.ExecStatusCancelled:
+					exec.MarkCancelled()
+				}
+
+				// Persist to database
+				if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
+					logrus.Warnf("[SyncExecution] Failed to auto-sync status: %v", updateErr)
+				} else {
+					// Update progress response with new status
+					progress.Status = newStatus
+					progress.FinishedAt = exec.FinishedAt
+					if newStatus == sync.ExecStatusFailed && exec.ErrorMessage != nil {
+						progress.ErrorMessage = exec.ErrorMessage
+					}
+				}
+			}
+		}
+	}
+
+	return progress, nil
+}
+
+// GetPlanProgress retrieves aggregated progress for the latest execution of a sync plan.
+func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID shared.ID) (*contracts.SyncExecutionProgress, error) {
+	execs, err := s.syncPlanRepo.GetExecutionsByPlan(planID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sync executions for plan: %w", err)
+	}
+
+	if len(execs) == 0 {
+		// Plan has never been executed - return a pending progress
+		return &contracts.SyncExecutionProgress{
+			PlanID: planID,
+			Status: sync.ExecStatusPending,
+		}, nil
+	}
+
+	// DAO 已按 started_at DESC 排序，第一条即为最新执行
+	latest := execs[0]
+	return s.GetExecutionProgress(ctx, latest.ID)
 }
 
 // ==================== Built-in Workflow Execution (Legacy) ====================
