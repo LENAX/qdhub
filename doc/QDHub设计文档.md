@@ -1314,6 +1314,15 @@ type SyncAppService interface {
     // CancelExecution 取消执行
     CancelExecution(ctx context.Context, executionID string) error
     
+    // ==================== 进度监控用例 ====================
+    
+    // GetPlanProgress 获取同步计划执行进度
+    // 用例流程：
+    //   1. 获取最新的执行记录
+    //   2. 从 Task Engine 获取实时进度
+    //   3. 返回聚合的进度信息
+    GetPlanProgress(ctx context.Context, planID string) (*SyncExecutionProgress, error)
+    
     // ==================== 调度管理用例 ====================
     
     // EnablePlan 启用同步计划并注册调度
@@ -1334,35 +1343,40 @@ type SyncAppService interface {
 
 // ==================== 命令与查询对象 ====================
 
-// CreateSyncJobCmd 创建同步任务命令
-type CreateSyncJobCmd struct {
-    Name           string         `json:"name" validate:"required"`
-    Description    string         `json:"description"`
-    APIMetaID      string         `json:"api_meta_id" validate:"required"`
-    DataStoreID    string         `json:"data_store_id" validate:"required"`
-    Mode           string         `json:"mode" validate:"required,oneof=batch realtime"`
-    CronExpression *string        `json:"cron_expression"`
-    Params         map[string]any `json:"params"`
-    ParamRules     []ParamRule    `json:"param_rules"`
+// CreateSyncPlanRequest 创建同步计划请求
+type CreateSyncPlanRequest struct {
+    Name           string   `json:"name" validate:"required"`
+    Description    string   `json:"description"`
+    DataSourceID   string   `json:"data_source_id" validate:"required"`
+    DataStoreID    string   `json:"data_store_id"`
+    SelectedAPIs   []string `json:"selected_apis" validate:"required"`
+    CronExpression *string  `json:"cron_expression"`
 }
 
-// UpdateSyncJobCmd 更新同步任务命令
-type UpdateSyncJobCmd struct {
-    Name           *string        `json:"name"`
-    Description    *string        `json:"description"`
-    CronExpression *string        `json:"cron_expression"`
-    Params         map[string]any `json:"params"`
-    ParamRules     []ParamRule    `json:"param_rules"`
+// UpdateSyncPlanRequest 更新同步计划请求
+type UpdateSyncPlanRequest struct {
+    Name           *string   `json:"name"`
+    Description    *string   `json:"description"`
+    DataStoreID    *string   `json:"data_store_id"`
+    SelectedAPIs   *[]string `json:"selected_apis"`
+    CronExpression *string   `json:"cron_expression"`
 }
 
-// ListSyncJobsQuery 同步任务列表查询
-type ListSyncJobsQuery struct {
-    APIMetaID   *string `json:"api_meta_id"`
-    DataStoreID *string `json:"data_store_id"`
-    Mode        *string `json:"mode"`
-    Status      *string `json:"status"`
-    Page        int     `json:"page" validate:"min=1"`
-    PageSize    int     `json:"page_size" validate:"min=1,max=100"`
+// ExecuteSyncPlanRequest 执行同步计划请求
+type ExecuteSyncPlanRequest struct {
+    TargetDBPath string `json:"target_db_path" validate:"required"`
+    StartDate    string `json:"start_date" validate:"required"`
+    EndDate      string `json:"end_date" validate:"required"`
+    StartTime    string `json:"start_time"`
+    EndTime      string `json:"end_time"`
+}
+
+// ExecutionCallbackRequest 执行回调请求
+type ExecutionCallbackRequest struct {
+    ExecutionID  string  `json:"execution_id" validate:"required"`
+    Success      bool    `json:"success"`
+    RecordCount  int64   `json:"record_count"`
+    ErrorMessage *string `json:"error_message"`
 }
 ```
 
@@ -2001,12 +2015,22 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/datasources/:id/refresh` | 刷新数据源元数据 |
 | GET | `/api/v1/datasources` | 列出所有数据源 |
-| GET | `/api/v1/datasources/:id/categories` | 获取 API 目录 |
-| GET | `/api/v1/datasources/:id/apis` | 列出数据源的所有 API |
-| GET | `/api/v1/apis/:id` | 获取 API 详情 |
+| POST | `/api/v1/datasources` | 创建数据源 |
+| GET | `/api/v1/datasources/:id` | 获取数据源详情 |
+| POST | `/api/v1/datasources/:id/refresh` | 刷新数据源元数据（触发元数据爬取工作流） |
 | POST | `/api/v1/datasources/:id/token` | 设置数据源 Token |
+| GET | `/api/v1/datasources/:id/token` | 获取 Token 信息（不返回实际值） |
+
+#### API 同步策略管理
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/datasources/:id/api-sync-strategies` | 创建 API 同步策略 |
+| GET | `/api/v1/datasources/:id/api-sync-strategies` | 列出数据源的所有 API 同步策略 |
+| GET | `/api/v1/api-sync-strategies/:id` | 获取 API 同步策略详情 |
+| PUT | `/api/v1/api-sync-strategies/:id` | 更新 API 同步策略 |
+| DELETE | `/api/v1/api-sync-strategies/:id` | 删除 API 同步策略 |
 
 #### 数据存储管理
 
@@ -2015,44 +2039,40 @@ func (m *TushareTypeMapper) MapAllFields(fields []FieldMeta, targetDB DataStoreT
 | POST | `/api/v1/datastores` | 创建量化数据存储配置 |
 | GET | `/api/v1/datastores` | 列出所有数据存储 |
 | GET | `/api/v1/datastores/:id` | 获取数据存储详情 |
-| POST | `/api/v1/datastores/:id/test` | 测试连接 |
-| POST | `/api/v1/datastores/:id/schemas/generate` | 生成表结构 |
-| POST | `/api/v1/datastores/:id/schemas/:schemaId/create` | 执行建表 |
-| GET | `/api/v1/datastores/:id/schemas` | 列出已创建的表 |
+| POST | `/api/v1/datastores/:id/create-tables` | 为数据源创建所有 API 的表（使用内建工作流） |
 
-#### 同步管理
+#### 同步计划管理
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/sync-jobs` | 创建同步任务 |
-| GET | `/api/v1/sync-jobs` | 列出同步任务 |
-| GET | `/api/v1/sync-jobs/:id` | 获取任务详情 |
-| PUT | `/api/v1/sync-jobs/:id` | 更新任务配置 |
-| POST | `/api/v1/sync-jobs/:id/trigger` | 手动触发同步 |
-| POST | `/api/v1/sync-jobs/:id/enable` | 启用任务 |
-| POST | `/api/v1/sync-jobs/:id/disable` | 禁用任务 |
-| GET | `/api/v1/sync-jobs/:id/executions` | 获取执行历史 |
+| POST | `/api/v1/sync-plans` | 创建同步计划 |
+| GET | `/api/v1/sync-plans` | 列出所有同步计划 |
+| GET | `/api/v1/sync-plans/:id` | 获取同步计划详情 |
+| PUT | `/api/v1/sync-plans/:id` | 更新同步计划 |
+| DELETE | `/api/v1/sync-plans/:id` | 删除同步计划 |
+| POST | `/api/v1/sync-plans/:id/resolve` | 解析同步计划的依赖关系 |
+| POST | `/api/v1/sync-plans/:id/trigger` | 手动触发同步计划执行 |
+| POST | `/api/v1/sync-plans/:id/enable` | 启用同步计划（注册定时任务） |
+| POST | `/api/v1/sync-plans/:id/disable` | 禁用同步计划（取消定时任务） |
+| GET | `/api/v1/sync-plans/:id/progress` | 获取同步计划执行进度（轮询） |
+| GET | `/api/v1/sync-plans/:id/progress-stream` | 流式获取同步计划执行进度（SSE） |
+| GET | `/api/v1/sync-plans/:id/executions` | 列出同步计划的所有执行记录 |
+| GET | `/api/v1/executions/:id` | 获取执行记录详情 |
+| POST | `/api/v1/executions/:id/cancel` | 取消执行 |
 
-#### 工作流管理
+#### 工作流实例管理
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/workflows` | 创建工作流定义 |
-| GET | `/api/v1/workflows` | 列出工作流定义 |
-| GET | `/api/v1/workflows/:id` | 获取工作流定义 |
-| PUT | `/api/v1/workflows/:id` | 更新工作流定义 |
-| DELETE | `/api/v1/workflows/:id` | 删除工作流定义 |
-| POST | `/api/v1/workflows/:id/execute` | 执行工作流 |
-| POST | `/api/v1/workflows/:id/enable` | 启用工作流 |
-| POST | `/api/v1/workflows/:id/disable` | 禁用工作流 |
-| GET | `/api/v1/instances` | 列出工作流实例 |
+| POST | `/api/v1/workflows/built-in/:name/execute` | 执行内建工作流（通过名称） |
+| GET | `/api/v1/instances` | 列出工作流实例（需提供 workflow_id 查询参数） |
 | GET | `/api/v1/instances/:id` | 获取实例详情 |
-| GET | `/api/v1/instances/:id/tasks` | 获取实例任务列表 |
-| GET | `/api/v1/instances/:id/progress` | 获取实例进度 |
-| POST | `/api/v1/instances/:id/pause` | 暂停实例 |
-| POST | `/api/v1/instances/:id/resume` | 恢复实例 |
-| POST | `/api/v1/instances/:id/cancel` | 取消实例 |
-| POST | `/api/v1/instances/:id/retry` | 重试实例 |
+| GET | `/api/v1/instances/:id/progress` | 获取实例进度（轮询） |
+| GET | `/api/v1/instances/:id/progress-stream` | 流式获取实例进度（SSE） |
+| GET | `/api/v1/instances/:id/tasks` | 获取任务实例列表 |
+| POST | `/api/v1/instances/:id/cancel` | 取消工作流实例 |
+
+> **注意**：工作流定义由系统初始化时自动创建（内建工作流），不提供手动创建/更新接口。
 
 ---
 
