@@ -22,6 +22,7 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -148,6 +149,9 @@ type Container struct {
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
+
+	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
+	QuantDBAdapter datastore.QuantDB
 }
 
 // Config holds container configuration.
@@ -167,6 +171,10 @@ type Config struct {
 
 	// Migration
 	MigrationPath string
+
+	// QuantDB (DuckDB) - 默认数据存储路径
+	// 如果设置，将在 Task Engine 初始化时创建 QuantDB adapter
+	DefaultDuckDBPath string
 }
 
 // DefaultConfig returns default configuration.
@@ -445,6 +453,23 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		DataSourceRegistry: c.DataSourceRegistry,
 		MetadataRepo:       c.MetadataRepo,
 	}
+
+	// 如果配置了默认 DuckDB 路径，创建并注入 QuantDB adapter
+	log.Printf("[Container] DefaultDuckDBPath from config: '%s'", c.config.DefaultDuckDBPath)
+	if c.config.DefaultDuckDBPath != "" {
+		log.Printf("[Container] Creating DuckDB adapter for: %s", c.config.DefaultDuckDBPath)
+		quantDBAdapter := duckdb.NewAdapter(c.config.DefaultDuckDBPath)
+		if err := quantDBAdapter.Connect(ctx); err != nil {
+			log.Printf("[Container] WARNING: Failed to connect to default DuckDB at %s: %v", c.config.DefaultDuckDBPath, err)
+		} else {
+			taskEngineDeps.QuantDB = quantDBAdapter
+			c.QuantDBAdapter = quantDBAdapter
+			log.Printf("[Container] ✅ QuantDB (DuckDB) adapter initialized: %s", c.config.DefaultDuckDBPath)
+		}
+	} else {
+		log.Printf("[Container] No DefaultDuckDBPath configured, skipping QuantDB initialization")
+	}
+
 	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
 		return fmt.Errorf("failed to initialize task engine: %w", err)
 	}
@@ -571,6 +596,13 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	// Shutdown Task Engine
 	if c.TaskEngine != nil {
 		c.TaskEngine.Stop()
+	}
+
+	// Close QuantDB adapter
+	if c.QuantDBAdapter != nil {
+		if err := c.QuantDBAdapter.Close(); err != nil {
+			logrus.Errorf("Error closing QuantDB adapter: %v", err)
+		}
 	}
 
 	// Close database

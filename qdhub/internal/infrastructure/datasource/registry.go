@@ -149,17 +149,25 @@ func (r *Registry) GetCrawler(name string) (Crawler, error) {
 	return nil, fmt.Errorf("crawler %s not found", name)
 }
 
-// GetParser returns a document parser by name.
+// GetParser returns a document parser by name (case-insensitive).
 func (r *Registry) GetParser(name string) (DocumentParser, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Try exact match first
 	parser, exists := r.parsers[name]
-	if !exists {
-		return nil, fmt.Errorf("parser %s not found", name)
+	if exists {
+		return parser, nil
 	}
 
-	return parser, nil
+	// Try case-insensitive match
+	lowerName := strings.ToLower(name)
+	parser, exists = r.parsers[lowerName]
+	if exists {
+		return parser, nil
+	}
+
+	return nil, fmt.Errorf("parser %s not found", name)
 }
 
 // ListAdapters returns the names of all registered adapters.

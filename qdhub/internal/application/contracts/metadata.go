@@ -80,10 +80,10 @@ type ParseMetadataRequest struct {
 
 // ParseMetadataResult represents the result of parsing metadata.
 type ParseMetadataResult struct {
-	InstanceID        shared.ID // Workflow instance ID for tracking execution status
-	CategoriesCreated int
-	APIsCreated       int
-	APIsUpdated       int
+	InstanceID        shared.ID `json:"instance_id"` // Workflow instance ID for tracking execution status
+	CategoriesCreated int       `json:"categories_created"`
+	APIsCreated       int       `json:"apis_created"`
+	APIsUpdated       int       `json:"apis_updated"`
 }
 
 // SaveTokenRequest represents a request to save a token.

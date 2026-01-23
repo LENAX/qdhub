@@ -39,15 +39,15 @@ type ProgressCalculator interface {
 
 // WorkflowStatus represents the detailed status of a workflow instance.
 type WorkflowStatus struct {
-	InstanceID    string // Task Engine uses string ID
-	Status        string // Task Engine status string
-	Progress      float64
-	TaskCount     int
-	CompletedTask int
-	FailedTask    int
-	StartedAt     shared.Timestamp
-	FinishedAt    *shared.Timestamp
-	ErrorMessage  *string
+	InstanceID    string            `json:"instance_id"` // Task Engine uses string ID
+	Status        string            `json:"status"`     // Task Engine status string
+	Progress      float64           `json:"progress"`
+	TaskCount     int               `json:"task_count"`
+	CompletedTask int               `json:"completed_task"`
+	FailedTask    int               `json:"failed_task"`
+	StartedAt     shared.Timestamp `json:"started_at"`
+	FinishedAt    *shared.Timestamp `json:"finished_at,omitempty"`
+	ErrorMessage  *string           `json:"error_message,omitempty"`
 }
 
 // ==================== 外部依赖接口（领域定义，基础设施实现）====================

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,9 +32,10 @@ Swagger documentation is available at /swagger/index.html`,
 }
 
 var (
-	serverHost string
-	serverPort int
-	serverMode string
+	serverHost        string
+	serverPort        int
+	serverMode        string
+	defaultDuckDBPath string
 )
 
 func init() {
@@ -43,11 +45,13 @@ func init() {
 	serverCmd.Flags().StringVar(&serverHost, "host", "0.0.0.0", "server host address")
 	serverCmd.Flags().IntVar(&serverPort, "port", 8080, "server port")
 	serverCmd.Flags().StringVar(&serverMode, "mode", "release", "server mode (debug, release, test)")
+	serverCmd.Flags().StringVar(&defaultDuckDBPath, "duckdb-path", "", "default DuckDB path for data sync (optional)")
 
 	// Bind to viper
 	viper.BindPFlag("server.host", serverCmd.Flags().Lookup("host"))
 	viper.BindPFlag("server.port", serverCmd.Flags().Lookup("port"))
 	viper.BindPFlag("server.mode", serverCmd.Flags().Lookup("mode"))
+	viper.BindPFlag("quantdb.duckdb_path", serverCmd.Flags().Lookup("duckdb-path"))
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
@@ -57,6 +61,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	mode := viper.GetString("server.mode")
 	dbDriver := viper.GetString("database.driver")
 	dbDSN := viper.GetString("database.dsn")
+	duckDBPath := viper.GetString("quantdb.duckdb_path")
 
 	// Apply defaults if not set
 	if host == "" {
@@ -74,12 +79,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if dbDSN == "" {
 		dbDSN = "./data/qdhub.db"
 	}
+	if duckDBPath == "" {
+		duckDBPath = defaultDuckDBPath
+	}
 
-	logrus.Infof("Starting QDHub server...")
-	logrus.Infof("  Host: %s", host)
-	logrus.Infof("  Port: %d", port)
-	logrus.Infof("  Mode: %s", mode)
-	logrus.Infof("  Database: %s (%s)", dbDriver, dbDSN)
+	log.Printf("Starting QDHub server...")
+	log.Printf("  Host: %s", host)
+	log.Printf("  Port: %d", port)
+	log.Printf("  Mode: %s", mode)
+	log.Printf("  Database: %s (%s)", dbDriver, dbDSN)
+	log.Printf("  DuckDB Path (from config): '%s'", viper.GetString("quantdb.duckdb_path"))
+	log.Printf("  DuckDB Path (from flag): '%s'", defaultDuckDBPath)
+	log.Printf("  DuckDB Path (final): '%s'", duckDBPath)
+	if duckDBPath != "" {
+		log.Printf("  ✅ DuckDB Path: %s", duckDBPath)
+	}
 
 	// Create container configuration
 	config := container.DefaultConfig()
@@ -88,6 +102,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	config.ServerHost = host
 	config.ServerPort = port
 	config.ServerMode = mode
+	config.DefaultDuckDBPath = duckDBPath
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)
