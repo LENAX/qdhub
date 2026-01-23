@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
@@ -132,27 +133,50 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 	}
 
 	progress := 0.0
-	if len(taskInstances) > 0 {
-		progress = float64(completedTasks) / float64(len(taskInstances)) * 100
-	}
-
-	// Determine final status: if all tasks are done (completed or failed) and there are failures, mark as Failed
-	// Otherwise use the status from Task Engine
 	finalStatus := statusStr
+
 	if len(taskInstances) > 0 {
+		// Normal case: calculate progress from task instances
+		progress = float64(completedTasks) / float64(len(taskInstances)) * 100
+
+		// Determine final status based on task completion
 		totalDone := completedTasks + failedTasks
 		if totalDone == len(taskInstances) {
 			// All tasks are done
 			if failedTasks > 0 {
-				// If any task failed, workflow should be Failed
 				finalStatus = "Failed"
 			} else {
-				// All tasks succeeded
 				finalStatus = "Success"
 			}
 		} else if failedTasks > 0 && runningTasks == 0 {
-			// Some tasks failed and no tasks are running, workflow should be Failed
+			// Some tasks failed and no tasks are running
 			finalStatus = "Failed"
+		}
+	} else {
+		// FALLBACK: When taskInstances is empty (e.g., dynamically submitted workflows),
+		// use the workflow instance status from Task Engine directly.
+		// This handles the case where task instances are not persisted to storage.
+		logrus.Warnf("[GetInstanceStatus] instanceID=%s, taskInstances=0, using instance.Status=%s as fallback",
+			engineInstanceID, instance.Status)
+
+		// Use instance.Status for both status and progress estimation
+		instanceStatusUpper := strings.ToUpper(instance.Status)
+		switch instanceStatusUpper {
+		case "SUCCESS", "COMPLETED":
+			finalStatus = "Success"
+			progress = 100.0
+		case "FAILED", "ERROR":
+			finalStatus = "Failed"
+			progress = 100.0
+		case "TERMINATED", "CANCELLED":
+			finalStatus = "Terminated"
+			progress = 100.0
+		case "RUNNING", "PENDING":
+			finalStatus = "Running"
+			// Keep progress at 0 since we can't calculate it without tasks
+		default:
+			// Use statusStr from engine as final fallback
+			finalStatus = statusStr
 		}
 	}
 

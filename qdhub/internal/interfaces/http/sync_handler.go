@@ -1,10 +1,15 @@
 package http
 
 import (
+	"encoding/json"
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 )
 
 // SyncHandler handles sync-related HTTP requests.
@@ -33,6 +38,10 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/sync-plans/:id/trigger", h.TriggerSyncPlan)
 	rg.POST("/sync-plans/:id/enable", h.EnablePlan)
 	rg.POST("/sync-plans/:id/disable", h.DisablePlan)
+
+	// Plan progress
+	rg.GET("/sync-plans/:id/progress", h.GetPlanProgress)
+	rg.GET("/sync-plans/:id/progress-stream", h.StreamPlanProgress)
 
 	// Execution management
 	rg.GET("/sync-plans/:id/executions", h.ListExecutions)
@@ -425,4 +434,144 @@ type ExecutionCallbackReq struct {
 	Success      bool    `json:"success"`
 	RecordCount  int64   `json:"record_count"`
 	ErrorMessage *string `json:"error_message"`
+}
+
+// SyncPlanProgressResponse represents aggregated progress information for a sync plan.
+// It is the HTTP-level DTO returned by /sync-plans/:id/progress and progress-stream.
+type SyncPlanProgressResponse struct {
+	PlanID             string     `json:"plan_id"`
+	ExecutionID        string     `json:"execution_id,omitempty"`
+	WorkflowInstanceID string     `json:"workflow_instance_id,omitempty"`
+	Status             string     `json:"status"`
+	Progress           float64    `json:"progress"`
+	TaskCount          int        `json:"task_count"`
+	CompletedTask      int        `json:"completed_task"`
+	FailedTask         int        `json:"failed_task"`
+	RecordCount        int64      `json:"record_count"`
+	ErrorMessage       *string    `json:"error_message,omitempty"`
+	StartedAt          *time.Time `json:"started_at,omitempty"`
+	FinishedAt         *time.Time `json:"finished_at,omitempty"`
+}
+
+// toSyncPlanProgressResponse converts application-level SyncExecutionProgress to HTTP response DTO.
+func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanProgressResponse {
+	if p == nil {
+		return nil
+	}
+
+	resp := &SyncPlanProgressResponse{
+		PlanID:             p.PlanID.String(),
+		ExecutionID:        p.ExecutionID.String(),
+		WorkflowInstanceID: p.WorkflowInstanceID.String(),
+		Status:             p.Status.String(),
+		Progress:           p.Progress,
+		TaskCount:          p.TaskCount,
+		CompletedTask:      p.CompletedTask,
+		FailedTask:         p.FailedTask,
+		RecordCount:        p.RecordCount,
+		ErrorMessage:       p.ErrorMessage,
+	}
+
+	// Convert timestamps to *time.Time (omit zero values)
+	if !p.StartedAt.IsZero() {
+		tm := p.StartedAt.ToTime()
+		resp.StartedAt = &tm
+	}
+	if p.FinishedAt != nil && !p.FinishedAt.IsZero() {
+		tm := p.FinishedAt.ToTime()
+		resp.FinishedAt = &tm
+	}
+
+	return resp
+}
+
+// GetPlanProgress handles GET /api/v1/sync-plans/:id/progress
+// @Summary      Get sync plan progress
+// @Description  Get aggregated progress of the latest execution for a sync plan
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync plan ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-plans/{id}/progress [get]
+func (h *SyncHandler) GetPlanProgress(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	progress, err := h.syncSvc.GetPlanProgress(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	resp := toSyncPlanProgressResponse(progress)
+	Success(c, resp)
+}
+
+// StreamPlanProgress handles GET /api/v1/sync-plans/:id/progress-stream
+// @Summary      Stream sync plan progress
+// @Description  Stream aggregated progress of the latest execution for a sync plan via SSE
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        id   path      string  true  "Sync plan ID"
+// @Success      200  {string}  string  "SSE stream of progress events"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Router       /sync-plans/{id}/progress-stream [get]
+func (h *SyncHandler) StreamPlanProgress(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	// Set SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		BadRequest(c, "streaming not supported")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			progress, err := h.syncSvc.GetPlanProgress(ctx, id)
+			if err != nil {
+				c.Writer.Write([]byte("event: error\n"))
+				c.Writer.Write([]byte("data: {\"error\":\"" + err.Error() + "\"}\n\n"))
+				flusher.Flush()
+				return
+			}
+
+			resp := toSyncPlanProgressResponse(progress)
+			data, err := json.Marshal(resp)
+			if err != nil {
+				c.Writer.Write([]byte("event: error\n"))
+				c.Writer.Write([]byte("data: {\"error\":\"failed to marshal progress\"}\n\n"))
+				flusher.Flush()
+				return
+			}
+
+			c.Writer.Write([]byte("data: "))
+			c.Writer.Write(data)
+			c.Writer.Write([]byte("\n\n"))
+			flusher.Flush()
+
+			// Stop streaming when execution reaches terminal state
+			status := resp.Status
+			if status == sync.ExecStatusSuccess.String() ||
+				status == sync.ExecStatusFailed.String() ||
+				status == sync.ExecStatusCancelled.String() {
+				return
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+	}
 }

@@ -526,6 +526,7 @@ func (c *Container) initApplicationServices() error {
 		c.DataSourceRepo,
 		c.WorkflowExecutor,
 		c.DependencyResolver,
+		c.TaskEngineAdapter,
 	)
 
 	logrus.Info("Application services initialized")

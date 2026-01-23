@@ -117,6 +117,14 @@ func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req c
 	return nil
 }
 
+func (m *FullMockSyncService) GetExecutionProgress(ctx context.Context, executionID shared.ID) (*contracts.SyncExecutionProgress, error) {
+	return &contracts.SyncExecutionProgress{}, nil
+}
+
+func (m *FullMockSyncService) GetPlanProgress(ctx context.Context, planID shared.ID) (*contracts.SyncExecutionProgress, error) {
+	return &contracts.SyncExecutionProgress{}, nil
+}
+
 // FullMockWorkflowService implements WorkflowApplicationService.
 type FullMockWorkflowService struct{}
 

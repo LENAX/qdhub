@@ -659,6 +659,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		dataSourceRepo,
 		workflowExecutor,
 		dependencyResolver,
+		nil,
 	)
 
 	cleanup := func() {
