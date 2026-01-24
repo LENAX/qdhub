@@ -31,3 +31,4 @@ qdhub/tests/e2e/logs/test_ggt_top10_20260122_162955.log
 qdhub/data/qdhub.db
 qdhub/data/qdhub.db-shm
 qdhub/logs/qdhub.log
+qdhub/*.test

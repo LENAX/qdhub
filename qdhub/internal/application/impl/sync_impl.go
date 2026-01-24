@@ -33,6 +33,9 @@ type SyncApplicationServiceImpl struct {
 
 	// 依赖：用于查询 workflow 实例进度（直接对接 Task Engine）
 	taskEngineAdapter workflow.TaskEngineAdapter
+
+	// 依赖：Unit of Work 用于事务控制
+	uow contracts.UnitOfWork
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -44,6 +47,7 @@ func NewSyncApplicationService(
 	workflowExecutor workflow.WorkflowExecutor,
 	dependencyResolver sync.DependencyResolver,
 	taskEngineAdapter workflow.TaskEngineAdapter,
+	uow contracts.UnitOfWork,
 ) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncPlanRepo:       syncPlanRepo,
@@ -53,6 +57,7 @@ func NewSyncApplicationService(
 		workflowExecutor:   workflowExecutor,
 		dependencyResolver: dependencyResolver,
 		taskEngineAdapter:  taskEngineAdapter,
+		uow:                uow,
 	}
 }
 
@@ -184,6 +189,7 @@ func (s *SyncApplicationServiceImpl) ListSyncPlans(ctx context.Context) ([]*sync
 
 // ResolveSyncPlan resolves dependencies for a sync plan.
 func (s *SyncApplicationServiceImpl) ResolveSyncPlan(ctx context.Context, planID shared.ID) error {
+	// Read operations (no transaction needed)
 	plan, err := s.syncPlanRepo.Get(planID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync plan: %w", err)
@@ -224,35 +230,38 @@ func (s *SyncApplicationServiceImpl) ResolveSyncPlan(ctx context.Context, planID
 	// Update plan with resolved graph
 	plan.SetExecutionGraph(graph, resolvedAPIs)
 
-	// Delete existing tasks
-	if err := s.syncPlanRepo.DeleteTasksByPlan(planID); err != nil {
-		return fmt.Errorf("failed to delete existing tasks: %w", err)
-	}
+	// Write operations using UoW for transaction
+	return s.uow.Do(ctx, func(repos contracts.Repositories) error {
+		// Delete existing tasks
+		if err := repos.SyncPlanRepo().DeleteTasksByPlan(planID); err != nil {
+			return fmt.Errorf("failed to delete existing tasks: %w", err)
+		}
 
-	// Create SyncTask entities from ExecutionGraph
-	sortOrder := 0
-	for level, apis := range graph.Levels {
-		for _, apiName := range apis {
-			taskConfig := graph.TaskConfigs[apiName]
-			task := sync.NewSyncTask(apiName, taskConfig.SyncMode, level)
-			task.SetDependencies(taskConfig.Dependencies)
-			task.SetParamMappings(taskConfig.ParamMappings)
-			task.SortOrder = sortOrder
-			sortOrder++
+		// Create SyncTask entities from ExecutionGraph
+		sortOrder := 0
+		for level, apis := range graph.Levels {
+			for _, apiName := range apis {
+				taskConfig := graph.TaskConfigs[apiName]
+				task := sync.NewSyncTask(apiName, taskConfig.SyncMode, level)
+				task.SetDependencies(taskConfig.Dependencies)
+				task.SetParamMappings(taskConfig.ParamMappings)
+				task.SortOrder = sortOrder
+				sortOrder++
 
-			plan.AddTask(task)
-			if err := s.syncPlanRepo.AddTask(task); err != nil {
-				return fmt.Errorf("failed to create sync task: %w", err)
+				plan.AddTask(task)
+				if err := repos.SyncPlanRepo().AddTask(task); err != nil {
+					return fmt.Errorf("failed to create sync task: %w", err)
+				}
 			}
 		}
-	}
 
-	// Persist plan
-	if err := s.syncPlanRepo.Update(plan); err != nil {
-		return fmt.Errorf("failed to update sync plan: %w", err)
-	}
+		// Persist plan
+		if err := repos.SyncPlanRepo().Update(plan); err != nil {
+			return fmt.Errorf("failed to update sync plan: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // ==================== Plan Execution ====================
@@ -315,7 +324,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	// Convert to API configs (for future use with advanced workflow execution)
 	_ = s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
 
-	// Execute workflow
+	// Execute workflow (external async operation, not part of transaction)
 	instanceID, err := s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
 		DataSourceID:   plan.DataSourceID,
 		DataSourceName: ds.Name,
@@ -332,30 +341,50 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		return "", fmt.Errorf("failed to execute workflow: %w", err)
 	}
 
-	// Create sync execution record
-	execution := sync.NewSyncExecution(planID, instanceID)
-	execution.ExecuteParams = &sync.ExecuteParams{
-		TargetDBPath: req.TargetDBPath,
-		StartDate:    req.StartDate,
-		EndDate:      req.EndDate,
-		StartTime:    req.StartTime,
-		EndTime:      req.EndTime,
-	}
-	execution.SyncedAPIs = s.extractAPINames(needSyncTasks)
-	execution.SkippedAPIs = skipAPIs
-	execution.MarkRunning()
+	// Create sync execution record and update plan status using UoW
+	var executionID shared.ID
+	err = s.uow.Do(ctx, func(repos contracts.Repositories) error {
+		// Verify plan exists in transaction (for foreign key constraint)
+		txPlan, err := repos.SyncPlanRepo().Get(planID)
+		if err != nil {
+			return fmt.Errorf("failed to get plan in transaction: %w", err)
+		}
+		if txPlan == nil {
+			return fmt.Errorf("plan not found in transaction: %s", planID)
+		}
 
-	if err := s.syncPlanRepo.AddPlanExecution(execution); err != nil {
-		return "", fmt.Errorf("failed to create sync execution: %w", err)
+		// Create sync execution record
+		execution := sync.NewSyncExecution(planID, instanceID)
+		execution.ExecuteParams = &sync.ExecuteParams{
+			TargetDBPath: req.TargetDBPath,
+			StartDate:    req.StartDate,
+			EndDate:      req.EndDate,
+			StartTime:    req.StartTime,
+			EndTime:      req.EndTime,
+		}
+		execution.SyncedAPIs = s.extractAPINames(needSyncTasks)
+		execution.SkippedAPIs = skipAPIs
+		execution.MarkRunning()
+
+		if err := repos.SyncPlanRepo().AddPlanExecution(execution); err != nil {
+			return fmt.Errorf("failed to create sync execution: %w", err)
+		}
+
+		// Mark plan as running (use the plan from transaction)
+		txPlan.MarkRunning()
+		if err := repos.SyncPlanRepo().Update(txPlan); err != nil {
+			return fmt.Errorf("failed to update sync plan status: %w", err)
+		}
+
+		executionID = execution.ID
+		return nil
+	})
+
+	if err != nil {
+		return "", err
 	}
 
-	// Mark plan as running
-	plan.MarkRunning()
-	if err := s.syncPlanRepo.Update(plan); err != nil {
-		return "", fmt.Errorf("failed to update sync plan status: %w", err)
-	}
-
-	return execution.ID, nil
+	return executionID, nil
 }
 
 // filterTasksByFrequency filters tasks based on sync frequency.
@@ -432,6 +461,7 @@ func (s *SyncApplicationServiceImpl) ListPlanExecutions(ctx context.Context, pla
 
 // CancelExecution cancels a running sync execution.
 func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, executionID shared.ID) error {
+	// Read operations (no transaction needed)
 	exec, err := s.syncPlanRepo.GetPlanExecution(executionID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync execution: %w", err)
@@ -445,23 +475,30 @@ func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, execut
 		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution is not running", nil)
 	}
 
-	// Update execution status
-	exec.MarkCancelled()
-	if err := s.syncPlanRepo.UpdatePlanExecution(exec); err != nil {
-		return fmt.Errorf("failed to update execution status: %w", err)
-	}
-
-	// Update plan status
+	// Get plan for status check
 	plan, err := s.syncPlanRepo.Get(exec.SyncPlanID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync plan: %w", err)
 	}
-	if plan != nil && plan.Status == sync.PlanStatusRunning {
-		plan.MarkCompleted(nil)
-		_ = s.syncPlanRepo.Update(plan)
-	}
 
-	return nil
+	// Write operations using UoW for transaction
+	return s.uow.Do(ctx, func(repos contracts.Repositories) error {
+		// Update execution status
+		exec.MarkCancelled()
+		if err := repos.SyncPlanRepo().UpdatePlanExecution(exec); err != nil {
+			return fmt.Errorf("failed to update execution status: %w", err)
+		}
+
+		// Update plan status if needed
+		if plan != nil && plan.Status == sync.PlanStatusRunning {
+			plan.MarkCompleted(nil)
+			if err := repos.SyncPlanRepo().Update(plan); err != nil {
+				return fmt.Errorf("failed to update sync plan status: %w", err)
+			}
+		}
+
+		return nil
+	})
 }
 
 // ==================== Scheduling ====================
@@ -580,6 +617,7 @@ func (s *SyncApplicationServiceImpl) UpdatePlanSchedule(ctx context.Context, pla
 
 // HandleExecutionCallback handles execution result callback from workflow.
 func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
+	// Read operations (no transaction needed)
 	exec, err := s.syncPlanRepo.GetPlanExecution(req.ExecutionID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync execution: %w", err)
@@ -588,58 +626,70 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 		return shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
 	}
 
-	// Update execution status
-	if req.Success {
-		exec.MarkSuccess(req.RecordCount)
-
-		// Update LastSyncedAt for synced tasks
-		tasks, err := s.syncPlanRepo.GetTasksByPlan(exec.SyncPlanID)
-		if err == nil {
-			for _, task := range tasks {
-				for _, syncedAPI := range exec.SyncedAPIs {
-					if task.APIName == syncedAPI {
-						task.MarkSynced()
-						_ = s.syncPlanRepo.UpdateTask(task)
-						break
-					}
-				}
-			}
-		}
-	} else {
-		errorMsg := "unknown error"
-		if req.ErrorMessage != nil {
-			errorMsg = *req.ErrorMessage
-		}
-		exec.MarkFailed(errorMsg)
-	}
-
-	if err := s.syncPlanRepo.UpdatePlanExecution(exec); err != nil {
-		return fmt.Errorf("failed to update execution: %w", err)
-	}
-
-	// Update plan status
+	// Get plan for status update
 	plan, err := s.syncPlanRepo.Get(exec.SyncPlanID)
 	if err != nil {
 		return fmt.Errorf("failed to get sync plan: %w", err)
 	}
-	if plan != nil {
-		// Get next run time from scheduler or calculate it
-		var nextRunAt *time.Time
-		if plan.CronExpression != nil && *plan.CronExpression != "" {
-			// Try to get from scheduler first (most accurate)
-			if s.planScheduler != nil {
-				nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
-			}
-			// Fallback to calculation if scheduler not available or plan not scheduled
-			if nextRunAt == nil {
-				nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
-			}
-		}
-		plan.MarkCompleted(nextRunAt)
-		_ = s.syncPlanRepo.Update(plan)
+
+	// Get tasks for updating LastSyncedAt
+	tasks, err := s.syncPlanRepo.GetTasksByPlan(exec.SyncPlanID)
+	if err != nil {
+		return fmt.Errorf("failed to get tasks: %w", err)
 	}
 
-	return nil
+	// Write operations using UoW for transaction
+	return s.uow.Do(ctx, func(repos contracts.Repositories) error {
+		// Update execution status
+		if req.Success {
+			exec.MarkSuccess(req.RecordCount)
+
+			// Update LastSyncedAt for synced tasks
+			for _, task := range tasks {
+				for _, syncedAPI := range exec.SyncedAPIs {
+					if task.APIName == syncedAPI {
+						task.MarkSynced()
+						if err := repos.SyncPlanRepo().UpdateTask(task); err != nil {
+							return fmt.Errorf("failed to update task: %w", err)
+						}
+						break
+					}
+				}
+			}
+		} else {
+			errorMsg := "unknown error"
+			if req.ErrorMessage != nil {
+				errorMsg = *req.ErrorMessage
+			}
+			exec.MarkFailed(errorMsg)
+		}
+
+		if err := repos.SyncPlanRepo().UpdatePlanExecution(exec); err != nil {
+			return fmt.Errorf("failed to update execution: %w", err)
+		}
+
+		// Update plan status
+		if plan != nil {
+			// Get next run time from scheduler or calculate it
+			var nextRunAt *time.Time
+			if plan.CronExpression != nil && *plan.CronExpression != "" {
+				// Try to get from scheduler first (most accurate)
+				if s.planScheduler != nil {
+					nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+				}
+				// Fallback to calculation if scheduler not available or plan not scheduled
+				if nextRunAt == nil {
+					nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+				}
+			}
+			plan.MarkCompleted(nextRunAt)
+			if err := repos.SyncPlanRepo().Update(plan); err != nil {
+				return fmt.Errorf("failed to update sync plan: %w", err)
+			}
+		}
+
+		return nil
+	})
 }
 
 // ==================== Progress Query ====================

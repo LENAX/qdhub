@@ -22,6 +22,7 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
@@ -152,6 +153,9 @@ type Container struct {
 
 	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
 	QuantDBAdapter datastore.QuantDB
+
+	// Unit of Work for transaction management
+	UoW contracts.UnitOfWork
 }
 
 // Config holds container configuration.
@@ -225,6 +229,11 @@ func (c *Container) Initialize(ctx context.Context) error {
 	// Step 5: Initialize scheduler
 	if err := c.initScheduler(); err != nil {
 		return fmt.Errorf("failed to initialize scheduler: %w", err)
+	}
+
+	// Step 5.5: Initialize Unit of Work
+	if err := c.initUnitOfWork(); err != nil {
+		return fmt.Errorf("failed to initialize unit of work: %w", err)
 	}
 
 	// Step 6: Initialize application services
@@ -499,6 +508,13 @@ func (c *Container) initScheduler() error {
 	return nil
 }
 
+// initUnitOfWork initializes the Unit of Work for transaction management.
+func (c *Container) initUnitOfWork() error {
+	c.UoW = uow.NewUnitOfWork(c.DB)
+	logrus.Info("Unit of Work initialized")
+	return nil
+}
+
 // initApplicationServices initializes all application services (application service module).
 func (c *Container) initApplicationServices() error {
 	// Workflow service (for workflow management API)
@@ -527,6 +543,7 @@ func (c *Container) initApplicationServices() error {
 		c.WorkflowExecutor,
 		c.DependencyResolver,
 		c.TaskEngineAdapter,
+		c.UoW,
 	)
 
 	logrus.Info("Application services initialized")
