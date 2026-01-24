@@ -29,6 +29,7 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 	httphandler "qdhub/internal/interfaces/http"
 )
@@ -153,9 +154,10 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 
 	// 创建 application services
 	metadataRepo := repository.NewMetadataRepository(ctx.DB)
+	uowImpl := uow.NewUnitOfWork(ctx.DB)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	if cfg.Mode == "mock" {

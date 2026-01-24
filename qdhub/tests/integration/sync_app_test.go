@@ -14,11 +14,16 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 )
 
 // MockSyncWorkflowExecutor is a mock workflow executor for sync integration testing.
-type MockSyncWorkflowExecutor struct{}
+type MockSyncWorkflowExecutor struct {
+	// FixedBatchSyncInstanceID when set, ExecuteBatchDataSync returns this ID instead of NewID().
+	// Use in tests that insert workflow_instance (e.g. UoW ExecuteSyncPlan) to satisfy FK.
+	FixedBatchSyncInstanceID *shared.ID
+}
 
 func (m *MockSyncWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
 	return shared.NewID(), nil
@@ -33,6 +38,9 @@ func (m *MockSyncWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req 
 }
 
 func (m *MockSyncWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	if m.FixedBatchSyncInstanceID != nil {
+		return *m.FixedBatchSyncInstanceID, nil
+	}
 	return shared.NewID(), nil
 }
 
@@ -99,8 +107,9 @@ func TestSyncApplicationService_Integration_CreateAndGetSyncPlan(t *testing.T) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -148,8 +157,9 @@ func TestSyncApplicationService_Integration_ListSyncPlans(t *testing.T) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -188,8 +198,9 @@ func TestSyncApplicationService_Integration_UpdateSyncPlan(t *testing.T) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -237,8 +248,9 @@ func TestSyncApplicationService_Integration_DeleteSyncPlan(t *testing.T) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -278,8 +290,9 @@ func TestSyncApplicationService_Integration_EnableDisablePlan(t *testing.T) {
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -332,8 +345,9 @@ func TestSyncApplicationService_Integration_CreateSyncPlan_DataSourceNotFound(t 
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Try to create sync plan with non-existent data source
 	_, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{

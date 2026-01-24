@@ -16,6 +16,7 @@ import (
 // DataSourceRepositoryImpl implements metadata.DataSourceRepository.
 type DataSourceRepositoryImpl struct {
 	db             *persistence.DB
+	tx             *sqlx.Tx // External transaction (nil if not in transaction)
 	dataSourceDAO  *dao.DataSourceDAO
 	categoryDAO    *dao.APICategoryDAO
 	apiMetadataDAO *dao.APIMetadataDAO
@@ -26,6 +27,19 @@ type DataSourceRepositoryImpl struct {
 func NewDataSourceRepository(db *persistence.DB) *DataSourceRepositoryImpl {
 	return &DataSourceRepositoryImpl{
 		db:             db,
+		tx:             nil,
+		dataSourceDAO:  dao.NewDataSourceDAO(db.DB),
+		categoryDAO:    dao.NewAPICategoryDAO(db.DB),
+		apiMetadataDAO: dao.NewAPIMetadataDAO(db.DB),
+		tokenDAO:       dao.NewTokenDAO(db.DB),
+	}
+}
+
+// NewDataSourceRepositoryWithTx creates a new DataSourceRepositoryImpl bound to an external transaction.
+func NewDataSourceRepositoryWithTx(db *persistence.DB, tx *sqlx.Tx) *DataSourceRepositoryImpl {
+	return &DataSourceRepositoryImpl{
+		db:             db,
+		tx:             tx,
 		dataSourceDAO:  dao.NewDataSourceDAO(db.DB),
 		categoryDAO:    dao.NewAPICategoryDAO(db.DB),
 		apiMetadataDAO: dao.NewAPIMetadataDAO(db.DB),
@@ -35,40 +49,47 @@ func NewDataSourceRepository(db *persistence.DB) *DataSourceRepositoryImpl {
 
 // Create creates a new data source with its aggregated entities.
 func (r *DataSourceRepositoryImpl) Create(ds *metadata.DataSource) error {
+	if r.tx != nil {
+		return r.createInTx(r.tx, ds)
+	}
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create data source
-		if err := r.dataSourceDAO.Create(tx, ds); err != nil {
+		return r.createInTx(tx, ds)
+	})
+}
+
+func (r *DataSourceRepositoryImpl) createInTx(tx *sqlx.Tx, ds *metadata.DataSource) error {
+	// Create data source
+	if err := r.dataSourceDAO.Create(tx, ds); err != nil {
+		return err
+	}
+
+	// Create categories
+	for _, cat := range ds.Categories {
+		if err := r.categoryDAO.Create(tx, &cat); err != nil {
 			return err
 		}
+	}
 
-		// Create categories
-		for _, cat := range ds.Categories {
-			if err := r.categoryDAO.Create(tx, &cat); err != nil {
-				return err
-			}
+	// Create API metadata
+	for _, api := range ds.APIs {
+		if err := r.apiMetadataDAO.Create(tx, &api); err != nil {
+			return err
 		}
+	}
 
-		// Create API metadata
-		for _, api := range ds.APIs {
-			if err := r.apiMetadataDAO.Create(tx, &api); err != nil {
-				return err
-			}
+	// Create token if exists
+	if ds.Token != nil {
+		if err := r.tokenDAO.Create(tx, ds.Token); err != nil {
+			return err
 		}
+	}
 
-		// Create token if exists
-		if ds.Token != nil {
-			if err := r.tokenDAO.Create(tx, ds.Token); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	return nil
 }
 
 // Get retrieves a data source by ID with its aggregated entities.
 func (r *DataSourceRepositoryImpl) Get(id shared.ID) (*metadata.DataSource, error) {
-	ds, err := r.dataSourceDAO.GetByID(nil, id)
+	ds, err := r.dataSourceDAO.GetByID(r.tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +98,7 @@ func (r *DataSourceRepositoryImpl) Get(id shared.ID) (*metadata.DataSource, erro
 	}
 
 	// Load categories
-	categories, err := r.categoryDAO.ListByDataSource(nil, id)
+	categories, err := r.categoryDAO.ListByDataSource(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load categories: %w", err)
 	}
@@ -87,7 +108,7 @@ func (r *DataSourceRepositoryImpl) Get(id shared.ID) (*metadata.DataSource, erro
 	}
 
 	// Load API metadata
-	apis, err := r.apiMetadataDAO.ListByDataSource(nil, id)
+	apis, err := r.apiMetadataDAO.ListByDataSource(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load API metadata: %w", err)
 	}
@@ -97,7 +118,7 @@ func (r *DataSourceRepositoryImpl) Get(id shared.ID) (*metadata.DataSource, erro
 	}
 
 	// Load token
-	ds.Token, err = r.tokenDAO.GetByDataSource(nil, id)
+	ds.Token, err = r.tokenDAO.GetByDataSource(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load token: %w", err)
 	}
@@ -107,104 +128,110 @@ func (r *DataSourceRepositoryImpl) Get(id shared.ID) (*metadata.DataSource, erro
 
 // Update updates a data source and its aggregated entities.
 func (r *DataSourceRepositoryImpl) Update(ds *metadata.DataSource) error {
+	if r.tx != nil {
+		return r.dataSourceDAO.Update(r.tx, ds)
+	}
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Update data source
-		if err := r.dataSourceDAO.Update(tx, ds); err != nil {
-			return err
-		}
-		return nil
+		return r.dataSourceDAO.Update(tx, ds)
 	})
 }
 
 // Delete deletes a data source and its aggregated entities.
 func (r *DataSourceRepositoryImpl) Delete(id shared.ID) error {
+	if r.tx != nil {
+		return r.deleteInTx(r.tx, id)
+	}
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Delete token first (no FK constraint issue)
-		if err := r.tokenDAO.DeleteByDataSource(tx, id); err != nil {
-			return err
-		}
-
-		// Delete API metadata
-		if err := r.apiMetadataDAO.DeleteByDataSource(tx, id); err != nil {
-			return err
-		}
-
-		// Delete categories
-		if err := r.categoryDAO.DeleteByDataSource(tx, id); err != nil {
-			return err
-		}
-
-		// Delete data source
-		if err := r.dataSourceDAO.DeleteByID(tx, id); err != nil {
-			return err
-		}
-
-		return nil
+		return r.deleteInTx(tx, id)
 	})
+}
+
+func (r *DataSourceRepositoryImpl) deleteInTx(tx *sqlx.Tx, id shared.ID) error {
+	// Delete token first (no FK constraint issue)
+	if err := r.tokenDAO.DeleteByDataSource(tx, id); err != nil {
+		return err
+	}
+
+	// Delete API metadata
+	if err := r.apiMetadataDAO.DeleteByDataSource(tx, id); err != nil {
+		return err
+	}
+
+	// Delete categories
+	if err := r.categoryDAO.DeleteByDataSource(tx, id); err != nil {
+		return err
+	}
+
+	// Delete data source
+	if err := r.dataSourceDAO.DeleteByID(tx, id); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // List retrieves all data sources (without aggregated entities for performance).
 func (r *DataSourceRepositoryImpl) List() ([]*metadata.DataSource, error) {
-	return r.dataSourceDAO.ListAll(nil)
+	return r.dataSourceDAO.ListAll(r.tx)
 }
 
 // ==================== Child Entity Operations (APICategory) ====================
 
 // AddCategory adds a new APICategory to a DataSource.
 func (r *DataSourceRepositoryImpl) AddCategory(cat *metadata.APICategory) error {
-	return r.categoryDAO.Create(nil, cat)
+	return r.categoryDAO.Create(r.tx, cat)
 }
 
 // GetCategory retrieves an APICategory by ID.
 func (r *DataSourceRepositoryImpl) GetCategory(id shared.ID) (*metadata.APICategory, error) {
-	return r.categoryDAO.GetByID(nil, id)
+	return r.categoryDAO.GetByID(r.tx, id)
 }
 
 // ListCategoriesByDataSource retrieves all APICategories for a DataSource.
 func (r *DataSourceRepositoryImpl) ListCategoriesByDataSource(dataSourceID shared.ID) ([]*metadata.APICategory, error) {
-	return r.categoryDAO.ListByDataSource(nil, dataSourceID)
+	return r.categoryDAO.ListByDataSource(r.tx, dataSourceID)
 }
 
 // UpdateCategory updates an APICategory.
 func (r *DataSourceRepositoryImpl) UpdateCategory(cat *metadata.APICategory) error {
-	return r.categoryDAO.Update(nil, cat)
+	return r.categoryDAO.Update(r.tx, cat)
 }
 
 // DeleteCategory deletes an APICategory by ID.
 func (r *DataSourceRepositoryImpl) DeleteCategory(id shared.ID) error {
-	return r.categoryDAO.DeleteByID(nil, id)
+	return r.categoryDAO.DeleteByID(r.tx, id)
 }
 
 // ==================== Child Entity Operations (APIMetadata) ====================
 
 // AddAPIMetadata adds a new APIMetadata to a DataSource.
 func (r *DataSourceRepositoryImpl) AddAPIMetadata(meta *metadata.APIMetadata) error {
-	return r.apiMetadataDAO.Create(nil, meta)
+	return r.apiMetadataDAO.Create(r.tx, meta)
 }
 
 // GetAPIMetadata retrieves an APIMetadata by ID.
 func (r *DataSourceRepositoryImpl) GetAPIMetadata(id shared.ID) (*metadata.APIMetadata, error) {
-	return r.apiMetadataDAO.GetByID(nil, id)
+	return r.apiMetadataDAO.GetByID(r.tx, id)
 }
 
 // ListAPIMetadataByDataSource retrieves all APIMetadata for a DataSource.
 func (r *DataSourceRepositoryImpl) ListAPIMetadataByDataSource(dataSourceID shared.ID) ([]*metadata.APIMetadata, error) {
-	return r.apiMetadataDAO.ListByDataSource(nil, dataSourceID)
+	return r.apiMetadataDAO.ListByDataSource(r.tx, dataSourceID)
 }
 
 // ListAPIMetadataByCategory retrieves all APIMetadata for a category.
 func (r *DataSourceRepositoryImpl) ListAPIMetadataByCategory(categoryID shared.ID) ([]*metadata.APIMetadata, error) {
-	return r.apiMetadataDAO.ListByCategory(nil, categoryID)
+	return r.apiMetadataDAO.ListByCategory(r.tx, categoryID)
 }
 
 // UpdateAPIMetadata updates an APIMetadata.
 func (r *DataSourceRepositoryImpl) UpdateAPIMetadata(meta *metadata.APIMetadata) error {
-	return r.apiMetadataDAO.Update(nil, meta)
+	return r.apiMetadataDAO.Update(r.tx, meta)
 }
 
 // DeleteAPIMetadata deletes an APIMetadata by ID.
 func (r *DataSourceRepositoryImpl) DeleteAPIMetadata(id shared.ID) error {
-	return r.apiMetadataDAO.DeleteByID(nil, id)
+	return r.apiMetadataDAO.DeleteByID(r.tx, id)
 }
 
 // ==================== Child Entity Operations (Token) ====================
@@ -212,32 +239,32 @@ func (r *DataSourceRepositoryImpl) DeleteAPIMetadata(id shared.ID) error {
 // SetToken sets the token for a DataSource (creates or updates).
 func (r *DataSourceRepositoryImpl) SetToken(token *metadata.Token) error {
 	// Check if token already exists for this data source
-	existing, err := r.tokenDAO.GetByDataSource(nil, token.DataSourceID)
+	existing, err := r.tokenDAO.GetByDataSource(r.tx, token.DataSourceID)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
 		// Update existing token
 		token.ID = existing.ID
-		return r.tokenDAO.Update(nil, token)
+		return r.tokenDAO.Update(r.tx, token)
 	}
 	// Create new token
-	return r.tokenDAO.Create(nil, token)
+	return r.tokenDAO.Create(r.tx, token)
 }
 
 // GetToken retrieves a Token by ID.
 func (r *DataSourceRepositoryImpl) GetToken(id shared.ID) (*metadata.Token, error) {
-	return r.tokenDAO.GetByID(nil, id)
+	return r.tokenDAO.GetByID(r.tx, id)
 }
 
 // GetTokenByDataSource retrieves the Token for a DataSource.
 func (r *DataSourceRepositoryImpl) GetTokenByDataSource(dataSourceID shared.ID) (*metadata.Token, error) {
-	return r.tokenDAO.GetByDataSource(nil, dataSourceID)
+	return r.tokenDAO.GetByDataSource(r.tx, dataSourceID)
 }
 
 // DeleteToken deletes a Token by ID.
 func (r *DataSourceRepositoryImpl) DeleteToken(id shared.ID) error {
-	return r.tokenDAO.DeleteByID(nil, id)
+	return r.tokenDAO.DeleteByID(r.tx, id)
 }
 
 // ==================== Extended Query Operations ====================
