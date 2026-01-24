@@ -26,6 +26,7 @@ import (
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 	httphandler "qdhub/internal/interfaces/http"
 )
@@ -164,11 +165,12 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	taskEngineAdapter := &MockHTTPTaskEngineAdapter{}
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	dependencyResolver := &MockHTTPDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
 
 	// Create application services
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server

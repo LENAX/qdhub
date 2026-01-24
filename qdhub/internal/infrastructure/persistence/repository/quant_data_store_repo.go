@@ -15,6 +15,7 @@ import (
 // QuantDataStoreRepositoryImpl implements datastore.QuantDataStoreRepository.
 type QuantDataStoreRepositoryImpl struct {
 	db             *persistence.DB
+	tx             *sqlx.Tx // External transaction (nil if not in transaction)
 	dataStoreDAO   *dao.QuantDataStoreDAO
 	tableSchemaDAO *dao.TableSchemaDAO
 }
@@ -23,6 +24,17 @@ type QuantDataStoreRepositoryImpl struct {
 func NewQuantDataStoreRepository(db *persistence.DB) *QuantDataStoreRepositoryImpl {
 	return &QuantDataStoreRepositoryImpl{
 		db:             db,
+		tx:             nil,
+		dataStoreDAO:   dao.NewQuantDataStoreDAO(db.DB),
+		tableSchemaDAO: dao.NewTableSchemaDAO(db.DB),
+	}
+}
+
+// NewQuantDataStoreRepositoryWithTx creates a new QuantDataStoreRepositoryImpl bound to an external transaction.
+func NewQuantDataStoreRepositoryWithTx(db *persistence.DB, tx *sqlx.Tx) *QuantDataStoreRepositoryImpl {
+	return &QuantDataStoreRepositoryImpl{
+		db:             db,
+		tx:             tx,
 		dataStoreDAO:   dao.NewQuantDataStoreDAO(db.DB),
 		tableSchemaDAO: dao.NewTableSchemaDAO(db.DB),
 	}
@@ -30,26 +42,33 @@ func NewQuantDataStoreRepository(db *persistence.DB) *QuantDataStoreRepositoryIm
 
 // Create creates a new quant data store with its aggregated entities.
 func (r *QuantDataStoreRepositoryImpl) Create(ds *datastore.QuantDataStore) error {
+	if r.tx != nil {
+		return r.createInTx(r.tx, ds)
+	}
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create data store
-		if err := r.dataStoreDAO.Create(tx, ds); err != nil {
+		return r.createInTx(tx, ds)
+	})
+}
+
+func (r *QuantDataStoreRepositoryImpl) createInTx(tx *sqlx.Tx, ds *datastore.QuantDataStore) error {
+	// Create data store
+	if err := r.dataStoreDAO.Create(tx, ds); err != nil {
+		return err
+	}
+
+	// Create table schemas
+	for _, schema := range ds.Schemas {
+		if err := r.tableSchemaDAO.Create(tx, &schema); err != nil {
 			return err
 		}
+	}
 
-		// Create table schemas
-		for _, schema := range ds.Schemas {
-			if err := r.tableSchemaDAO.Create(tx, &schema); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	return nil
 }
 
 // Get retrieves a quant data store by ID with its aggregated entities.
 func (r *QuantDataStoreRepositoryImpl) Get(id shared.ID) (*datastore.QuantDataStore, error) {
-	ds, err := r.dataStoreDAO.GetByID(nil, id)
+	ds, err := r.dataStoreDAO.GetByID(r.tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +77,7 @@ func (r *QuantDataStoreRepositoryImpl) Get(id shared.ID) (*datastore.QuantDataSt
 	}
 
 	// Load table schemas
-	schemas, err := r.tableSchemaDAO.GetByDataStore(nil, id)
+	schemas, err := r.tableSchemaDAO.GetByDataStore(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load table schemas: %w", err)
 	}
@@ -72,61 +91,68 @@ func (r *QuantDataStoreRepositoryImpl) Get(id shared.ID) (*datastore.QuantDataSt
 
 // Update updates a quant data store.
 func (r *QuantDataStoreRepositoryImpl) Update(ds *datastore.QuantDataStore) error {
-	return r.dataStoreDAO.Update(nil, ds)
+	return r.dataStoreDAO.Update(r.tx, ds)
 }
 
 // Delete deletes a quant data store and its aggregated entities.
 func (r *QuantDataStoreRepositoryImpl) Delete(id shared.ID) error {
+	if r.tx != nil {
+		return r.deleteInTx(r.tx, id)
+	}
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Delete table schemas first
-		if err := r.tableSchemaDAO.DeleteByDataStore(tx, id); err != nil {
-			return err
-		}
-
-		// Delete data store
-		if err := r.dataStoreDAO.DeleteByID(tx, id); err != nil {
-			return err
-		}
-
-		return nil
+		return r.deleteInTx(tx, id)
 	})
+}
+
+func (r *QuantDataStoreRepositoryImpl) deleteInTx(tx *sqlx.Tx, id shared.ID) error {
+	// Delete table schemas first
+	if err := r.tableSchemaDAO.DeleteByDataStore(tx, id); err != nil {
+		return err
+	}
+
+	// Delete data store
+	if err := r.dataStoreDAO.DeleteByID(tx, id); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // List retrieves all quant data stores (without aggregated entities for performance).
 func (r *QuantDataStoreRepositoryImpl) List() ([]*datastore.QuantDataStore, error) {
-	return r.dataStoreDAO.ListAll(nil)
+	return r.dataStoreDAO.ListAll(r.tx)
 }
 
 // ==================== Child Entity Operations (TableSchema) ====================
 
 // AddSchema adds a new TableSchema to a QuantDataStore.
 func (r *QuantDataStoreRepositoryImpl) AddSchema(schema *datastore.TableSchema) error {
-	return r.tableSchemaDAO.Create(nil, schema)
+	return r.tableSchemaDAO.Create(r.tx, schema)
 }
 
 // GetSchema retrieves a TableSchema by ID.
 func (r *QuantDataStoreRepositoryImpl) GetSchema(id shared.ID) (*datastore.TableSchema, error) {
-	return r.tableSchemaDAO.GetByID(nil, id)
+	return r.tableSchemaDAO.GetByID(r.tx, id)
 }
 
 // GetSchemaByAPIMetadata retrieves a TableSchema by API metadata ID.
 func (r *QuantDataStoreRepositoryImpl) GetSchemaByAPIMetadata(apiMetadataID shared.ID) (*datastore.TableSchema, error) {
-	return r.tableSchemaDAO.GetByAPIMetadata(nil, apiMetadataID)
+	return r.tableSchemaDAO.GetByAPIMetadata(r.tx, apiMetadataID)
 }
 
 // GetSchemasByDataStore retrieves all TableSchemas for a QuantDataStore.
 func (r *QuantDataStoreRepositoryImpl) GetSchemasByDataStore(dataStoreID shared.ID) ([]*datastore.TableSchema, error) {
-	return r.tableSchemaDAO.GetByDataStore(nil, dataStoreID)
+	return r.tableSchemaDAO.GetByDataStore(r.tx, dataStoreID)
 }
 
 // UpdateSchema updates a TableSchema.
 func (r *QuantDataStoreRepositoryImpl) UpdateSchema(schema *datastore.TableSchema) error {
-	return r.tableSchemaDAO.Update(nil, schema)
+	return r.tableSchemaDAO.Update(r.tx, schema)
 }
 
 // DeleteSchema deletes a TableSchema by ID.
 func (r *QuantDataStoreRepositoryImpl) DeleteSchema(id shared.ID) error {
-	return r.tableSchemaDAO.DeleteByID(nil, id)
+	return r.tableSchemaDAO.DeleteByID(r.tx, id)
 }
 
 // ==================== Extended Query Operations ====================

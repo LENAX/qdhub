@@ -24,6 +24,7 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 )
@@ -71,9 +72,10 @@ func setupE2EApplicationServices(t *testing.T, db *persistence.DB, taskEngine *e
 	var planScheduler sync.PlanScheduler = nil
 
 	// 创建应用服务
+	uowImpl := uow.NewUnitOfWork(db)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	cleanup := func() {

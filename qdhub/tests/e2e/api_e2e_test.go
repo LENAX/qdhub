@@ -30,6 +30,7 @@ import (
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 	httphandler "qdhub/internal/interfaces/http"
 )
@@ -275,12 +276,13 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	// Create adapters
 	workflowExecutor := newE2EWorkflowExecutor()
 	dependencyResolver := sync.NewDependencyResolver()
+	uowImpl := uow.NewUnitOfWork(db)
 
 	// Create application services
 	metadataRepo := repository.NewMetadataRepository(db)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server

@@ -15,6 +15,7 @@ import (
 // SyncPlanRepositoryImpl implements sync.SyncPlanRepository.
 type SyncPlanRepositoryImpl struct {
 	db               *persistence.DB
+	tx               *sqlx.Tx // External transaction (nil if not in transaction)
 	syncPlanDAO      *dao.SyncPlanDAO
 	syncTaskDAO      *dao.SyncTaskDAO
 	syncExecutionDAO *dao.SyncExecutionDAO
@@ -24,6 +25,19 @@ type SyncPlanRepositoryImpl struct {
 func NewSyncPlanRepository(db *persistence.DB) *SyncPlanRepositoryImpl {
 	return &SyncPlanRepositoryImpl{
 		db:               db,
+		tx:               nil,
+		syncPlanDAO:      dao.NewSyncPlanDAO(db.DB),
+		syncTaskDAO:      dao.NewSyncTaskDAO(db.DB),
+		syncExecutionDAO: dao.NewSyncExecutionDAO(db.DB),
+	}
+}
+
+// NewSyncPlanRepositoryWithTx creates a new SyncPlanRepositoryImpl bound to an external transaction.
+// All operations will use the provided transaction instead of creating new ones.
+func NewSyncPlanRepositoryWithTx(db *persistence.DB, tx *sqlx.Tx) *SyncPlanRepositoryImpl {
+	return &SyncPlanRepositoryImpl{
+		db:               db,
+		tx:               tx,
 		syncPlanDAO:      dao.NewSyncPlanDAO(db.DB),
 		syncTaskDAO:      dao.NewSyncTaskDAO(db.DB),
 		syncExecutionDAO: dao.NewSyncExecutionDAO(db.DB),
@@ -32,33 +46,44 @@ func NewSyncPlanRepository(db *persistence.DB) *SyncPlanRepositoryImpl {
 
 // Create creates a new sync plan with its aggregated entities.
 func (r *SyncPlanRepositoryImpl) Create(plan *sync.SyncPlan) error {
+	// If we have an external transaction, use it directly
+	if r.tx != nil {
+		return r.createInTx(r.tx, plan)
+	}
+	// Otherwise, create a new transaction
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Create sync plan
-		if err := r.syncPlanDAO.Create(tx, plan); err != nil {
+		return r.createInTx(tx, plan)
+	})
+}
+
+// createInTx is the internal implementation that performs the actual create operation
+func (r *SyncPlanRepositoryImpl) createInTx(tx *sqlx.Tx, plan *sync.SyncPlan) error {
+	// Create sync plan
+	if err := r.syncPlanDAO.Create(tx, plan); err != nil {
+		return err
+	}
+
+	// Create tasks
+	for _, task := range plan.Tasks {
+		if err := r.syncTaskDAO.Create(tx, task); err != nil {
 			return err
 		}
+	}
 
-		// Create tasks
-		for _, task := range plan.Tasks {
-			if err := r.syncTaskDAO.Create(tx, task); err != nil {
-				return err
-			}
+	// Create executions
+	for _, exec := range plan.Executions {
+		if err := r.syncExecutionDAO.Create(tx, exec); err != nil {
+			return err
 		}
+	}
 
-		// Create executions
-		for _, exec := range plan.Executions {
-			if err := r.syncExecutionDAO.Create(tx, exec); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	return nil
 }
 
 // Get retrieves a sync plan by ID with its aggregated entities.
 func (r *SyncPlanRepositoryImpl) Get(id shared.ID) (*sync.SyncPlan, error) {
-	plan, err := r.syncPlanDAO.GetByID(nil, id)
+	// Use external transaction if available for read consistency
+	plan, err := r.syncPlanDAO.GetByID(r.tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -67,14 +92,14 @@ func (r *SyncPlanRepositoryImpl) Get(id shared.ID) (*sync.SyncPlan, error) {
 	}
 
 	// Load tasks
-	tasks, err := r.syncTaskDAO.GetByPlanID(nil, id)
+	tasks, err := r.syncTaskDAO.GetByPlanID(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tasks: %w", err)
 	}
 	plan.Tasks = tasks
 
 	// Load executions (lazy load, only recent ones)
-	executions, err := r.syncExecutionDAO.GetByPlanID(nil, id)
+	executions, err := r.syncExecutionDAO.GetByPlanID(r.tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load executions: %w", err)
 	}
@@ -85,95 +110,119 @@ func (r *SyncPlanRepositoryImpl) Get(id shared.ID) (*sync.SyncPlan, error) {
 
 // Update updates a sync plan.
 func (r *SyncPlanRepositoryImpl) Update(plan *sync.SyncPlan) error {
-	return r.syncPlanDAO.Update(nil, plan)
+	// Use external transaction if available, otherwise nil (no transaction needed for single update)
+	return r.syncPlanDAO.Update(r.tx, plan)
 }
 
 // Delete deletes a sync plan and its aggregated entities.
 func (r *SyncPlanRepositoryImpl) Delete(id shared.ID) error {
+	// If we have an external transaction, use it directly
+	if r.tx != nil {
+		return r.deleteInTx(r.tx, id)
+	}
+	// Otherwise, create a new transaction
 	return r.db.ExecInTx(func(tx *sqlx.Tx) error {
-		// Delete tasks first
-		if err := r.syncTaskDAO.DeleteByPlanID(tx, id); err != nil {
-			return err
-		}
-
-		// Delete sync plan
-		if err := r.syncPlanDAO.DeleteByID(tx, id); err != nil {
-			return err
-		}
-
-		return nil
+		return r.deleteInTx(tx, id)
 	})
+}
+
+// deleteInTx is the internal implementation that performs the actual delete operation
+func (r *SyncPlanRepositoryImpl) deleteInTx(tx *sqlx.Tx, id shared.ID) error {
+	// Delete tasks first
+	if err := r.syncTaskDAO.DeleteByPlanID(tx, id); err != nil {
+		return err
+	}
+
+	// Delete sync plan
+	if err := r.syncPlanDAO.DeleteByID(tx, id); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // List retrieves all sync plans (without aggregated entities for performance).
 func (r *SyncPlanRepositoryImpl) List() ([]*sync.SyncPlan, error) {
-	return r.syncPlanDAO.ListAll(nil)
+	// Use external transaction if available for read consistency
+	return r.syncPlanDAO.ListAll(r.tx)
 }
 
 // ==================== SyncTask Operations ====================
 
 // AddTask adds a new SyncTask to a SyncPlan.
 func (r *SyncPlanRepositoryImpl) AddTask(task *sync.SyncTask) error {
-	return r.syncTaskDAO.Create(nil, task)
+	// Use external transaction if available, otherwise nil
+	return r.syncTaskDAO.Create(r.tx, task)
 }
 
 // GetTask retrieves a SyncTask by ID.
 func (r *SyncPlanRepositoryImpl) GetTask(id shared.ID) (*sync.SyncTask, error) {
-	return r.syncTaskDAO.GetByID(nil, id)
+	// Use external transaction if available for read consistency
+	return r.syncTaskDAO.GetByID(r.tx, id)
 }
 
 // GetTasksByPlan retrieves all SyncTasks for a SyncPlan.
 func (r *SyncPlanRepositoryImpl) GetTasksByPlan(planID shared.ID) ([]*sync.SyncTask, error) {
-	return r.syncTaskDAO.GetByPlanID(nil, planID)
+	// Use external transaction if available for read consistency
+	return r.syncTaskDAO.GetByPlanID(r.tx, planID)
 }
 
 // UpdateTask updates a SyncTask.
 func (r *SyncPlanRepositoryImpl) UpdateTask(task *sync.SyncTask) error {
-	return r.syncTaskDAO.Update(nil, task)
+	// Use external transaction if available, otherwise nil
+	return r.syncTaskDAO.Update(r.tx, task)
 }
 
 // DeleteTasksByPlan deletes all SyncTasks for a SyncPlan.
 func (r *SyncPlanRepositoryImpl) DeleteTasksByPlan(planID shared.ID) error {
-	return r.syncTaskDAO.DeleteByPlanID(nil, planID)
+	// Use external transaction if available, otherwise nil
+	return r.syncTaskDAO.DeleteByPlanID(r.tx, planID)
 }
 
 // ==================== SyncExecution Operations ====================
 
 // AddPlanExecution adds a new SyncExecution to a SyncPlan.
 func (r *SyncPlanRepositoryImpl) AddPlanExecution(exec *sync.SyncExecution) error {
-	return r.syncExecutionDAO.Create(nil, exec)
+	// Use external transaction if available, otherwise nil
+	return r.syncExecutionDAO.Create(r.tx, exec)
 }
 
 // GetPlanExecution retrieves a SyncExecution by ID.
 func (r *SyncPlanRepositoryImpl) GetPlanExecution(id shared.ID) (*sync.SyncExecution, error) {
-	return r.syncExecutionDAO.GetByID(nil, id)
+	// Use external transaction if available for read consistency
+	return r.syncExecutionDAO.GetByID(r.tx, id)
 }
 
 // GetExecutionsByPlan retrieves all SyncExecutions for a SyncPlan.
 func (r *SyncPlanRepositoryImpl) GetExecutionsByPlan(planID shared.ID) ([]*sync.SyncExecution, error) {
-	return r.syncExecutionDAO.GetByPlanID(nil, planID)
+	// Use external transaction if available for read consistency
+	return r.syncExecutionDAO.GetByPlanID(r.tx, planID)
 }
 
 // UpdatePlanExecution updates a SyncExecution.
 func (r *SyncPlanRepositoryImpl) UpdatePlanExecution(exec *sync.SyncExecution) error {
-	return r.syncExecutionDAO.Update(nil, exec)
+	// Use external transaction if available, otherwise nil
+	return r.syncExecutionDAO.Update(r.tx, exec)
 }
 
 // ==================== Query Operations ====================
 
 // GetByDataSource retrieves sync plans by data source ID.
 func (r *SyncPlanRepositoryImpl) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
-	return r.syncPlanDAO.GetByDataSource(nil, dataSourceID)
+	// Use external transaction if available for read consistency
+	return r.syncPlanDAO.GetByDataSource(r.tx, dataSourceID)
 }
 
 // GetEnabledPlans retrieves all enabled sync plans.
 func (r *SyncPlanRepositoryImpl) GetEnabledPlans() ([]*sync.SyncPlan, error) {
-	return r.syncPlanDAO.GetByStatus(nil, sync.PlanStatusEnabled)
+	// Use external transaction if available for read consistency
+	return r.syncPlanDAO.GetByStatus(r.tx, sync.PlanStatusEnabled)
 }
 
 // GetByStatus retrieves sync plans by status.
 func (r *SyncPlanRepositoryImpl) GetByStatus(status sync.PlanStatus) ([]*sync.SyncPlan, error) {
-	return r.syncPlanDAO.GetByStatus(nil, status)
+	// Use external transaction if available for read consistency
+	return r.syncPlanDAO.GetByStatus(r.tx, status)
 }
 
 // ==================== Extended Query Operations ====================

@@ -42,6 +42,7 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
+	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -652,6 +653,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	cronCalculator := sync.NewCronScheduleCalculator()
 	dependencyResolver := sync.NewDependencyResolver()
 	// 使用 nil 作为 PlanScheduler，因为测试不需要调度功能
+	uowImpl := uow.NewUnitOfWork(db)
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo,
 		cronCalculator,
@@ -659,7 +661,8 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		dataSourceRepo,
 		workflowExecutor,
 		dependencyResolver,
-		nil,
+		taskEngineAdapter,
+		uowImpl,
 	)
 
 	cleanup := func() {
