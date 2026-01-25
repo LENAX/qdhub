@@ -64,6 +64,7 @@ func runAllMigrations(t *testing.T, projectRoot, dbPath string) error {
 		"migrations/002_seed_mapping_rules.up.sql",
 		"migrations/003_sync_plan_migration.up.sql",
 		"migrations/004_api_sync_strategy.up.sql",
+		"migrations/005_sync_plan_default_params.up.sql",
 	}
 
 	for _, migrationFile := range migrationFiles {
@@ -1358,4 +1359,321 @@ func TestE2E_DataSync_OneMonthHistorical(t *testing.T) {
 			t.Error("部分表不存在，数据同步可能失败")
 		}
 	})
+}
+
+// ==================== Cron 定时调度测试 ====================
+
+// TestE2E_Server_CronScheduleTrigger 测试 Cron 定时调度实际触发执行
+// 验证：创建每分钟执行一次的 SyncPlan，等待并验证至少触发 2 次执行
+// 注意：此测试需要真实 Tushare Token，且运行时间约 2.5 分钟
+func TestE2E_Server_CronScheduleTrigger(t *testing.T) {
+	// 检查 Tushare Token
+	tushareToken := os.Getenv("QDHUB_TUSHARE_TOKEN")
+	if tushareToken == "" {
+		t.Skip("跳过：未设置 QDHUB_TUSHARE_TOKEN 环境变量（此测试需要真实 Token 才能执行同步）")
+	}
+
+	ctx := setupServerE2EContext(t)
+
+	t.Log("========== Cron 定时调度触发测试 ==========")
+	t.Log("⏰ 此测试将创建每分钟执行一次的同步计划，等待约 2.5 分钟验证触发")
+
+	var dataSourceID, dataStoreID, syncPlanID string
+
+	// ==================== Step 1: 创建数据源 ====================
+	t.Run("Step1_CreateDataSource", func(t *testing.T) {
+		t.Log("----- Step 1: 创建数据源 -----")
+
+		createReq := map[string]string{
+			"name":        "Tushare",
+			"description": "Tushare",
+			"base_url":    "http://api.tushare.pro",
+			"doc_url":     "https://tushare.pro/document/2",
+		}
+		resp, err := ctx.doRequest("POST", "/api/v1/datasources", createReq)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("创建数据源失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+
+		data, err := getServerResponseData(resp)
+		require.NoError(t, err)
+		dataSourceID = getServerStringField(data, "id")
+		require.NotEmpty(t, dataSourceID)
+		t.Logf("✅ 数据源创建成功: ID=%s", dataSourceID)
+	})
+
+	// ==================== Step 2: 配置 Token ====================
+	t.Run("Step2_ConfigureToken", func(t *testing.T) {
+		t.Log("----- Step 2: 配置 Token -----")
+		if dataSourceID == "" {
+			t.Skip("跳过：需要先创建数据源")
+		}
+
+		configReq := map[string]string{
+			"token": tushareToken,
+		}
+		resp, err := ctx.doRequest("POST", "/api/v1/datasources/"+dataSourceID+"/token", configReq)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("配置 Token 失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+		resp.Body.Close()
+		t.Log("✅ Token 配置成功")
+	})
+
+	// ==================== Step 3: 刷新元数据 ====================
+	t.Run("Step3_RefreshMetadata", func(t *testing.T) {
+		t.Log("----- Step 3: 刷新元数据 -----")
+		if dataSourceID == "" {
+			t.Skip("跳过：需要先创建数据源")
+		}
+
+		resp, err := ctx.doRequest("POST", "/api/v1/datasources/"+dataSourceID+"/refresh", nil)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("刷新元数据失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+
+		data, err := getServerResponseData(resp)
+		require.NoError(t, err)
+		instanceID := getServerStringField(data, "instance_id")
+		if instanceID != "" {
+			t.Logf("  等待元数据刷新完成: %s", instanceID)
+			ctx.waitForWorkflowSSE(t, "/api/v1/instances/"+instanceID+"/progress-stream")
+		}
+		t.Log("✅ 元数据刷新完成")
+	})
+
+	// ==================== Step 4: 创建 DataStore ====================
+	t.Run("Step4_CreateDataStore", func(t *testing.T) {
+		t.Log("----- Step 4: 创建 DataStore -----")
+
+		createReq := map[string]interface{}{
+			"name":         "CronTestDuckDB",
+			"type":         "duckdb",
+			"storage_path": ctx.DuckDBPath,
+		}
+		resp, err := ctx.doRequest("POST", "/api/v1/datastores", createReq)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("创建 DataStore 失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+
+		data, err := getServerResponseData(resp)
+		require.NoError(t, err)
+		dataStoreID = getServerStringField(data, "id")
+		require.NotEmpty(t, dataStoreID)
+		t.Logf("✅ DataStore 创建成功: ID=%s", dataStoreID)
+	})
+
+	// ==================== Step 5: 建表 ====================
+	t.Run("Step5_CreateTables", func(t *testing.T) {
+		t.Log("----- Step 5: 建表 -----")
+		if dataSourceID == "" || dataStoreID == "" {
+			t.Skip("跳过：需要先创建数据源和 DataStore")
+		}
+
+		createReq := map[string]interface{}{
+			"data_source_id": dataSourceID,
+		}
+		resp, err := ctx.doRequest("POST", "/api/v1/datastores/"+dataStoreID+"/create-tables", createReq)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+			t.Fatalf("建表失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+
+		data, err := getServerResponseData(resp)
+		require.NoError(t, err)
+		tableInstanceID := getServerStringField(data, "instance_id")
+		if tableInstanceID != "" {
+			t.Logf("  等待建表完成: %s", tableInstanceID)
+			ctx.waitForWorkflowSSE(t, "/api/v1/instances/"+tableInstanceID+"/progress-stream")
+		}
+		t.Log("✅ 建表完成")
+	})
+
+	// ==================== Step 6: 创建每分钟执行的 SyncPlan ====================
+	t.Run("Step6_CreateCronSyncPlan", func(t *testing.T) {
+		t.Log("----- Step 6: 创建每分钟执行的 SyncPlan -----")
+		if dataSourceID == "" || dataStoreID == "" {
+			t.Skip("跳过：需要先创建数据源和 DataStore")
+		}
+
+		// 计算日期范围（最近一周，数据量小）
+		endDate := time.Now().Format("20060102")
+		startDate := time.Now().AddDate(0, 0, -7).Format("20060102")
+
+		// 每分钟执行一次：使用 @every 语法或标准 6 位 cron（秒 分 时 日 月 周）
+		cronExpr := "@every 1m" // robfig/cron 支持的简写形式
+		createReq := map[string]interface{}{
+			"name":            "EveryMinuteSyncPlan",
+			"description":     "每分钟执行一次的同步计划（Cron 触发测试）",
+			"data_source_id":  dataSourceID,
+			"data_store_id":   dataStoreID,
+			"selected_apis":   []string{"trade_cal", "stock_basic"}, // 仅同步这两个简单 API
+			"cron_expression": cronExpr,
+			"default_execute_params": map[string]string{
+				"target_db_path": ctx.DuckDBPath,
+				"start_date":     startDate,
+				"end_date":       endDate,
+			},
+		}
+
+		resp, err := ctx.doRequest("POST", "/api/v1/sync-plans", createReq)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("创建 SyncPlan 失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+
+		data, err := getServerResponseData(resp)
+		require.NoError(t, err)
+		syncPlanID = getServerStringField(data, "id")
+		require.NotEmpty(t, syncPlanID)
+
+		t.Logf("✅ SyncPlan 创建成功: ID=%s, Cron=%s", syncPlanID, cronExpr)
+	})
+
+	// ==================== Step 7: 解析依赖 ====================
+	t.Run("Step7_ResolveSyncPlan", func(t *testing.T) {
+		t.Log("----- Step 7: 解析依赖 -----")
+		if syncPlanID == "" {
+			t.Skip("跳过：需要先创建 SyncPlan")
+		}
+
+		resp, err := ctx.doRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/resolve", nil)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("解析依赖失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+		resp.Body.Close()
+		t.Log("✅ 依赖解析成功")
+	})
+
+	// ==================== Step 8: 启用计划（开始调度） ====================
+	t.Run("Step8_EnablePlan", func(t *testing.T) {
+		t.Log("----- Step 8: 启用计划 -----")
+		if syncPlanID == "" {
+			t.Skip("跳过：需要先创建 SyncPlan")
+		}
+
+		resp, err := ctx.doRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/enable", nil)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("启用计划失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+		resp.Body.Close()
+
+		// 获取下次执行时间
+		resp, err = ctx.doRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
+		require.NoError(t, err)
+		data, _ := getServerResponseData(resp)
+		nextExecuteAt := data["next_execute_at"]
+		t.Logf("✅ 计划已启用，下次执行时间: %v", nextExecuteAt)
+	})
+
+	// ==================== Step 9: 等待并验证触发执行 ====================
+	t.Run("Step9_WaitAndVerifyTriggers", func(t *testing.T) {
+		t.Log("----- Step 9: 等待 Cron 触发执行 -----")
+		if syncPlanID == "" {
+			t.Skip("跳过：需要先创建 SyncPlan")
+		}
+
+		// 等待约 2.5 分钟，期间每 10 秒检查一次执行记录
+		maxWait := 150 * time.Second // 2.5 分钟
+		checkInterval := 10 * time.Second
+		startTime := time.Now()
+		requiredExecutions := 2
+
+		t.Logf("⏳ 开始等待 Cron 触发，最长等待 %v，目标: %d 次执行", maxWait, requiredExecutions)
+
+		var executionCount int
+		var lastCheckCount int
+
+		for time.Since(startTime) < maxWait {
+			time.Sleep(checkInterval)
+			elapsed := time.Since(startTime).Round(time.Second)
+
+			// 查询执行记录
+			resp, err := ctx.doRequest("GET", "/api/v1/sync-plans/"+syncPlanID+"/executions", nil)
+			if err != nil {
+				t.Logf("  %v: 查询执行记录失败: %v", elapsed, err)
+				continue
+			}
+
+			execList, err := getServerResponseDataList(resp)
+			if err != nil {
+				// 可能是空列表返回 null
+				execList = []interface{}{}
+			}
+
+			executionCount = len(execList)
+
+			if executionCount != lastCheckCount {
+				t.Logf("  %v: 执行记录数: %d", elapsed, executionCount)
+				lastCheckCount = executionCount
+			}
+
+			// 达到目标次数，提前结束
+			if executionCount >= requiredExecutions {
+				t.Logf("✅ 已达到目标执行次数: %d", executionCount)
+				break
+			}
+		}
+
+		// 验证结果
+		t.Logf("📊 最终执行记录数: %d (目标: %d)", executionCount, requiredExecutions)
+		assert.GreaterOrEqual(t, executionCount, requiredExecutions,
+			"Cron 应至少触发 %d 次执行，实际触发 %d 次", requiredExecutions, executionCount)
+
+		if executionCount >= requiredExecutions {
+			t.Log("✅ Cron 定时触发测试通过！")
+		} else {
+			t.Errorf("❌ Cron 定时触发测试失败：期望至少 %d 次执行，实际 %d 次", requiredExecutions, executionCount)
+		}
+	})
+
+	// ==================== Step 10: 禁用计划 ====================
+	t.Run("Step10_DisablePlan", func(t *testing.T) {
+		t.Log("----- Step 10: 禁用计划 -----")
+		if syncPlanID == "" {
+			t.Skip("跳过：需要先创建 SyncPlan")
+		}
+
+		// 等待 plan 脱离 running（最后一次执行的 workflow 完成并触发 callback 后才会 MarkCompleted）
+		t.Log("⏳ 等待 plan 空闲（status != running）后再禁用...")
+		waitIdle := 30 * time.Second
+		interval := 2 * time.Second
+		deadline := time.Now().Add(waitIdle)
+		for time.Now().Before(deadline) {
+			resp, err := ctx.doRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
+			require.NoError(t, err)
+			data, _ := getServerResponseData(resp)
+			resp.Body.Close()
+			if status, _ := data["status"].(string); status != "" && status != "running" {
+				t.Logf("✅ Plan 已空闲: status=%s", status)
+				break
+			}
+			time.Sleep(interval)
+		}
+
+		resp, err := ctx.doRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/disable", nil)
+		require.NoError(t, err)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("禁用计划失败: 状态码 %d, 响应: %s", resp.StatusCode, readServerResponseBody(resp))
+		}
+		resp.Body.Close()
+		t.Log("✅ 计划已禁用，停止调度")
+	})
+
+	t.Log("========== Cron 定时调度触发测试完成 ==========")
 }

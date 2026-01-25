@@ -73,12 +73,13 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 	}
 
 	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
-		Name:           req.Name,
-		Description:    req.Description,
-		DataSourceID:   shared.ID(req.DataSourceID),
-		DataStoreID:    shared.ID(req.DataStoreID),
-		SelectedAPIs:   req.SelectedAPIs,
-		CronExpression: req.CronExpression,
+		Name:                 req.Name,
+		Description:          req.Description,
+		DataSourceID:         shared.ID(req.DataSourceID),
+		DataStoreID:          shared.ID(req.DataStoreID),
+		SelectedAPIs:         req.SelectedAPIs,
+		CronExpression:       req.CronExpression,
+		DefaultExecuteParams: req.DefaultExecuteParams,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -156,11 +157,12 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 	}
 
 	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
-		Name:           req.Name,
-		Description:    req.Description,
-		DataStoreID:    dataStoreID,
-		SelectedAPIs:   req.SelectedAPIs,
-		CronExpression: req.CronExpression,
+		Name:                 req.Name,
+		Description:          req.Description,
+		DataStoreID:          dataStoreID,
+		SelectedAPIs:         req.SelectedAPIs,
+		CronExpression:       req.CronExpression,
+		DefaultExecuteParams: req.DefaultExecuteParams,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -402,21 +404,23 @@ func (h *SyncHandler) HandleCallback(c *gin.Context) {
 
 // CreateSyncPlanReq represents the request body for creating a sync plan.
 type CreateSyncPlanReq struct {
-	Name           string   `json:"name" binding:"required"`
-	Description    string   `json:"description"`
-	DataSourceID   string   `json:"data_source_id" binding:"required"`
-	DataStoreID    string   `json:"data_store_id"`
-	SelectedAPIs   []string `json:"selected_apis" binding:"required"`
-	CronExpression *string  `json:"cron_expression"`
+	Name                 string              `json:"name" binding:"required"`
+	Description          string              `json:"description"`
+	DataSourceID         string              `json:"data_source_id" binding:"required"`
+	DataStoreID          string              `json:"data_store_id"`
+	SelectedAPIs         []string            `json:"selected_apis" binding:"required"`
+	CronExpression       *string             `json:"cron_expression"`
+	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
 type UpdateSyncPlanReq struct {
-	Name           *string   `json:"name"`
-	Description    *string   `json:"description"`
-	DataStoreID    *string   `json:"data_store_id"`
-	SelectedAPIs   *[]string `json:"selected_apis"`
-	CronExpression *string   `json:"cron_expression"`
+	Name                 *string             `json:"name"`
+	Description          *string             `json:"description"`
+	DataStoreID          *string             `json:"data_store_id"`
+	SelectedAPIs         *[]string           `json:"selected_apis"`
+	CronExpression       *string             `json:"cron_expression"`
+	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
 }
 
 // TriggerSyncPlanReq represents the request body for triggering a sync plan.

@@ -447,6 +447,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	var tasks []*task.Task
+	var depNames []string // 所有同步任务名，用于 BatchSyncComplete 依赖
 
 	// 如果参数为空，使用占位符
 	dataSourceName := params.DataSourceName
@@ -511,6 +512,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		return nil, err
 	}
 	tasks = append(tasks, fetchTradeCalTask)
+	depNames = append(depNames, "FetchTradeCal")
 
 	// Task: 获取股票基础信息
 	fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
@@ -528,6 +530,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		return nil, err
 	}
 	tasks = append(tasks, fetchStockBasicTask)
+	depNames = append(depNames, "FetchStockBasic")
 
 	// ==================== Level 1: 数据同步任务 ====================
 
@@ -539,6 +542,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				return nil, err
 			}
 			tasks = append(tasks, syncTask)
+			depNames = append(depNames, "Sync_"+config.APIName)
 		}
 	} else {
 		// 使用 APINames（简单模式）+ 智能策略选择
@@ -690,8 +694,23 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			}
 			log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s", apiName, taskName)
 			tasks = append(tasks, syncTask)
+			depNames = append(depNames, taskName)
 		}
 	}
+
+	// BatchSyncComplete：依赖所有同步任务，成功时触发 DataSyncCompleteHandler → execution 回调 → Plan.MarkCompleted
+	completeTaskBuilder := builder.NewTaskBuilder("BatchSyncComplete", "批量同步完成（触发 execution 回调）", b.registry).
+		WithJobFunction("NotifySyncComplete", map[string]interface{}{}).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncComplete").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure")
+	for _, dep := range depNames {
+		completeTaskBuilder = completeTaskBuilder.WithDependency(dep)
+	}
+	completeTask, err := completeTaskBuilder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("build BatchSyncComplete task: %w", err)
+	}
+	tasks = append(tasks, completeTask)
 
 	// 构建工作流
 	wfBuilder := builder.NewWorkflowBuilder("BatchDataSync", "批量数据同步工作流 - 支持用户指定时间区间和 API")
@@ -849,6 +868,7 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 	}
 
 	var tasks []*task.Task
+	var depNames []string
 
 	// 基础参数
 	baseParams := map[string]interface{}{
@@ -887,9 +907,25 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 			if err != nil {
 				return nil, fmt.Errorf("build task for %s: %w", apiName, err)
 			}
+			taskName := "Sync_" + apiName
 			tasks = append(tasks, syncTask)
+			depNames = append(depNames, taskName)
 		}
 	}
+
+	// BatchSyncComplete：依赖所有同步任务，成功时触发 DataSyncCompleteHandler → execution 回调
+	completeTaskBuilder := builder.NewTaskBuilder("BatchSyncComplete", "批量同步完成（触发 execution 回调）", b.registry).
+		WithJobFunction("NotifySyncComplete", map[string]interface{}{}).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncComplete").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure")
+	for _, dep := range depNames {
+		completeTaskBuilder = completeTaskBuilder.WithDependency(dep)
+	}
+	completeTask, err := completeTaskBuilder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("build BatchSyncComplete task: %w", err)
+	}
+	tasks = append(tasks, completeTask)
 
 	// 构建工作流
 	wfBuilder := builder.NewWorkflowBuilder("BatchDataSync", "批量数据同步工作流 - 基于 ExecutionGraph")

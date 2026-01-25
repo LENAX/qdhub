@@ -73,6 +73,10 @@ type SyncApplicationService interface {
 	// This is called by workflow engine when sync execution completes.
 	HandleExecutionCallback(ctx context.Context, req ExecutionCallbackRequest) error
 
+	// HandleExecutionCallbackByWorkflowInstance looks up execution by workflow instance ID,
+	// then invokes HandleExecutionCallback. Used by DataSyncCompleteHandler (task engine).
+	HandleExecutionCallbackByWorkflowInstance(ctx context.Context, workflowInstID string, success bool, recordCount int64, errMsg *string) error
+
 	// ==================== Progress Query ====================
 
 	// GetExecutionProgress retrieves aggregated progress for a specific sync execution.
@@ -88,21 +92,23 @@ type SyncApplicationService interface {
 
 // CreateSyncPlanRequest represents a request to create a sync plan.
 type CreateSyncPlanRequest struct {
-	Name           string
-	Description    string
-	DataSourceID   shared.ID
-	DataStoreID    shared.ID
-	SelectedAPIs   []string
-	CronExpression *string
+	Name                 string
+	Description          string
+	DataSourceID         shared.ID
+	DataStoreID          shared.ID
+	SelectedAPIs         []string
+	CronExpression       *string
+	DefaultExecuteParams *sync.ExecuteParams
 }
 
 // UpdateSyncPlanRequest represents a request to update a sync plan.
 type UpdateSyncPlanRequest struct {
-	Name           *string
-	Description    *string
-	DataStoreID    *shared.ID
-	SelectedAPIs   *[]string
-	CronExpression *string
+	Name                 *string
+	Description          *string
+	DataStoreID          *shared.ID
+	SelectedAPIs         *[]string
+	CronExpression       *string
+	DefaultExecuteParams *sync.ExecuteParams
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.

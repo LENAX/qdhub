@@ -403,7 +403,7 @@ func extractFieldsFromUpstream(tc *task.TaskContext) []metadata.FieldMeta {
 }
 
 // extractAPIMetadataFromUpstream 从子任务结果中提取 API 元数据列表
-// 使用 Task Engine v1.0.6+ 的子任务结果聚合 API
+// 使用 Task Engine v1.0.6+ 的子任务结果聚合 API；若为空则尝试从 _cached_* 参数回退
 func extractAPIMetadataFromUpstream(tc *task.TaskContext) []map[string]interface{} {
 	// 使用 ExtractMapsFromSubTasks 直接提取 api_metadata 字段
 	// Task Engine 会自动聚合模板任务的子任务结果
@@ -413,7 +413,52 @@ func extractAPIMetadataFromUpstream(tc *task.TaskContext) []map[string]interface
 		return apiMetadataMaps
 	}
 
+	// 回退：从 _cached_* 参数中收集 api_metadata（部分引擎将子任务结果存于此）
+	apiMetadataMaps = extractAPIMetadataFromCachedParams(tc)
+	if len(apiMetadataMaps) > 0 {
+		logrus.Debugf("extractAPIMetadataFromUpstream: 从 _cached_* 回退提取到 %d 个 api_metadata", len(apiMetadataMaps))
+		return apiMetadataMaps
+	}
+
 	return nil
+}
+
+// extractAPIMetadataFromCachedParams 从 tc.Params 的 _cached_* 中收集 api_metadata
+// 支持两种形态：(1) 直接 _cached_* = {"api_metadata": {...}}；(2) 模板聚合 _cached_FetchAPIDetails.subtask_results[].result.api_metadata
+func extractAPIMetadataFromCachedParams(tc *task.TaskContext) []map[string]interface{} {
+	var out []map[string]interface{}
+	for k, v := range tc.Params {
+		if !strings.HasPrefix(k, "_cached_") {
+			continue
+		}
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		am, ok := m["api_metadata"].(map[string]interface{})
+		if ok && am != nil {
+			out = append(out, am)
+			continue
+		}
+		// 模板任务聚合：subtask_results[].result.api_metadata（如 _cached_FetchAPIDetails）
+		if arr, ok := m["subtask_results"].([]interface{}); ok {
+			for _, item := range arr {
+				entry, _ := item.(map[string]interface{})
+				if entry == nil {
+					continue
+				}
+				result, _ := entry["result"].(map[string]interface{})
+				if result == nil {
+					continue
+				}
+				am2, _ := result["api_metadata"].(map[string]interface{})
+				if am2 != nil {
+					out = append(out, am2)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // convertToFieldMeta 将接口类型转换为 FieldMeta 切片

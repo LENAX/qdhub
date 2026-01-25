@@ -140,6 +140,7 @@ type Container struct {
 	// Scheduler (backward compatibility: direct field access)
 	CronCalculator     sync.CronScheduleCalculator
 	PlanScheduler      sync.PlanScheduler
+	planExecutor       *scheduler.ScheduledPlanExecutor
 	DependencyResolver sync.DependencyResolver
 
 	// Application Services (backward compatibility: direct field access)
@@ -239,6 +240,11 @@ func (c *Container) Initialize(ctx context.Context) error {
 	// Step 6: Initialize application services
 	if err := c.initApplicationServices(); err != nil {
 		return fmt.Errorf("failed to initialize application services: %w", err)
+	}
+
+	// Step 6.5: Restore enabled plans to scheduler (after restart)
+	if err := c.restoreScheduledPlans(ctx); err != nil {
+		logrus.Warnf("Warning: failed to restore scheduled plans: %v", err)
 	}
 
 	// Step 7: Initialize built-in workflows
@@ -498,7 +504,9 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 // initScheduler initializes the scheduler (scheduler module).
 func (c *Container) initScheduler() error {
 	c.CronCalculator = scheduler.NewCronSchedulerCalculatorAdapter()
-	c.PlanScheduler = scheduler.NewCronScheduler(nil) // TODO: Add plan trigger callback
+
+	c.planExecutor = scheduler.NewScheduledPlanExecutor()
+	c.PlanScheduler = scheduler.NewCronScheduler(c.planExecutor)
 	c.PlanScheduler.Start()
 
 	// Initialize dependency resolver
@@ -546,7 +554,35 @@ func (c *Container) initApplicationServices() error {
 		c.UoW,
 	)
 
+	// Deferred injection: executor needs SyncSvc (breaks init cycle)
+	c.planExecutor.SetSyncService(c.SyncSvc)
+
+	// 注册 SyncCallbackInvoker，供 DataSyncCompleteHandler 触发 execution 回调（Plan.MarkCompleted）
+	taskengine.RegisterSyncCallbackInvoker(c.TaskEngine, c.SyncSvc)
+
 	logrus.Info("Application services initialized")
+	return nil
+}
+
+// restoreScheduledPlans re-registers enabled plans with cron expression to the scheduler.
+func (c *Container) restoreScheduledPlans(ctx context.Context) error {
+	plans, err := c.SyncPlanRepo.GetEnabledPlans()
+	if err != nil {
+		return fmt.Errorf("get enabled plans: %w", err)
+	}
+
+	var restored int
+	for _, plan := range plans {
+		if plan.CronExpression != nil && *plan.CronExpression != "" {
+			if err := c.PlanScheduler.SchedulePlan(plan.ID.String(), *plan.CronExpression); err != nil {
+				logrus.Warnf("Failed to restore plan %s: %v", plan.ID, err)
+				continue
+			}
+			restored++
+		}
+	}
+
+	logrus.Infof("Restored %d scheduled plan(s)", restored)
 	return nil
 }
 
