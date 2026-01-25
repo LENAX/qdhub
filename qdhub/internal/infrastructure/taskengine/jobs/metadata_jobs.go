@@ -741,22 +741,19 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 	// Extract api_metadata from all upstream sub-tasks
 	// 使用新的 Task Engine API 从子任务结果中提取 api_metadata
 	// FetchAndParseAPIDetail 子任务返回 {"api_metadata": {...}, "api_url": "..."}
+	// 注意：SaveAllMetadata 无子任务，子任务属于 FetchAPIDetails；提取依赖 _cached_* 或引擎聚合
 	apiMetadataMaps := extractAPIMetadataFromUpstream(tc)
 	if len(apiMetadataMaps) == 0 {
-		logrus.Warnf("SaveAPIMetadataBatchJob: No api_metadata found from upstream tasks (子任务数=%d)", subTaskCount)
-		// 打印参数 keys 用于调试
+		successCount := subTaskCount - len(failedResults)
 		var keys []string
 		for k := range tc.Params {
 			keys = append(keys, k)
 		}
-		logrus.Debugf("SaveAPIMetadataBatchJob: Params keys: %v", keys)
-		return map[string]interface{}{
-			"saved_count":   0,
-			"message":       "No API metadata to save",
-			"subtask_count": subTaskCount,
-			"success_count": subTaskCount - len(failedResults),
-			"failed_count":  len(failedResults),
-		}, nil
+		logrus.Warnf("SaveAPIMetadataBatchJob: No api_metadata from upstream (子任务数=%d, 成功=%d, 失败=%d). Params keys: %v",
+			subTaskCount, successCount, len(failedResults), keys)
+		// 无法保存任何元数据时视为失败，便于排查 ExtractMapsFromSubTasks / _cached_ 聚合问题
+		return nil, fmt.Errorf("no api_metadata from upstream: 子任务数=%d, 成功=%d, 失败=%d (ExtractMapsFromSubTasks 与 _cached_ 回退均无数据)",
+			subTaskCount, successCount, len(failedResults))
 	}
 
 	logrus.Debugf("[SaveAPIMetadataBatch] 从子任务提取到 %d 个 API metadata", len(apiMetadataMaps))

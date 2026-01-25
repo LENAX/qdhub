@@ -363,6 +363,12 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 	}, nil
 }
 
+// NotifySyncCompleteJob 无操作 job，用于 BatchSyncComplete 任务。
+// 实际回调逻辑在 DataSyncCompleteHandler 中通过 SyncCallbackInvoker 执行。
+func NotifySyncCompleteJob(tc *task.TaskContext) (interface{}, error) {
+	return nil, nil
+}
+
 // ==================== 增量实时同步 Job Functions ====================
 
 // GetSyncCheckpointJob 获取同步检查点

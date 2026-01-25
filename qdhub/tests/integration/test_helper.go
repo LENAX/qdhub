@@ -63,6 +63,18 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to execute api_sync_strategy migration: %v", err)
 	}
 
+	// Sync plan default execute params (for scheduled runs)
+	defaultParamsMigrationSQL, err := os.ReadFile("../../migrations/005_sync_plan_default_params.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 005_sync_plan_default_params migration: %v", err)
+	}
+	_, err = db.Exec(string(defaultParamsMigrationSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 005_sync_plan_default_params migration: %v", err)
+	}
+
 	cleanup := func() {
 		db.Close()
 		os.Remove(dsn)

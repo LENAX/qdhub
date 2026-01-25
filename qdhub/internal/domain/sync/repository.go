@@ -37,6 +37,9 @@ type SyncPlanRepository interface {
 	// GetExecutionsByPlan 获取计划的所有执行记录
 	GetExecutionsByPlan(planID shared.ID) ([]*SyncExecution, error)
 
+	// GetExecutionByWorkflowInstID 按 workflow 实例 ID 获取执行记录（用于完成回调）
+	GetExecutionByWorkflowInstID(workflowInstID string) (*SyncExecution, error)
+
 	// UpdateExecution 更新执行记录
 	UpdatePlanExecution(exec *SyncExecution) error
 

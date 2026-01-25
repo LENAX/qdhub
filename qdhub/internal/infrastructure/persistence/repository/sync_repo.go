@@ -199,6 +199,11 @@ func (r *SyncPlanRepositoryImpl) GetExecutionsByPlan(planID shared.ID) ([]*sync.
 	return r.syncExecutionDAO.GetByPlanID(r.tx, planID)
 }
 
+// GetExecutionByWorkflowInstID retrieves a SyncExecution by workflow instance ID.
+func (r *SyncPlanRepositoryImpl) GetExecutionByWorkflowInstID(workflowInstID string) (*sync.SyncExecution, error) {
+	return r.syncExecutionDAO.GetByWorkflowInstID(r.tx, workflowInstID)
+}
+
 // UpdatePlanExecution updates a SyncExecution.
 func (r *SyncPlanRepositoryImpl) UpdatePlanExecution(exec *sync.SyncExecution) error {
 	// Use external transaction if available, otherwise nil

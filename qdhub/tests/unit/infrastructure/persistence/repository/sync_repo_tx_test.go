@@ -36,6 +36,7 @@ func setupSyncRepoTestDB(t *testing.T) (*persistence.DB, func()) {
 			resolved_apis TEXT,
 			execution_graph TEXT,
 			cron_expression VARCHAR(128),
+			default_execute_params TEXT,
 			status VARCHAR(32) DEFAULT 'draft',
 			last_executed_at TIMESTAMP,
 			next_execute_at TIMESTAMP,

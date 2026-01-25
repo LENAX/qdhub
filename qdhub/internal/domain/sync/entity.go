@@ -213,6 +213,9 @@ type SyncPlan struct {
 	// 调度配置
 	CronExpression *string // 定时表达式（可选）
 
+	// 默认执行参数（用于定时触发）
+	DefaultExecuteParams *ExecuteParams
+
 	// 状态
 	Status         PlanStatus
 	LastExecutedAt *time.Time
@@ -259,6 +262,12 @@ func (sp *SyncPlan) SetExecutionGraph(graph *ExecutionGraph, resolvedAPIs []stri
 // SetCronExpression sets the cron expression for scheduled execution.
 func (sp *SyncPlan) SetCronExpression(cronExpr string) {
 	sp.CronExpression = &cronExpr
+	sp.UpdatedAt = shared.Now()
+}
+
+// SetDefaultExecuteParams sets the default execute params for scheduled runs.
+func (sp *SyncPlan) SetDefaultExecuteParams(p *ExecuteParams) {
+	sp.DefaultExecuteParams = p
 	sp.UpdatedAt = shared.Now()
 }
 
@@ -364,6 +373,32 @@ func (sp *SyncPlan) UnmarshalExecutionGraphJSON(jsonStr string) error {
 		return err
 	}
 	sp.ExecutionGraph = &graph
+	return nil
+}
+
+// MarshalDefaultExecuteParamsJSON marshals default execute params to JSON string.
+func (sp *SyncPlan) MarshalDefaultExecuteParamsJSON() (string, error) {
+	if sp.DefaultExecuteParams == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(sp.DefaultExecuteParams)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// UnmarshalDefaultExecuteParamsJSON unmarshals default execute params from JSON string.
+func (sp *SyncPlan) UnmarshalDefaultExecuteParamsJSON(jsonStr string) error {
+	if jsonStr == "" {
+		sp.DefaultExecuteParams = nil
+		return nil
+	}
+	var p ExecuteParams
+	if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
+		return err
+	}
+	sp.DefaultExecuteParams = &p
 	return nil
 }
 

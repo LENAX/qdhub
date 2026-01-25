@@ -2,6 +2,7 @@ package dao
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,11 +27,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 // Create inserts a new sync plan record.
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
-		selected_apis, resolved_apis, execution_graph, cron_expression, status,
-		last_executed_at, next_execute_at, created_at, updated_at)
+		selected_apis, resolved_apis, execution_graph, cron_expression, default_execute_params,
+		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
-		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :status,
-		:last_executed_at, :next_execute_at, :created_at, :updated_at)`
+		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :default_execute_params,
+		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
 	if err != nil {
@@ -67,6 +68,7 @@ func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 		name = :name, description = :description, data_store_id = :data_store_id,
 		selected_apis = :selected_apis, resolved_apis = :resolved_apis,
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
+		default_execute_params = :default_execute_params,
 		status = :status, last_executed_at = :last_executed_at,
 		next_execute_at = :next_execute_at, updated_at = :updated_at
 		WHERE id = :id`
@@ -182,17 +184,23 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 		return nil, fmt.Errorf("failed to marshal execution graph: %w", err)
 	}
 
+	defaultExecuteParams, err := entity.MarshalDefaultExecuteParamsJSON()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal default execute params: %w", err)
+	}
+
 	row := &SyncPlanRow{
-		ID:             entity.ID.String(),
-		Name:           entity.Name,
-		Description:    entity.Description,
-		DataSourceID:   entity.DataSourceID.String(),
-		SelectedAPIs:   selectedAPIs,
-		ResolvedAPIs:   resolvedAPIs,
-		ExecutionGraph: executionGraph,
-		Status:         entity.Status.String(),
-		CreatedAt:      entity.CreatedAt.ToTime(),
-		UpdatedAt:      entity.UpdatedAt.ToTime(),
+		ID:                   entity.ID.String(),
+		Name:                 entity.Name,
+		Description:          entity.Description,
+		DataSourceID:         entity.DataSourceID.String(),
+		SelectedAPIs:         selectedAPIs,
+		ResolvedAPIs:         resolvedAPIs,
+		ExecutionGraph:       executionGraph,
+		DefaultExecuteParams: defaultExecuteParams,
+		Status:               entity.Status.String(),
+		CreatedAt:            entity.CreatedAt.ToTime(),
+		UpdatedAt:            entity.UpdatedAt.ToTime(),
 	}
 
 	if entity.DataStoreID != "" {
@@ -255,6 +263,12 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 	if row.ExecutionGraph != "" {
 		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal execution graph: %w", err)
+		}
+	}
+
+	if row.DefaultExecuteParams != "" {
+		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal default execute params: %w", err)
 		}
 	}
 
@@ -545,6 +559,27 @@ func (d *SyncExecutionDAO) GetByPlanID(tx *sqlx.Tx, planID shared.ID) ([]*sync.S
 		entities = append(entities, entity)
 	}
 	return entities, nil
+}
+
+// GetByWorkflowInstID retrieves a sync execution by workflow instance ID.
+func (d *SyncExecutionDAO) GetByWorkflowInstID(tx *sqlx.Tx, workflowInstID string) (*sync.SyncExecution, error) {
+	query := `SELECT * FROM sync_execution WHERE workflow_inst_id = ? LIMIT 1`
+	var row SyncExecutionRow
+
+	var err error
+	if tx != nil {
+		err = tx.Get(&row, query, workflowInstID)
+	} else {
+		err = d.DB().Get(&row, query, workflowInstID)
+	}
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get sync execution by workflow_inst_id: %w", err)
+	}
+	return d.toEntity(&row)
 }
 
 // toRow converts domain entity to database row.
