@@ -53,7 +53,7 @@ func setupE2EApplicationServices(t *testing.T, db *persistence.DB, taskEngine *e
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// 创建适配器
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(taskEngine)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(taskEngine, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(taskEngine)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 

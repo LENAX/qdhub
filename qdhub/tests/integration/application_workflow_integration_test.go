@@ -55,7 +55,7 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// Create adapters
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 
 	// Initialize built-in workflows

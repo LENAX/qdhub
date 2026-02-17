@@ -26,7 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/sync"
+	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
@@ -160,6 +162,16 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
+	// 创建认证相关组件
+	userRepo := repository.NewUserRepository(ctx.DB)
+	passwordHasher := auth.NewBcryptPasswordHasher(0)
+	jwtManager := authinfra.NewJWTManager("test_secret_key_123456789012345678901234567890", 1*time.Hour, 24*time.Hour)
+	enforcer, err := authinfra.NewCasbinEnforcer(ctx.DB.DB, persistence.DBTypeSQLite)
+	require.NoError(t, err)
+	err = authinfra.InitializeDefaultPolicies(enforcer)
+	require.NoError(t, err)
+	authSvc := impl.NewAuthApplicationService(userRepo, userRepo, passwordHasher, jwtManager)
+
 	if cfg.Mode == "mock" {
 		// Mock 模式：使用 httptest
 		gin.SetMode(gin.TestMode)
@@ -168,7 +180,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			Port: 0,
 			Mode: gin.TestMode,
 		}
-		server := httphandler.NewServer(config, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = "" // Mock 模式不需要 BaseURL
@@ -192,7 +204,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			WriteTimeout: 30 * time.Second,
 			Mode:         gin.DebugMode,
 		}
-		server := httphandler.NewServer(config, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)

@@ -54,7 +54,7 @@ func TestBuiltInWorkflow_Integration(t *testing.T) {
 		t.Fatalf("Failed to create workflow repository: %v", err)
 	}
 
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 
 	// Initialize built-in workflows

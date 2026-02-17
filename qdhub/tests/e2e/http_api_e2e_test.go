@@ -21,14 +21,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
+	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 	httpapi "qdhub/internal/interfaces/http"
+	"time"
 )
 
 // setupE2EHTTPServer 设置E2E测试所需的HTTP服务器
@@ -49,7 +52,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// 创建适配器
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(taskEngine)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(taskEngine, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(taskEngine)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 
@@ -74,10 +77,20 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
+	// 创建认证相关组件
+	userRepo := repository.NewUserRepository(db)
+	passwordHasher := auth.NewBcryptPasswordHasher(0)
+	jwtManager := authinfra.NewJWTManager("test_secret_key_123456789012345678901234567890", 1*time.Hour, 24*time.Hour)
+	enforcer, err := authinfra.NewCasbinEnforcer(db.DB, persistence.DBTypeSQLite)
+	require.NoError(t, err)
+	err = authinfra.InitializeDefaultPolicies(enforcer)
+	require.NoError(t, err)
+	authSvc := impl.NewAuthApplicationService(userRepo, userRepo, passwordHasher, jwtManager)
+
 	// 创建HTTP服务器
 	config := httpapi.DefaultServerConfig()
 	config.Mode = gin.TestMode
-	server := httpapi.NewServer(config, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
+	server := httpapi.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, jwtManager, enforcer, "")
 
 	// 创建测试服务器
 	ts := httptest.NewServer(server.Engine())

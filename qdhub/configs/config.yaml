@@ -10,7 +10,7 @@ database:
   dsn: "./data/qdhub.db"
 
 task_engine:
-  worker_count: 10
+  worker_count: 100
   task_timeout: 60  # seconds
 
 datasources:

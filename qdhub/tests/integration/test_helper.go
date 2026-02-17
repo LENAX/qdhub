@@ -82,3 +82,17 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 
 	return db, cleanup
 }
+
+// runAuthMigration runs the auth schema migration (002) on the given DB.
+// Used by HTTP integration tests that need JWT-protected routes.
+func runAuthMigration(t *testing.T, db *persistence.DB) {
+	t.Helper()
+	migrationSQL, err := os.ReadFile("../../migrations/002_auth_schema.sqlite.up.sql")
+	if err != nil {
+		t.Fatalf("Failed to read auth migration file: %v", err)
+	}
+	_, err = db.Exec(string(migrationSQL))
+	if err != nil {
+		t.Fatalf("Failed to execute auth migration: %v", err)
+	}
+}

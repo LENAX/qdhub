@@ -7,19 +7,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/infrastructure/datasource"
 
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 )
 
 const (
 	// DefaultBaseURL is the default Tushare Pro API base URL.
 	DefaultBaseURL = "http://api.tushare.pro"
-	// DefaultTimeout is the default request timeout in seconds.
-	DefaultTimeout = 30
+	// DefaultTimeout is the default request timeout in seconds (Tushare 接口可能较慢).
+	DefaultTimeout = 60
 	// DefaultRetryCount is the default retry count.
 	DefaultRetryCount = 5
 	// DefaultRetryDelay is the default retry delay in milliseconds.
@@ -32,6 +36,14 @@ const (
 	DefaultMaxIdleConnsPerHost = 10
 	// DefaultIdleConnTimeout is the default idle connection timeout in seconds.
 	DefaultIdleConnTimeout = 90
+	// DefaultRateLimitPerMinute 全局限流：每分钟最大请求数（留余量避免触发 API 500 次/分钟限制）
+	DefaultRateLimitPerMinute = 450
+	// DefaultRateLimitBurst 限流器突发容量
+	DefaultRateLimitBurst = 10
+	// DefaultRateLimitBackoff 限流错误后的退避时间（等待“每分钟”窗口重置）
+	DefaultRateLimitBackoff = 65 * time.Second
+	// DefaultRateLimitBackoffJitter 退避时间的随机抖动上限
+	DefaultRateLimitBackoffJitter = 10 * time.Second
 )
 
 // Client implements datasource.APIClient for Tushare Pro API.
@@ -47,6 +59,11 @@ type Client struct {
 	sem           *semaphore.Weighted
 	// Error mapping
 	errorMapper *datasource.ErrorMapper
+	// 方案 B：全局限流器，nil 表示不启用
+	rateLimiter *rate.Limiter
+	// 方案 A：限流错误后的退避与抖动
+	rateLimitBackoff      time.Duration
+	rateLimitBackoffJitter time.Duration
 }
 
 // ClientOption is a function that configures Client.
@@ -130,6 +147,32 @@ func WithHTTPClient(client *http.Client) ClientOption {
 	}
 }
 
+// WithRateLimit 方案 B：设置每分钟最大请求数，0 表示不启用全局限流。
+func WithRateLimit(perMinute int) ClientOption {
+	return func(c *Client) {
+		if perMinute > 0 {
+			// rate.Limit = 每秒请求数
+			c.rateLimiter = rate.NewLimiter(rate.Limit(perMinute)/60.0, DefaultRateLimitBurst)
+		} else {
+			c.rateLimiter = nil
+		}
+	}
+}
+
+// WithRateLimitBackoff 方案 A：限流错误后的退避时间（默认 65s）。
+func WithRateLimitBackoff(d time.Duration) ClientOption {
+	return func(c *Client) {
+		c.rateLimitBackoff = d
+	}
+}
+
+// WithRateLimitBackoffJitter 方案 A：退避时间的随机抖动上限（默认 10s）。
+func WithRateLimitBackoffJitter(d time.Duration) ClientOption {
+	return func(c *Client) {
+		c.rateLimitBackoffJitter = d
+	}
+}
+
 // TushareErrorMappingRules 定义 Tushare 特有的错误映射规则
 // 规则按优先级排序，先匹配的优先
 var TushareErrorMappingRules = []datasource.ErrorMappingRule{
@@ -175,16 +218,15 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 
 	c := &Client{
-		baseURL:   DefaultBaseURL,
-		transport: transport,
-		httpClient: &http.Client{
-			Timeout:   DefaultTimeout * time.Second,
-			Transport: transport,
-		},
-		retryCount:    DefaultRetryCount,
-		retryDelay:    DefaultRetryDelay * time.Millisecond,
-		maxConcurrent: DefaultMaxConcurrent,
-		errorMapper:   datasource.NewErrorMapper(TushareErrorMappingRules, datasource.ErrCodeUnknown),
+		baseURL:               DefaultBaseURL,
+		transport:             transport,
+		httpClient:            &http.Client{Timeout: DefaultTimeout * time.Second, Transport: transport},
+		retryCount:            DefaultRetryCount,
+		retryDelay:            DefaultRetryDelay * time.Millisecond,
+		maxConcurrent:         DefaultMaxConcurrent,
+		errorMapper:           datasource.NewErrorMapper(TushareErrorMappingRules, datasource.ErrCodeUnknown),
+		rateLimitBackoff:      DefaultRateLimitBackoff,
+		rateLimitBackoffJitter: DefaultRateLimitBackoffJitter,
 	}
 
 	// Apply options
@@ -192,9 +234,12 @@ func NewClient(opts ...ClientOption) *Client {
 		opt(c)
 	}
 
-	// Initialize semaphore after options are applied
-	c.sem = semaphore.NewWeighted(c.maxConcurrent)
+	// 方案 B：默认启用全局限流 450 次/分钟（若未通过 WithRateLimit 设置）
+	if c.rateLimiter == nil {
+		c.rateLimiter = rate.NewLimiter(rate.Limit(DefaultRateLimitPerMinute)/60.0, DefaultRateLimitBurst)
+	}
 
+	c.sem = semaphore.NewWeighted(c.maxConcurrent)
 	return c
 }
 
@@ -244,6 +289,13 @@ func (c *Client) Query(ctx context.Context, apiName string, params map[string]in
 	}
 	defer c.sem.Release(1)
 
+	// 方案 B：全局限流，在发请求前等待令牌
+	if c.rateLimiter != nil {
+		if err := c.rateLimiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limiter wait: %w", err)
+		}
+	}
+
 	// Build request
 	reqBody := tushareRequest{
 		APIName: apiName,
@@ -269,6 +321,12 @@ func (c *Client) Query(ctx context.Context, apiName string, params map[string]in
 
 		lastErr = err
 
+		// 触发了 API 限流时打警告日志
+		if dsErr, ok := err.(*datasource.DataSourceError); ok && dsErr.Code == datasource.ErrCodeRateLimited {
+			logrus.Warnf("⚠️ [Tushare] 触发限流: api=%s, 第 %d/%d 次重试后将退避再试, msg=%s",
+				reqBody.APIName, i+1, c.retryCount+1, dsErr.Message)
+		}
+
 		// Check if error is retryable
 		if dsErr, ok := err.(*datasource.DataSourceError); ok {
 			switch dsErr.Code {
@@ -281,10 +339,20 @@ func (c *Client) Query(ctx context.Context, apiName string, params map[string]in
 
 		// Wait before retry
 		if i < c.retryCount {
+			backoff := c.retryDelay
+			// 方案 A：限流错误时使用长退避 + 随机抖动，等待“每分钟”窗口重置
+			if dsErr, ok := err.(*datasource.DataSourceError); ok && dsErr.Code == datasource.ErrCodeRateLimited {
+				jitter := c.rateLimitBackoffJitter
+				if jitter > 0 {
+					backoff = c.rateLimitBackoff + time.Duration(rand.Int63n(int64(jitter)))
+				} else {
+					backoff = c.rateLimitBackoff
+				}
+			}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(c.retryDelay):
+			case <-time.After(backoff):
 			}
 		}
 	}

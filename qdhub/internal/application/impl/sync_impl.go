@@ -762,6 +762,14 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		progress.TaskCount = wfStatus.TaskCount
 		progress.CompletedTask = wfStatus.CompletedTask
 		progress.FailedTask = wfStatus.FailedTask
+		progress.RunningCount = wfStatus.RunningCount
+		progress.PendingCount = wfStatus.PendingCount
+		progress.RunningTaskIDs = wfStatus.RunningTaskIDs
+		progress.PendingTaskIDs = wfStatus.PendingTaskIDs
+		// When task engine returns 0 task count (e.g. dynamic workflow), use execution's SyncedAPIs as expected count
+		if progress.TaskCount == 0 && len(exec.SyncedAPIs) > 0 {
+			progress.TaskCount = len(exec.SyncedAPIs)
+		}
 
 		// Prefer workflow FinishedAt if execution.FinishedAt is nil
 		if progress.FinishedAt == nil && wfStatus.FinishedAt != nil {
@@ -844,4 +852,3 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 }
 
 // ==================== Built-in Workflow Execution (Legacy) ====================
-

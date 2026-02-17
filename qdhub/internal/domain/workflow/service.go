@@ -39,15 +39,19 @@ type ProgressCalculator interface {
 
 // WorkflowStatus represents the detailed status of a workflow instance.
 type WorkflowStatus struct {
-	InstanceID    string            `json:"instance_id"` // Task Engine uses string ID
-	Status        string            `json:"status"`     // Task Engine status string
-	Progress      float64           `json:"progress"`
-	TaskCount     int               `json:"task_count"`
-	CompletedTask int               `json:"completed_task"`
-	FailedTask    int               `json:"failed_task"`
-	StartedAt     shared.Timestamp `json:"started_at"`
-	FinishedAt    *shared.Timestamp `json:"finished_at,omitempty"`
-	ErrorMessage  *string           `json:"error_message,omitempty"`
+	InstanceID     string             `json:"instance_id"` // Task Engine uses string ID
+	Status         string             `json:"status"`      // Task Engine status string
+	Progress       float64            `json:"progress"`
+	TaskCount      int                `json:"task_count"`
+	CompletedTask  int                `json:"completed_task"`
+	FailedTask     int                `json:"failed_task"`
+	RunningCount   int                `json:"running_count"`   // 正在运行的任务数（来自引擎快照，0 时也返回以便与内部一致）
+	PendingCount   int                `json:"pending_count"`   // 挂起的任务数（来自引擎快照，0 时也返回）
+	RunningTaskIDs []string           `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
+	PendingTaskIDs []string           `json:"pending_task_ids,omitempty"`  // 挂起的任务 ID（存储可能滞后）
+	StartedAt      shared.Timestamp   `json:"started_at"`
+	FinishedAt     *shared.Timestamp  `json:"finished_at,omitempty"`
+	ErrorMessage   *string            `json:"error_message,omitempty"`
 }
 
 // ==================== 外部依赖接口（领域定义，基础设施实现）====================

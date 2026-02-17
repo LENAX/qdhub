@@ -140,10 +140,14 @@ type SyncExecutionProgress struct {
 	Status sync.ExecStatus
 
 	// Workflow progress
-	Progress      float64
-	TaskCount     int
-	CompletedTask int
-	FailedTask    int
+	Progress       float64
+	TaskCount      int
+	CompletedTask  int
+	FailedTask     int
+	RunningCount   int      // 正在运行的任务数（来自引擎快照时与内部一致）
+	PendingCount   int      // 挂起的任务数（来自引擎快照时与内部一致）
+	RunningTaskIDs []string // 正在运行的任务 ID（存储可能滞后）
+	PendingTaskIDs []string // 挂起的任务 ID（存储可能滞后）
 
 	// Execution result
 	RecordCount  int64

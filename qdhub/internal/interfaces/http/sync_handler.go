@@ -451,6 +451,10 @@ type SyncPlanProgressResponse struct {
 	TaskCount          int        `json:"task_count"`
 	CompletedTask      int        `json:"completed_task"`
 	FailedTask         int        `json:"failed_task"`
+	RunningCount       int        `json:"running_count"`   // 正在运行的任务数（0 时也返回，与内部一致）
+	PendingCount       int        `json:"pending_count"`   // 挂起的任务数（0 时也返回）
+	RunningTaskIDs     []string   `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
+	PendingTaskIDs     []string   `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
 	RecordCount        int64      `json:"record_count"`
 	ErrorMessage       *string    `json:"error_message,omitempty"`
 	StartedAt          *time.Time `json:"started_at,omitempty"`
@@ -472,6 +476,10 @@ func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanPro
 		TaskCount:          p.TaskCount,
 		CompletedTask:      p.CompletedTask,
 		FailedTask:         p.FailedTask,
+		RunningCount:       p.RunningCount,
+		PendingCount:       p.PendingCount,
+		RunningTaskIDs:     p.RunningTaskIDs,
+		PendingTaskIDs:     p.PendingTaskIDs,
 		RecordCount:        p.RecordCount,
 		ErrorMessage:       p.ErrorMessage,
 	}
