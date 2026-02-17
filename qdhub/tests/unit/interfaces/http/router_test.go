@@ -157,7 +157,7 @@ func TestNewServer(t *testing.T) {
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, "",
+		nil, nil, nil, "",
 	)
 
 	assert.NotNil(t, server)
@@ -174,7 +174,7 @@ func TestHealthCheck(t *testing.T) {
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, "",
+		nil, nil, nil, "",
 	)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
@@ -196,7 +196,7 @@ func TestServerShutdown(t *testing.T) {
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, "",
+		nil, nil, nil, "",
 	)
 
 	// Test shutdown without starting
@@ -226,7 +226,7 @@ func TestAPIRoutes(t *testing.T) {
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, "",
+		nil, nil, nil, "",
 	)
 
 	// Test that all routes are registered

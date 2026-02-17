@@ -45,11 +45,12 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler      *AuthHandler
-	metadataHandler  *MetadataHandler
-	dataStoreHandler *DataStoreHandler
-	syncHandler      *SyncHandler
-	workflowHandler  *WorkflowHandler
+	authHandler       *AuthHandler
+	metadataHandler   *MetadataHandler
+	dataStoreHandler  *DataStoreHandler
+	syncHandler       *SyncHandler
+	workflowHandler   *WorkflowHandler
+	analysisHandler   *AnalysisHandler
 
 	// Auth components
 	jwtManager *authinfra.JWTManager
@@ -61,6 +62,7 @@ type Server struct {
 
 // NewServer creates a new HTTP server with the given configuration and services.
 // debugDBDSN 可选，非空时注册 GET /api/v1/debug/database 返回当前连接的 DB DSN，用于 e2e 排查连错库。
+// analysisSvc 可选，nil 时不注册 /analysis 路由。
 func NewServer(
 	config ServerConfig,
 	authSvc contracts.AuthApplicationService,
@@ -68,6 +70,7 @@ func NewServer(
 	dataStoreSvc contracts.DataStoreApplicationService,
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
+	analysisSvc contracts.AnalysisApplicationService,
 	jwtManager *authinfra.JWTManager,
 	enforcer *casbin.Enforcer,
 	debugDBDSN string,
@@ -90,6 +93,9 @@ func NewServer(
 		jwtManager:       jwtManager,
 		enforcer:         enforcer,
 		debugDBDSN:       debugDBDSN,
+	}
+	if analysisSvc != nil {
+		server.analysisHandler = NewAnalysisHandler(analysisSvc)
 	}
 
 	// Setup routes
@@ -144,6 +150,9 @@ func (s *Server) setupRoutes() {
 			s.dataStoreHandler.RegisterRoutes(protected)
 			s.syncHandler.RegisterRoutes(protected)
 			s.workflowHandler.RegisterRoutes(protected)
+			if s.analysisHandler != nil {
+				s.analysisHandler.RegisterRoutes(protected)
+			}
 		}
 	}
 }

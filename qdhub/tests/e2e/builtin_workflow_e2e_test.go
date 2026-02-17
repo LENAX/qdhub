@@ -43,6 +43,7 @@ import (
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
+	analysisinfra "qdhub/internal/infrastructure/analysis"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -513,8 +514,9 @@ type builtinWorkflowE2EContext struct {
 	syncAppService      contracts.SyncApplicationService      // 同步应用服务
 	dsRegistry          *datasource.Registry
 	quantDBAdapter      *mockQuantDBAdapter
-	duckDBAdapter       *duckdb.Adapter // 真实模式下使用
+	duckDBAdapter       *duckdb.Adapter // 真实模式或 Analysis E2E 时使用
 	taskEngineAdapter   workflow.TaskEngineAdapter
+	analysisAppService  contracts.AnalysisApplicationService // 有 QuantDB 时创建，供 Analysis E2E 使用
 	cleanup             func()
 }
 
@@ -541,12 +543,18 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		require.NoError(t, err, "连接 DuckDB 失败")
 		t.Logf("✅ DuckDB 已连接: %s", config.DuckDBPath)
 	} else {
-		// Mock 模式：使用临时数据库
+		// Mock 模式：使用临时数据库；为 Analysis E2E 与同步共用，创建临时 DuckDB
 		tmpfile, err := os.CreateTemp("", "builtin_workflow_e2e_*.db")
 		require.NoError(t, err)
 		tmpfile.Close()
 		dsn = tmpfile.Name()
 		removeSQLiteOnCleanup = true
+		// Mock 模式下也创建临时 DuckDB，供同步写入与 Analysis E2E 读取
+		config.DuckDBPath = filepath.Join(os.TempDir(), fmt.Sprintf("e2e_quant_mock_%d.duckdb", time.Now().UnixNano()))
+		duckDBAdapter = duckdb.NewAdapter(config.DuckDBPath)
+		err = duckDBAdapter.Connect(ctx)
+		require.NoError(t, err, "Mock 模式连接临时 DuckDB 失败")
+		t.Logf("✅ Mock 模式 DuckDB 已连接: %s", config.DuckDBPath)
 	}
 
 	db, err := persistence.NewDB(dsn)
@@ -607,8 +615,8 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		DataSourceRegistry: dsRegistry,
 		MetadataRepo:       metadataRepo,
 	}
-	// 真实模式下注册 QuantDB adapter
-	if config.IsRealMode && duckDBAdapter != nil {
+	// 有 DuckDB 时注册（真实模式或 Mock 模式 Analysis E2E）
+	if duckDBAdapter != nil {
 		taskEngineDeps.QuantDB = duckDBAdapter
 		t.Logf("✅ 已注册 QuantDB (DuckDB Adapter)")
 	}
@@ -665,6 +673,21 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		uowImpl,
 	)
 
+	// 13. 有 QuantDB 时创建 Analysis 应用服务（含兜底），供 Analysis E2E 使用
+	var analysisAppService contracts.AnalysisApplicationService
+	if duckDBAdapter != nil {
+		var readers *analysisinfra.Readers
+		if dsRegistry != nil && metadataRepo != nil {
+			tokenResolver := &analysisinfra.TokenResolverImpl{Repo: metadataRepo}
+			fallback := analysisinfra.NewFallbackProvider("tushare", dsRegistry, tokenResolver)
+			readers = analysisinfra.NewReadersWithFallback(duckDBAdapter, fallback)
+		} else {
+			readers = analysisinfra.NewReaders(duckDBAdapter)
+		}
+		analysisAppService = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
+		t.Logf("✅ Analysis 应用服务已创建（含兜底）")
+	}
+
 	cleanup := func() {
 		eng.Stop()
 		if duckDBAdapter != nil {
@@ -693,6 +716,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		quantDBAdapter:      newMockQuantDBAdapter(),
 		duckDBAdapter:       duckDBAdapter,
 		taskEngineAdapter:   taskEngineAdapter,
+		analysisAppService:  analysisAppService,
 		cleanup:             cleanup,
 	}
 }

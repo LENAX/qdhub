@@ -26,6 +26,7 @@ import (
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
+	analysisinfra "qdhub/internal/infrastructure/analysis"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
@@ -152,6 +153,7 @@ type Container struct {
 	SyncSvc      contracts.SyncApplicationService
 	WorkflowSvc  contracts.WorkflowApplicationService
 	AuthSvc      contracts.AuthApplicationService
+	AnalysisSvc contracts.AnalysisApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
@@ -757,6 +759,19 @@ func (c *Container) initHTTPServer() error {
 		Mode:         c.config.ServerMode,
 	}
 
+	// 当已初始化 QuantDB 时，创建分析应用服务并注册 /analysis 路由
+	if c.QuantDBAdapter != nil {
+		var readers *analysisinfra.Readers
+		if c.DataSourceRegistry != nil && c.MetadataRepo != nil {
+			tokenResolver := &analysisinfra.TokenResolverImpl{Repo: c.MetadataRepo}
+			fallback := analysisinfra.NewFallbackProvider("tushare", c.DataSourceRegistry, tokenResolver)
+			readers = analysisinfra.NewReadersWithFallback(c.QuantDBAdapter, fallback)
+		} else {
+			readers = analysisinfra.NewReaders(c.QuantDBAdapter)
+		}
+		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
+	}
+
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
@@ -764,6 +779,7 @@ func (c *Container) initHTTPServer() error {
 		c.DataStoreSvc,
 		c.SyncSvc,
 		c.WorkflowSvc,
+		c.AnalysisSvc,
 		c.JWTManager,
 		c.Enforcer,
 		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库
