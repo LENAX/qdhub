@@ -42,7 +42,7 @@ func TestTaskEngineAdapter_Creation(t *testing.T) {
 	eng := createTestEngine(t)
 	defer eng.Stop()
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	if adapter == nil {
 		t.Fatal("Expected adapter to be non-nil")
 	}
@@ -58,7 +58,7 @@ func TestTaskEngineAdapter_SubmitWorkflow(t *testing.T) {
 		t.Fatalf("Failed to start engine: %v", err)
 	}
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 
 	t.Run("Nil definition", func(t *testing.T) {
 		_, err := adapter.SubmitWorkflow(ctx, nil, nil)
@@ -109,7 +109,7 @@ func TestTaskEngineAdapter_RegisterWorkflow(t *testing.T) {
 		t.Fatalf("Failed to start engine: %v", err)
 	}
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 
 	t.Run("Nil definition", func(t *testing.T) {
 		err := adapter.RegisterWorkflow(ctx, nil)
@@ -133,7 +133,7 @@ func TestTaskEngineAdapter_UnregisterWorkflow(t *testing.T) {
 	eng := createTestEngine(t)
 	defer eng.Stop()
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 
 	// UnregisterWorkflow is a no-op, should not error
 	err := adapter.UnregisterWorkflow(ctx, "test-id")
@@ -152,7 +152,7 @@ func TestTaskEngineAdapter_InstanceControl(t *testing.T) {
 		t.Fatalf("Failed to start engine: %v", err)
 	}
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 
 	// Create and register workflow first
 	def := workflow.NewWorkflowDefinition("TestWorkflow", "Test", workflow.WfCategorySync, "yaml: test", false)
@@ -195,7 +195,7 @@ func TestTaskEngineAdapter_GetInstanceStatus(t *testing.T) {
 		t.Fatalf("Failed to start engine: %v", err)
 	}
 
-	adapter := taskengine.NewTaskEngineAdapter(eng)
+	adapter := taskengine.NewTaskEngineAdapter(eng, 0)
 
 	// Create and register workflow first
 	def := workflow.NewWorkflowDefinition("TestWorkflow", "Test", workflow.WfCategorySync, "yaml: test", false)

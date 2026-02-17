@@ -116,6 +116,9 @@ func (m *FullMockSyncService) UpdatePlanSchedule(ctx context.Context, planID sha
 func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req contracts.ExecutionCallbackRequest) error {
 	return nil
 }
+func (m *FullMockSyncService) HandleExecutionCallbackByWorkflowInstance(ctx context.Context, workflowInstID string, success bool, recordCount int64, errMsg *string) error {
+	return nil
+}
 
 func (m *FullMockSyncService) GetExecutionProgress(ctx context.Context, executionID shared.ID) (*contracts.SyncExecutionProgress, error) {
 	return &contracts.SyncExecutionProgress{}, nil
@@ -150,10 +153,11 @@ func TestNewServer(t *testing.T) {
 
 	server := httpapi.NewServer(
 		config,
-		&FullMockMetadataService{},
+		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
+		nil, nil, "",
 	)
 
 	assert.NotNil(t, server)
@@ -166,10 +170,11 @@ func TestHealthCheck(t *testing.T) {
 
 	server := httpapi.NewServer(
 		config,
-		&FullMockMetadataService{},
+		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
+		nil, nil, "",
 	)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
@@ -187,10 +192,11 @@ func TestServerShutdown(t *testing.T) {
 
 	server := httpapi.NewServer(
 		config,
-		&FullMockMetadataService{},
+		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
+		nil, nil, "",
 	)
 
 	// Test shutdown without starting
@@ -216,10 +222,11 @@ func TestAPIRoutes(t *testing.T) {
 
 	server := httpapi.NewServer(
 		config,
-		&FullMockMetadataService{},
+		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
+		nil, nil, "",
 	)
 
 	// Test that all routes are registered

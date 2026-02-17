@@ -10,14 +10,17 @@ import (
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
+	"github.com/casbin/casbin/v2"
 	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
@@ -140,6 +143,7 @@ type Container struct {
 	// Scheduler (backward compatibility: direct field access)
 	CronCalculator     sync.CronScheduleCalculator
 	PlanScheduler      sync.PlanScheduler
+	planExecutor       *scheduler.ScheduledPlanExecutor
 	DependencyResolver sync.DependencyResolver
 
 	// Application Services (backward compatibility: direct field access)
@@ -147,6 +151,7 @@ type Container struct {
 	DataStoreSvc contracts.DataStoreApplicationService
 	SyncSvc      contracts.SyncApplicationService
 	WorkflowSvc  contracts.WorkflowApplicationService
+	AuthSvc      contracts.AuthApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
@@ -156,6 +161,12 @@ type Container struct {
 
 	// Unit of Work for transaction management
 	UoW contracts.UnitOfWork
+
+	// Auth components
+	UserRepo     auth.UserRepository
+	UserRoleRepo auth.UserRoleRepository
+	JWTManager   *authinfra.JWTManager
+	Enforcer     *casbin.Enforcer
 }
 
 // Config holds container configuration.
@@ -179,6 +190,11 @@ type Config struct {
 	// QuantDB (DuckDB) - 默认数据存储路径
 	// 如果设置，将在 Task Engine 初始化时创建 QuantDB adapter
 	DefaultDuckDBPath string
+
+	// Auth configuration
+	JWTSecret         string        // JWT 签名密钥
+	JWTExpiration     time.Duration // Access token 过期时间
+	RefreshExpiration time.Duration // Refresh token 过期时间
 }
 
 // DefaultConfig returns default configuration.
@@ -189,9 +205,12 @@ func DefaultConfig() Config {
 		ServerHost:               "0.0.0.0",
 		ServerPort:               8080,
 		ServerMode:               "release",
-		TaskEngineMaxConcurrency: 10,
-		TaskEngineTimeout:        60,
+		TaskEngineMaxConcurrency: 100,
+		TaskEngineTimeout:        120, // 单任务执行超时（秒），元数据爬取等可能较慢
 		MigrationPath:            "./migrations/001_init_schema.up.sql",
+		JWTSecret:                "change-me-in-production",
+		JWTExpiration:            24 * time.Hour,
+		RefreshExpiration:        7 * 24 * time.Hour,
 	}
 }
 
@@ -236,9 +255,19 @@ func (c *Container) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize unit of work: %w", err)
 	}
 
+	// Step 5.6: Initialize auth components
+	if err := c.initAuth(); err != nil {
+		return fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
 	// Step 6: Initialize application services
 	if err := c.initApplicationServices(); err != nil {
 		return fmt.Errorf("failed to initialize application services: %w", err)
+	}
+
+	// Step 6.5: Restore enabled plans to scheduler (after restart)
+	if err := c.restoreScheduledPlans(ctx); err != nil {
+		logrus.Warnf("Warning: failed to restore scheduled plans: %v", err)
 	}
 
 	// Step 7: Initialize built-in workflows
@@ -397,7 +426,70 @@ func (c *Container) runMigrations() error {
 		return fmt.Errorf("failed to run migration: %w", err)
 	}
 
+	// Run auth migration
+	if err := c.runAuthMigration(); err != nil {
+		return fmt.Errorf("failed to run auth migration: %w", err)
+	}
+
+	// Seed default admin user if not exists
+	if err := c.runDefaultAdminSeed(); err != nil {
+		return fmt.Errorf("failed to seed default admin: %w", err)
+	}
+
 	logrus.Info("Database migrations applied successfully")
+	return nil
+}
+
+// runAuthMigration runs the auth schema migration based on database type.
+func (c *Container) runAuthMigration() error {
+	var migrationFile string
+	switch c.config.DBDriver {
+	case "postgres":
+		migrationFile = "./migrations/002_auth_schema.postgres.up.sql"
+	case "mysql":
+		migrationFile = "./migrations/002_auth_schema.mysql.up.sql"
+	default:
+		migrationFile = "./migrations/002_auth_schema.sqlite.up.sql"
+	}
+
+	migrationSQL, err := os.ReadFile(migrationFile)
+	if err != nil {
+		// Migration file might not exist, skip silently
+		logrus.Warnf("Auth migration file not found: %s", migrationFile)
+		return nil
+	}
+
+	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
+		return fmt.Errorf("failed to run auth migration: %w", err)
+	}
+
+	logrus.Info("Auth migration applied successfully")
+	return nil
+}
+
+// runDefaultAdminSeed runs the default admin user seed migration based on database type.
+func (c *Container) runDefaultAdminSeed() error {
+	var migrationFile string
+	switch c.config.DBDriver {
+	case "postgres":
+		migrationFile = "./migrations/006_seed_default_admin.postgres.up.sql"
+	case "mysql":
+		migrationFile = "./migrations/006_seed_default_admin.mysql.up.sql"
+	default:
+		migrationFile = "./migrations/006_seed_default_admin.sqlite.up.sql"
+	}
+
+	migrationSQL, err := os.ReadFile(migrationFile)
+	if err != nil {
+		logrus.Warnf("Default admin seed file not found: %s", migrationFile)
+		return nil
+	}
+
+	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
+		return fmt.Errorf("failed to run default admin seed: %w", err)
+	}
+
+	logrus.Info("Default admin seed applied successfully")
 	return nil
 }
 
@@ -416,6 +508,11 @@ func (c *Container) initRepositories() error {
 
 	// Metadata repository (for task engine dependencies)
 	c.MetadataRepo = repository.NewMetadataRepository(c.DB)
+
+	// Auth repositories
+	userRepoImpl := repository.NewUserRepository(c.DB)
+	c.UserRepo = userRepoImpl
+	c.UserRoleRepo = userRepoImpl // UserRepositoryImpl implements both interfaces
 
 	logrus.Info("Repositories initialized")
 	return nil
@@ -439,6 +536,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create task engine: %w", err)
 	}
+	eng.SetInstanceManagerVersion(engine.InstanceManagerV3)
 
 	// Start Task Engine
 	if err := eng.Start(ctx); err != nil {
@@ -484,7 +582,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	}
 
 	// Create Task Engine adapter and workflow factory
-	c.TaskEngineAdapter = taskengine.NewTaskEngineAdapter(eng)
+	c.TaskEngineAdapter = taskengine.NewTaskEngineAdapter(eng, c.config.TaskEngineMaxConcurrency)
 	c.WorkflowFactory = taskengine.GetWorkflowFactory(eng)
 
 	// Create WorkflowExecutor (domain service for executing built-in workflows)
@@ -498,7 +596,9 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 // initScheduler initializes the scheduler (scheduler module).
 func (c *Container) initScheduler() error {
 	c.CronCalculator = scheduler.NewCronSchedulerCalculatorAdapter()
-	c.PlanScheduler = scheduler.NewCronScheduler(nil) // TODO: Add plan trigger callback
+
+	c.planExecutor = scheduler.NewScheduledPlanExecutor()
+	c.PlanScheduler = scheduler.NewCronScheduler(c.planExecutor)
 	c.PlanScheduler.Start()
 
 	// Initialize dependency resolver
@@ -512,6 +612,50 @@ func (c *Container) initScheduler() error {
 func (c *Container) initUnitOfWork() error {
 	c.UoW = uow.NewUnitOfWork(c.DB)
 	logrus.Info("Unit of Work initialized")
+	return nil
+}
+
+// initAuth initializes authentication and authorization components.
+func (c *Container) initAuth() error {
+	// Initialize JWT manager
+	c.JWTManager = authinfra.NewJWTManager(
+		c.config.JWTSecret,
+		c.config.JWTExpiration,
+		c.config.RefreshExpiration,
+	)
+
+	// Determine database type
+	var dbType persistence.DBType
+	switch c.config.DBDriver {
+	case "postgres":
+		dbType = persistence.DBTypePostgres
+	case "mysql":
+		dbType = persistence.DBTypeMySQL
+	default:
+		dbType = persistence.DBTypeSQLite
+	}
+
+	// Initialize Casbin enforcer
+	enforcer, err := authinfra.NewCasbinEnforcer(c.DB.DB, dbType)
+	if err != nil {
+		return fmt.Errorf("failed to create casbin enforcer: %w", err)
+	}
+	c.Enforcer = enforcer
+
+	// Initialize default policies (only if casbin_rule table is empty)
+	// Check if policies exist by trying to get all policies
+	allPolicies, err := enforcer.GetPolicy()
+	if err != nil {
+		return fmt.Errorf("failed to get policies: %w", err)
+	}
+	if len(allPolicies) == 0 {
+		if err := authinfra.InitializeDefaultPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to initialize default policies: %w", err)
+		}
+		logrus.Info("Default RBAC policies initialized")
+	}
+
+	logrus.Info("Auth components initialized")
 	return nil
 }
 
@@ -546,7 +690,44 @@ func (c *Container) initApplicationServices() error {
 		c.UoW,
 	)
 
+	// Auth service
+	passwordHasher := auth.NewBcryptPasswordHasher(0) // Use default cost
+	c.AuthSvc = impl.NewAuthApplicationService(
+		c.UserRepo,
+		c.UserRoleRepo,
+		passwordHasher,
+		c.JWTManager,
+	)
+
+	// Deferred injection: executor needs SyncSvc (breaks init cycle)
+	c.planExecutor.SetSyncService(c.SyncSvc)
+
+	// 注册 SyncCallbackInvoker，供 DataSyncCompleteHandler 触发 execution 回调（Plan.MarkCompleted）
+	taskengine.RegisterSyncCallbackInvoker(c.TaskEngine, c.SyncSvc)
+
 	logrus.Info("Application services initialized")
+	return nil
+}
+
+// restoreScheduledPlans re-registers enabled plans with cron expression to the scheduler.
+func (c *Container) restoreScheduledPlans(ctx context.Context) error {
+	plans, err := c.SyncPlanRepo.GetEnabledPlans()
+	if err != nil {
+		return fmt.Errorf("get enabled plans: %w", err)
+	}
+
+	var restored int
+	for _, plan := range plans {
+		if plan.CronExpression != nil && *plan.CronExpression != "" {
+			if err := c.PlanScheduler.SchedulePlan(plan.ID.String(), *plan.CronExpression); err != nil {
+				logrus.Warnf("Failed to restore plan %s: %v", plan.ID, err)
+				continue
+			}
+			restored++
+		}
+	}
+
+	logrus.Infof("Restored %d scheduled plan(s)", restored)
 	return nil
 }
 
@@ -578,10 +759,14 @@ func (c *Container) initHTTPServer() error {
 
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
+		c.AuthSvc,
 		c.MetadataSvc,
 		c.DataStoreSvc,
 		c.SyncSvc,
 		c.WorkflowSvc,
+		c.JWTManager,
+		c.Enforcer,
+		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库
 	)
 
 	logrus.Info("HTTP server initialized")

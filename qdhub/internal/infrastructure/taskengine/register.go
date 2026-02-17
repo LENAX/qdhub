@@ -27,6 +27,9 @@ type Dependencies struct {
 	// QuantDB is the quant database adapter (required for table creation jobs).
 	// This interface provides methods to create tables in the target database (DuckDB, ClickHouse, etc.)
 	QuantDB datastore.QuantDB
+	// SyncCallbackInvoker 可选；DataSyncCompleteHandler 用于触发 execution 回调（Plan.MarkCompleted）。
+	// 需实现 HandleExecutionCallbackByWorkflowInstance(ctx, workflowInstID, success, recordCount, errMsg).
+	SyncCallbackInvoker interface{}
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -61,6 +64,7 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"SyncAPIData", jobs.SyncAPIDataJob, "同步单个 API 数据"},
 		{"GenerateDataSyncSubTasks", jobs.GenerateDataSyncSubTasksJob, "生成数据同步子任务（模板任务）"},
 		{"DeleteSyncedData", jobs.DeleteSyncedDataJob, "删除同步的数据（用于回滚）"},
+		{"NotifySyncComplete", jobs.NotifySyncCompleteJob, "批量同步完成占位（回调在 Handler 中执行）"},
 
 		// ==================== 增量实时同步 Jobs ====================
 		{"GetSyncCheckpoint", jobs.GetSyncCheckpointJob, "获取同步检查点"},
@@ -168,8 +172,22 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 		registry.RegisterDependencyWithKey("QuantDB", deps.QuantDB)
 	}
 
+	// Register SyncCallbackInvoker (optional; for DataSyncCompleteHandler → execution callback)
+	if deps.SyncCallbackInvoker != nil {
+		registry.RegisterDependencyWithKey("SyncCallbackInvoker", deps.SyncCallbackInvoker)
+	}
+
 	// Register engine itself as dependency (for template tasks)
 	registry.RegisterDependencyWithKey("Engine", eng)
+}
+
+// RegisterSyncCallbackInvoker 在 SyncSvc 创建后注册 execution 回调注入（DataSyncCompleteHandler 使用）。
+// 应在 initApplicationServices 之后调用。
+func RegisterSyncCallbackInvoker(eng *engine.Engine, invoker interface{}) {
+	if eng == nil || invoker == nil {
+		return
+	}
+	eng.GetRegistry().RegisterDependencyWithKey("SyncCallbackInvoker", invoker)
 }
 
 // Initialize initializes the task engine with all QDHub job functions and handlers.

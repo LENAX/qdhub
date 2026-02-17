@@ -403,17 +403,152 @@ func extractFieldsFromUpstream(tc *task.TaskContext) []metadata.FieldMeta {
 }
 
 // extractAPIMetadataFromUpstream 从子任务结果中提取 API 元数据列表
-// 使用 Task Engine v1.0.6+ 的子任务结果聚合 API
+// 优先级：(1) 当前任务的 ExtractMapsFromSubTasks (2) 上游模板任务 GetUpstreamResult("FetchAPIDetails") (3) _cached_* 参数
 func extractAPIMetadataFromUpstream(tc *task.TaskContext) []map[string]interface{} {
-	// 使用 ExtractMapsFromSubTasks 直接提取 api_metadata 字段
-	// Task Engine 会自动聚合模板任务的子任务结果
+	// 1. 当前任务若有子任务，直接提取（SaveAllMetadata 无子任务，子任务属于 FetchAPIDetails）
 	apiMetadataMaps := tc.ExtractMapsFromSubTasks("api_metadata")
 	if len(apiMetadataMaps) > 0 {
-		logrus.Debugf("extractAPIMetadataFromUpstream: 提取到 %d 个 api_metadata", len(apiMetadataMaps))
+		logrus.Debugf("extractAPIMetadataFromUpstream: ExtractMapsFromSubTasks 提取到 %d 个 api_metadata", len(apiMetadataMaps))
+		return apiMetadataMaps
+	}
+
+	// 2. 通过 TaskContext 获取上游模板任务 FetchAPIDetails 的结果（含子任务聚合时由引擎填入）
+	upstream := tc.GetUpstreamResult("FetchAPIDetails")
+	if upstream != nil {
+		apiMetadataMaps = extractAPIMetadataFromMap(upstream)
+		if len(apiMetadataMaps) > 0 {
+			logrus.Debugf("extractAPIMetadataFromUpstream: GetUpstreamResult(FetchAPIDetails) 提取到 %d 个 api_metadata", len(apiMetadataMaps))
+			return apiMetadataMaps
+		}
+		logrus.Warnf("extractAPIMetadataFromUpstream: GetUpstreamResult(FetchAPIDetails) 有值但未解析出 api_metadata，keys=%v（需含 subtask_results 或 sub_tasks 且每项有 result.api_metadata 或 api_metadata）", upstreamResultKeys(upstream))
+	}
+
+	// 3. 回退：从 _cached_* 参数中收集（引擎将上游结果注入 Params 时）
+	apiMetadataMaps = extractAPIMetadataFromCachedParams(tc)
+	if len(apiMetadataMaps) > 0 {
+		logrus.Debugf("extractAPIMetadataFromUpstream: 从 _cached_* 回退提取到 %d 个 api_metadata", len(apiMetadataMaps))
 		return apiMetadataMaps
 	}
 
 	return nil
+}
+
+// extractAPIMetadataFromMap 从单个 map 中提取 api_metadata 列表（支持 subtask_results / sub_tasks 结构）
+func extractAPIMetadataFromMap(m map[string]interface{}) []map[string]interface{} {
+	for _, key := range []string{"subtask_results", "sub_tasks"} {
+		raw := m[key]
+		if raw == nil {
+			continue
+		}
+		if out := extractAPIMetadataFromSlice(raw); len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}
+
+// extractAPIMetadataFromSlice 从 slice 中提取 api_metadata，支持 []interface{} 与 []map[string]interface{}（引擎可能传入后者）
+func extractAPIMetadataFromSlice(raw interface{}) []map[string]interface{} {
+	if raw == nil {
+		return nil
+	}
+	switch arr := raw.(type) {
+	case []interface{}:
+		return extractAPIMetadataFromResultEntries(arr)
+	case []map[string]interface{}:
+		out := make([]map[string]interface{}, 0, len(arr))
+		for _, entry := range arr {
+			if am := extractOneAPIMetadataFromEntry(entry); am != nil {
+				out = append(out, am)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// extractOneAPIMetadataFromEntry 从单条 entry（map）中提取 api_metadata
+func extractOneAPIMetadataFromEntry(entry map[string]interface{}) map[string]interface{} {
+	if result, _ := entry["result"].(map[string]interface{}); result != nil {
+		if am, _ := result["api_metadata"].(map[string]interface{}); am != nil {
+			return am
+		}
+	}
+	if am, _ := entry["api_metadata"].(map[string]interface{}); am != nil {
+		return am
+	}
+	return nil
+}
+
+// upstreamResultKeys 返回 map 的 keys，用于调试日志（避免打印大 value）
+func upstreamResultKeys(m map[string]interface{}) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// extractAPIMetadataFromCachedParams 从 tc.Params 的 _cached_* 中收集 api_metadata
+// 支持形态：
+//   (1) 直接 _cached_* = {"api_metadata": {...}}
+//   (2) 模板聚合 subtask_results[].result.api_metadata（Task Engine 注入子任务执行结果时使用）
+//   (3) 兼容 sub_tasks[].result.api_metadata（部分引擎用 sub_tasks 键名且元素含 result 时）
+func extractAPIMetadataFromCachedParams(tc *task.TaskContext) []map[string]interface{} {
+	var out []map[string]interface{}
+	for k, v := range tc.Params {
+		if !strings.HasPrefix(k, "_cached_") {
+			continue
+		}
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		am, ok := m["api_metadata"].(map[string]interface{})
+		if ok && am != nil {
+			out = append(out, am)
+			continue
+		}
+		// 模板任务聚合：subtask_results / sub_tasks（支持 []interface{} 与 []map[string]interface{}）
+		for _, key := range []string{"subtask_results", "sub_tasks"} {
+			if raw := m[key]; raw != nil {
+				extracted := extractAPIMetadataFromSlice(raw)
+				if len(extracted) > 0 {
+					out = append(out, extracted...)
+					break // 已从本 _cached_ 取到数据，跳过同 map 的另一个 key
+				}
+			}
+		}
+	}
+	return out
+}
+
+// extractAPIMetadataFromResultEntries 从子任务结果数组中提取 api_metadata 列表
+// 支持两种结构：(1) []{ result: { api_metadata } } (2) []{ api_metadata }（子任务返回值直接作为元素）
+func extractAPIMetadataFromResultEntries(arr []interface{}) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, item := range arr {
+		entry, _ := item.(map[string]interface{})
+		if entry == nil {
+			continue
+		}
+		// 结构 (1): entry.result.api_metadata
+		if result, _ := entry["result"].(map[string]interface{}); result != nil {
+			if am2, _ := result["api_metadata"].(map[string]interface{}); am2 != nil {
+				out = append(out, am2)
+				continue
+			}
+		}
+		// 结构 (2): entry.api_metadata（子任务返回值直接为元素时）
+		if am2, _ := entry["api_metadata"].(map[string]interface{}); am2 != nil {
+			out = append(out, am2)
+		}
+	}
+	return out
 }
 
 // convertToFieldMeta 将接口类型转换为 FieldMeta 切片

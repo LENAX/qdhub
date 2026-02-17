@@ -63,10 +63,36 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to execute api_sync_strategy migration: %v", err)
 	}
 
+	// Sync plan default execute params (for scheduled runs)
+	defaultParamsMigrationSQL, err := os.ReadFile("../../migrations/005_sync_plan_default_params.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 005_sync_plan_default_params migration: %v", err)
+	}
+	_, err = db.Exec(string(defaultParamsMigrationSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 005_sync_plan_default_params migration: %v", err)
+	}
+
 	cleanup := func() {
 		db.Close()
 		os.Remove(dsn)
 	}
 
 	return db, cleanup
+}
+
+// runAuthMigration runs the auth schema migration (002) on the given DB.
+// Used by HTTP integration tests that need JWT-protected routes.
+func runAuthMigration(t *testing.T, db *persistence.DB) {
+	t.Helper()
+	migrationSQL, err := os.ReadFile("../../migrations/002_auth_schema.sqlite.up.sql")
+	if err != nil {
+		t.Fatalf("Failed to read auth migration file: %v", err)
+	}
+	_, err = db.Exec(string(migrationSQL))
+	if err != nil {
+		t.Fatalf("Failed to execute auth migration: %v", err)
+	}
 }

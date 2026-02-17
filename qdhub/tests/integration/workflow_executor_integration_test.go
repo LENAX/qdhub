@@ -52,7 +52,7 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err, "Failed to create workflow repository")
 
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 
 	// Initialize built-in workflows
@@ -206,7 +206,7 @@ func TestWorkflowExecutor_ParameterMapping(t *testing.T) {
 	workflowRepo, err := repository.NewWorkflowDefinitionRepository(db)
 	require.NoError(t, err)
 
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 
 	builtInInitializer := impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter)

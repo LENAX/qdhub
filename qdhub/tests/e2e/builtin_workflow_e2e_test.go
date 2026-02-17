@@ -616,7 +616,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	require.NoError(t, err)
 
 	// 6. 创建 adapters
-	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng)
+	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 
 	// 7. 初始化内建 workflows
@@ -1144,7 +1144,7 @@ func TestE2E_BuiltinWorkflow_MetadataCrawlOnly(t *testing.T) {
 	t.Logf("MetadataCrawl Workflow 已提交: InstanceID=%s", instanceID)
 
 	// 等待并获取状态
-	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
+	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine, 0)
 	time.Sleep(2 * time.Second) // 等待一段时间让 workflow 执行
 
 	status, err := adapter.GetInstanceStatus(ctx, instanceID.String())
@@ -1186,7 +1186,7 @@ func TestE2E_BuiltinWorkflow_CreateTablesOnly(t *testing.T) {
 	t.Logf("CreateTables Workflow 已提交: InstanceID=%s", instanceID)
 
 	// 等待并获取状态
-	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine)
+	adapter := taskengine.NewTaskEngineAdapter(testCtx.engine, 0)
 	time.Sleep(2 * time.Second)
 
 	status, err := adapter.GetInstanceStatus(ctx, instanceID.String())

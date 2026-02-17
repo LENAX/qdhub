@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/sirupsen/logrus"
@@ -15,13 +16,19 @@ import (
 
 // TaskEngineAdapterImpl implements workflow.TaskEngineAdapter.
 type TaskEngineAdapterImpl struct {
-	engine *engine.Engine
+	engine                   *engine.Engine
+	defaultMaxConcurrentTask int // 每个工作流实例的最大并发任务数，注册时写入 workflow；0 表示使用 100
 }
 
 // NewTaskEngineAdapter creates a new TaskEngineAdapter implementation.
-func NewTaskEngineAdapter(eng *engine.Engine) workflow.TaskEngineAdapter {
+// defaultMaxConcurrentTask 为每个工作流实例的 MaxConcurrentTask，若 <=0 则使用 100（与 task-engine V3 默认 10 区分，提高同步吞吐）。
+func NewTaskEngineAdapter(eng *engine.Engine, defaultMaxConcurrentTask int) workflow.TaskEngineAdapter {
+	if defaultMaxConcurrentTask <= 0 {
+		defaultMaxConcurrentTask = 100
+	}
 	return &TaskEngineAdapterImpl{
-		engine: eng,
+		engine:                   eng,
+		defaultMaxConcurrentTask: defaultMaxConcurrentTask,
 	}
 }
 
@@ -97,14 +104,9 @@ func (a *TaskEngineAdapterImpl) CancelInstance(ctx context.Context, engineInstan
 }
 
 // GetInstanceStatus retrieves instance status from Task Engine.
+// Prefers engine.GetInstanceProgress (in-memory snapshot) when the instance is running; otherwise uses storage.
 func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineInstanceID string) (*workflow.WorkflowStatus, error) {
-	// Get status string from engine
-	statusStr, err := a.engine.GetWorkflowInstanceStatus(ctx, engineInstanceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow instance status: %w", err)
-	}
-
-	// Get workflow instance with tasks from aggregate repo
+	// Get workflow instance from aggregate repo (for StartedAt, EndTime, ErrorMessage, ID)
 	aggregateRepo := a.engine.GetAggregateRepo()
 	instance, taskInstances, err := aggregateRepo.GetWorkflowInstanceWithTasks(ctx, engineInstanceID)
 	if err != nil {
@@ -114,69 +116,99 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "workflow instance not found", nil)
 	}
 
-	// Calculate progress and determine final status
-	// Note: Task Engine may use different case for status (e.g., "FAILED" vs "Failed")
-	completedTasks := 0
-	failedTasks := 0
-	runningTasks := 0
-	for _, task := range taskInstances {
-		// Normalize status to uppercase for comparison
-		status := strings.ToUpper(task.Status)
-		switch status {
-		case "SUCCESS", "SKIPPED":
-			completedTasks++
-		case "FAILED":
-			failedTasks++
-		case "RUNNING", "PENDING":
-			runningTasks++
-		}
+	statusStr, err := a.engine.GetWorkflowInstanceStatus(ctx, engineInstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow instance status: %w", err)
 	}
 
-	progress := 0.0
-	finalStatus := statusStr
+	var progress float64
+	var finalStatus string
+	var completedTasks, failedTasks, taskCount int
+	var snapshotRunning, snapshotPending int
+	var hasSnapshot bool
 
-	if len(taskInstances) > 0 {
-		// Normal case: calculate progress from task instances
-		progress = float64(completedTasks) / float64(len(taskInstances)) * 100
-
-		// Determine final status based on task completion
-		totalDone := completedTasks + failedTasks
-		if totalDone == len(taskInstances) {
-			// All tasks are done
+	// Prefer in-memory progress from engine/manager when instance is running (handles dynamic workflows)
+	if snapshot, ok := a.engine.GetInstanceProgress(engineInstanceID); ok {
+		hasSnapshot = true
+		snapshotRunning = snapshot.Running
+		snapshotPending = snapshot.Pending
+		taskCount = snapshot.Total
+		completedTasks = snapshot.Completed
+		failedTasks = snapshot.Failed
+		if taskCount > 0 {
+			progress = float64(completedTasks+failedTasks) / float64(taskCount) * 100
+		}
+		done := completedTasks + failedTasks
+		if taskCount > 0 && done == taskCount {
 			if failedTasks > 0 {
 				finalStatus = "Failed"
 			} else {
 				finalStatus = "Success"
 			}
-		} else if failedTasks > 0 && runningTasks == 0 {
-			// Some tasks failed and no tasks are running
-			finalStatus = "Failed"
+			progress = 100.0
+		} else if snapshot.Running > 0 || snapshot.Pending > 0 {
+			finalStatus = "Running"
+		} else {
+			finalStatus = statusStr
+		}
+		// 若引擎已标记实例为终态，以引擎为准，避免 snapshot 未及时更新导致一直显示 99.x% / Running
+		statusUpper := strings.ToUpper(statusStr)
+		switch statusUpper {
+		case "SUCCESS", "COMPLETED", "FAILED", "ERROR", "TERMINATED", "CANCELLED":
+			finalStatus = statusStr
+			progress = 100.0
 		}
 	} else {
-		// FALLBACK: When taskInstances is empty (e.g., dynamically submitted workflows),
-		// use the workflow instance status from Task Engine directly.
-		// This handles the case where task instances are not persisted to storage.
-		logrus.Warnf("[GetInstanceStatus] instanceID=%s, taskInstances=0, using instance.Status=%s as fallback",
-			engineInstanceID, instance.Status)
+		// Fallback: compute from storage task instances or instance status
+		for _, task := range taskInstances {
+			sts := strings.ToUpper(task.Status)
+			switch sts {
+			case "SUCCESS", "SKIPPED":
+				completedTasks++
+			case "FAILED":
+				failedTasks++
+			}
+		}
+		taskCount = len(taskInstances)
+		finalStatus = statusStr
 
-		// Use instance.Status for both status and progress estimation
-		instanceStatusUpper := strings.ToUpper(instance.Status)
-		switch instanceStatusUpper {
-		case "SUCCESS", "COMPLETED":
-			finalStatus = "Success"
-			progress = 100.0
-		case "FAILED", "ERROR":
-			finalStatus = "Failed"
-			progress = 100.0
-		case "TERMINATED", "CANCELLED":
-			finalStatus = "Terminated"
-			progress = 100.0
-		case "RUNNING", "PENDING":
-			finalStatus = "Running"
-			// Keep progress at 0 since we can't calculate it without tasks
-		default:
-			// Use statusStr from engine as final fallback
-			finalStatus = statusStr
+		if taskCount > 0 {
+			progress = float64(completedTasks+failedTasks) / float64(taskCount) * 100
+			if completedTasks+failedTasks == taskCount {
+				if failedTasks > 0 {
+					finalStatus = "Failed"
+				} else {
+					finalStatus = "Success"
+				}
+			}
+			// 若引擎状态已是终态，进度按 100% 显示，避免存储滞后导致 99.x%
+			statusUpper := strings.ToUpper(statusStr)
+			if statusUpper == "SUCCESS" || statusUpper == "COMPLETED" || statusUpper == "FAILED" || statusUpper == "ERROR" || statusUpper == "TERMINATED" || statusUpper == "CANCELLED" {
+				progress = 100.0
+			}
+		} else {
+			instanceStatusUpper := strings.ToUpper(instance.Status)
+			switch instanceStatusUpper {
+			case "SUCCESS", "COMPLETED":
+				finalStatus = "Success"
+				progress = 100.0
+			case "FAILED", "ERROR":
+				finalStatus = "Failed"
+				progress = 100.0
+			case "TERMINATED", "CANCELLED":
+				finalStatus = "Terminated"
+				progress = 100.0
+			case "RUNNING", "PENDING":
+				finalStatus = "Running"
+				elapsed := time.Since(instance.StartTime)
+				progressPct := elapsed.Seconds() / 60 * 1.5
+				if progressPct > 95 {
+					progressPct = 95
+				}
+				progress = progressPct
+			default:
+				finalStatus = statusStr
+			}
 		}
 	}
 
@@ -184,10 +216,46 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		InstanceID:    instance.ID,
 		Status:        finalStatus,
 		Progress:      progress,
-		TaskCount:     len(taskInstances),
+		TaskCount:     taskCount,
 		CompletedTask: completedTasks,
 		FailedTask:    failedTasks,
 		StartedAt:     shared.Timestamp(instance.StartTime),
+	}
+
+	// 从 taskInstances（存储）收集正在运行和挂起的任务 ID。
+	// 注意：进度来自引擎内存快照，会实时更新；running/pending IDs 来自存储，Task Engine 可能
+	// 未在任务开始时写入 Running、或未在任务完成时及时更新存储，导致 running_ids 常为空、pending_ids 不随完成而减少。
+	var runningIDs, pendingIDs []string
+	for _, task := range taskInstances {
+		sts := strings.ToUpper(task.Status)
+		switch sts {
+		case "RUNNING":
+			runningIDs = append(runningIDs, task.ID)
+		case "PENDING", "READY":
+			pendingIDs = append(pendingIDs, task.ID)
+		}
+	}
+	if len(runningIDs) > 0 {
+		status.RunningTaskIDs = runningIDs
+	}
+	if len(pendingIDs) > 0 {
+		status.PendingTaskIDs = pendingIDs
+	}
+
+	// 优先使用引擎快照的 running/pending 计数，使 API 与内部状态一致；无快照时用存储的 ID 数量。
+	// 当快照 Running=0 但存储有运行中任务时，用存储数量作为 fallback，避免“进度查询与内部 runningCount 不一致”。
+	if hasSnapshot {
+		status.RunningCount = snapshotRunning
+		status.PendingCount = snapshotPending
+		if snapshotRunning == 0 && len(runningIDs) > 0 {
+			status.RunningCount = len(runningIDs)
+		}
+		if snapshotPending == 0 && len(pendingIDs) > 0 {
+			status.PendingCount = len(pendingIDs)
+		}
+	} else {
+		status.RunningCount = len(runningIDs)
+		status.PendingCount = len(pendingIDs)
 	}
 
 	if instance.EndTime != nil && !instance.EndTime.IsZero() {
@@ -199,6 +267,19 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		status.ErrorMessage = &instance.ErrorMessage
 	}
 
+	// 获取任务进度时打印正在运行/挂起的任务数量；若有内存快照则同时打印引擎侧计数，便于对比存储滞后
+	if status.Status == "Running" {
+		runningCnt := len(status.RunningTaskIDs)
+		pendingCnt := len(status.PendingTaskIDs)
+		if snapshot, ok := a.engine.GetInstanceProgress(engineInstanceID); ok {
+			logrus.Infof("[Progress] instanceID=%s progress=%.1f%% running=%d pending=%d (storage) | snapshot: running=%d pending=%d (running_task_ids=%v pending_task_ids=%v)",
+				engineInstanceID, status.Progress, runningCnt, pendingCnt, snapshot.Running, snapshot.Pending, status.RunningTaskIDs, status.PendingTaskIDs)
+		} else {
+			logrus.Infof("[Progress] instanceID=%s progress=%.1f%% running=%d pending=%d (running_task_ids=%v pending_task_ids=%v)",
+				engineInstanceID, status.Progress, runningCnt, pendingCnt, status.RunningTaskIDs, status.PendingTaskIDs)
+		}
+	}
+
 	return status, nil
 }
 
@@ -206,6 +287,10 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 func (a *TaskEngineAdapterImpl) RegisterWorkflow(ctx context.Context, definition *workflow.WorkflowDefinition) error {
 	if definition == nil || definition.Workflow == nil {
 		return fmt.Errorf("workflow definition is nil")
+	}
+	// 设置每个工作流实例的最大并发任务数，否则 task-engine V3 使用默认 10，导致“运行中: 10”
+	if err := definition.Workflow.SetMaxConcurrentTask(a.defaultMaxConcurrentTask); err != nil {
+		return fmt.Errorf("failed to set workflow max concurrent task: %w", err)
 	}
 
 	// Register workflow with Task Engine

@@ -89,6 +89,9 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 	if req.CronExpression != nil {
 		plan.SetCronExpression(*req.CronExpression)
 	}
+	if req.DefaultExecuteParams != nil {
+		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
+	}
 
 	// Persist
 	if err := s.syncPlanRepo.Create(plan); err != nil {
@@ -144,6 +147,9 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 	}
 	if req.CronExpression != nil {
 		plan.SetCronExpression(*req.CronExpression)
+	}
+	if req.DefaultExecuteParams != nil {
+		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
 	}
 
 	plan.UpdatedAt = shared.Now()
@@ -692,6 +698,23 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 	})
 }
 
+// HandleExecutionCallbackByWorkflowInstance looks up execution by workflow instance ID, then invokes HandleExecutionCallback.
+func (s *SyncApplicationServiceImpl) HandleExecutionCallbackByWorkflowInstance(ctx context.Context, workflowInstID string, success bool, recordCount int64, errMsg *string) error {
+	exec, err := s.syncPlanRepo.GetExecutionByWorkflowInstID(workflowInstID)
+	if err != nil {
+		return fmt.Errorf("failed to get sync execution by workflow inst id: %w", err)
+	}
+	if exec == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found for workflow "+workflowInstID, nil)
+	}
+	return s.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
+		ExecutionID:  exec.ID,
+		Success:      success,
+		RecordCount:  recordCount,
+		ErrorMessage: errMsg,
+	})
+}
+
 // ==================== Progress Query ====================
 
 // GetExecutionProgress retrieves aggregated progress for a specific sync execution.
@@ -739,6 +762,14 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		progress.TaskCount = wfStatus.TaskCount
 		progress.CompletedTask = wfStatus.CompletedTask
 		progress.FailedTask = wfStatus.FailedTask
+		progress.RunningCount = wfStatus.RunningCount
+		progress.PendingCount = wfStatus.PendingCount
+		progress.RunningTaskIDs = wfStatus.RunningTaskIDs
+		progress.PendingTaskIDs = wfStatus.PendingTaskIDs
+		// When task engine returns 0 task count (e.g. dynamic workflow), use execution's SyncedAPIs as expected count
+		if progress.TaskCount == 0 && len(exec.SyncedAPIs) > 0 {
+			progress.TaskCount = len(exec.SyncedAPIs)
+		}
 
 		// Prefer workflow FinishedAt if execution.FinishedAt is nil
 		if progress.FinishedAt == nil && wfStatus.FinishedAt != nil {
@@ -821,4 +852,3 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 }
 
 // ==================== Built-in Workflow Execution (Legacy) ====================
-

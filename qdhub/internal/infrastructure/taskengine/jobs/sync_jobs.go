@@ -15,6 +15,7 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/engine"
 	"github.com/LENAX/task-engine/pkg/core/task"
+	"github.com/LENAX/task-engine/pkg/core/types"
 
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/infrastructure/datasource"
@@ -206,13 +207,26 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	// 获取 Engine
+	// 获取 Engine（仅用于 taskRegistry）
 	engineInterface, ok := tc.GetDependency("Engine")
 	if !ok {
 		return nil, fmt.Errorf("Engine dependency not found")
 	}
 	eng := engineInterface.(*engine.Engine)
 	taskRegistry := eng.GetRegistry()
+
+	// 获取 InstanceManager（用于一次性 AtomicAddSubTasks）
+	type instanceManagerWithAtomic interface {
+		AtomicAddSubTasks(subTasks []types.Task, parentTaskID string) error
+	}
+	managerInterface := tc.GetInstanceManager()
+	if managerInterface == nil {
+		return nil, fmt.Errorf("InstanceManager not found (template task must run with InstanceManager set)")
+	}
+	manager, ok := managerInterface.(instanceManagerWithAtomic)
+	if !ok {
+		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
+	}
 
 	// 从上游任务提取参数值列表
 	var paramValues []string
@@ -256,8 +270,9 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
-	generatedCount := 0
 
+	// 先收集所有子任务，再通过 AtomicAddSubTasks 一次性提交给 instance manager
+	subTasks := make([]types.Task, 0, len(paramValues))
 	var subTaskInfos []map[string]interface{}
 	for _, paramValue := range paramValues {
 		subTaskName := fmt.Sprintf("Sync_%s_%s", apiName, paramValue)
@@ -293,23 +308,31 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			continue
 		}
 
-		bgCtx := context.Background()
-		if err := eng.AddSubTaskToInstance(bgCtx, workflowInstanceID, subTask, parentTaskID); err != nil {
-			logrus.Printf("❌ [GenerateDataSyncSubTasks] 添加子任务失败: %s, error=%v", subTaskName, err)
-			continue
-		}
-
-		generatedCount++
+		subTasks = append(subTasks, subTask)
 		subTaskInfos = append(subTaskInfos, map[string]interface{}{
 			"name":      subTaskName,
 			"api_name":  apiName,
 			"param_key": paramKey,
 			paramKey:    paramValue,
 		})
-		logrus.Printf("✅ [GenerateDataSyncSubTasks] 子任务已添加: %s", subTaskName)
 	}
 
-	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成 %d 个子任务", generatedCount)
+	if len(subTasks) == 0 {
+		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 无有效子任务可提交")
+		return map[string]interface{}{
+			"status":    "success",
+			"generated": 0,
+			"api_name":  apiName,
+			"param_key": paramKey,
+			"sub_tasks": subTaskInfos,
+		}, nil
+	}
+
+	if err := manager.AtomicAddSubTasks(subTasks, parentTaskID); err != nil {
+		return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+	}
+	generatedCount := len(subTasks)
+	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成并一次性提交 %d 个子任务", generatedCount)
 
 	return map[string]interface{}{
 		"status":    "success",
@@ -361,6 +384,12 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 		"api_name":      apiName,
 		"sync_batch_id": syncBatchID,
 	}, nil
+}
+
+// NotifySyncCompleteJob 无操作 job，用于 BatchSyncComplete 任务。
+// 实际回调逻辑在 DataSyncCompleteHandler 中通过 SyncCallbackInvoker 执行。
+func NotifySyncCompleteJob(tc *task.TaskContext) (interface{}, error) {
+	return nil, nil
 }
 
 // ==================== 增量实时同步 Job Functions ====================

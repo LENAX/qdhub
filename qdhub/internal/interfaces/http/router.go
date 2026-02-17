@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"qdhub/internal/application/contracts"
+	authinfra "qdhub/internal/infrastructure/auth"
 
 	_ "qdhub/docs" // Import generated swagger docs
 )
@@ -43,19 +45,32 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
+	authHandler      *AuthHandler
 	metadataHandler  *MetadataHandler
 	dataStoreHandler *DataStoreHandler
 	syncHandler      *SyncHandler
 	workflowHandler  *WorkflowHandler
+
+	// Auth components
+	jwtManager *authinfra.JWTManager
+	enforcer   *casbin.Enforcer
+
+	// debugDBDSN 临时：当前连接的 DB DSN，用于 e2e 验证是否连错库，仅 debug 时设置
+	debugDBDSN string
 }
 
 // NewServer creates a new HTTP server with the given configuration and services.
+// debugDBDSN 可选，非空时注册 GET /api/v1/debug/database 返回当前连接的 DB DSN，用于 e2e 排查连错库。
 func NewServer(
 	config ServerConfig,
+	authSvc contracts.AuthApplicationService,
 	metadataSvc contracts.MetadataApplicationService,
 	dataStoreSvc contracts.DataStoreApplicationService,
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
+	jwtManager *authinfra.JWTManager,
+	enforcer *casbin.Enforcer,
+	debugDBDSN string,
 ) *Server {
 	// Set gin mode
 	gin.SetMode(config.Mode)
@@ -67,10 +82,14 @@ func NewServer(
 	server := &Server{
 		config:           config,
 		engine:           engine,
+		authHandler:      NewAuthHandler(authSvc),
 		metadataHandler:  NewMetadataHandler(metadataSvc),
 		dataStoreHandler: NewDataStoreHandler(dataStoreSvc),
 		syncHandler:      NewSyncHandler(syncSvc),
 		workflowHandler:  NewWorkflowHandler(workflowSvc),
+		jwtManager:       jwtManager,
+		enforcer:         enforcer,
+		debugDBDSN:       debugDBDSN,
 	}
 
 	// Setup routes
@@ -86,8 +105,16 @@ func (s *Server) setupRoutes() {
 	s.engine.Use(Logger())
 	s.engine.Use(CORS())
 
+	// Inject JWT manager into context for middleware
+	s.engine.Use(func(c *gin.Context) {
+		c.Set("jwt_manager", s.jwtManager)
+		c.Next()
+	})
+
 	// Health check
 	s.engine.GET("/health", s.healthCheck)
+	// 临时 debug：根路径也注册，便于 e2e 访问（子进程可能未正确加载 /api/v1 路由）
+	s.engine.GET("/debug/database", s.debugDatabase)
 
 	// Swagger documentation
 	s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -100,19 +127,44 @@ func (s *Server) setupRoutes() {
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")
 	{
-		// Register all handler routes
-		s.metadataHandler.RegisterRoutes(v1)
-		s.dataStoreHandler.RegisterRoutes(v1)
-		s.syncHandler.RegisterRoutes(v1)
-		s.workflowHandler.RegisterRoutes(v1)
+		// 临时 debug：返回当前连接的 DB DSN，用于 e2e 验证是否连错库（始终注册，未设置时返回空）
+		v1.GET("/debug/database", s.debugDatabase)
+		// Auth routes (public)
+		s.authHandler.RegisterRoutes(v1)
+
+		// Protected routes (require authentication and RBAC)
+		protected := v1.Group("")
+		protected.Use(JWTAuthMiddleware())
+		if s.enforcer != nil {
+			protected.Use(CasbinRBACMiddleware(s.enforcer))
+		}
+		{
+			// Register all handler routes
+			s.metadataHandler.RegisterRoutes(protected)
+			s.dataStoreHandler.RegisterRoutes(protected)
+			s.syncHandler.RegisterRoutes(protected)
+			s.workflowHandler.RegisterRoutes(protected)
+		}
 	}
 }
 
-// healthCheck handles GET /health
+// healthCheck handles GET /health. In debug mode, includes database_dsn for e2e to verify which DB the server uses.
 func (s *Server) healthCheck(c *gin.Context) {
+	out := gin.H{"status": "healthy", "version": "1.0.0"}
+	if s.debugDBDSN != "" {
+		out["database_dsn"] = s.debugDBDSN
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// debugDatabase 临时：GET /api/v1/debug/database 返回当前连接的 DB DSN，用于 e2e 验证是否连错库
+func (s *Server) debugDatabase(c *gin.Context) {
+	dsn := s.debugDBDSN
+	if dsn == "" {
+		dsn = "(not set)"
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "healthy",
-		"version": "1.0.0",
+		"database_dsn": dsn,
 	})
 }
 

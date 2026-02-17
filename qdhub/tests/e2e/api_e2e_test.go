@@ -23,11 +23,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
@@ -285,13 +287,23 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
+	// Create auth components
+	userRepo := repository.NewUserRepository(db)
+	passwordHasher := auth.NewBcryptPasswordHasher(0)
+	jwtManager := authinfra.NewJWTManager("test_secret_key_123456789012345678901234567890", 1*time.Hour, 24*time.Hour)
+	enforcer, err := authinfra.NewCasbinEnforcer(db.DB, persistence.DBTypeSQLite)
+	require.NoError(t, err)
+	err = authinfra.InitializeDefaultPolicies(enforcer)
+	require.NoError(t, err)
+	authSvc := impl.NewAuthApplicationService(userRepo, userRepo, passwordHasher, jwtManager)
+
 	// Create HTTP server
 	config := httphandler.ServerConfig{
 		Host: "127.0.0.1",
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, jwtManager, enforcer, "")
 
 	cleanup := func() {
 		db.Close()

@@ -6,18 +6,20 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"qdhub/internal/infrastructure/container"
 )
 
 var serverCmd = &cobra.Command{
-	Use:   "server",
+	Use:   "server [config-file]",
 	Short: "Start the QDHub HTTP server",
 	Long: `Start the QDHub HTTP server with all API endpoints.
 
@@ -55,13 +57,59 @@ func init() {
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
-	// Get configuration from viper
+	// Config file: 1) positional arg (e2e 使用), 2) root --config, 3) viper
+	dbDSN := ""
+	duckDBPath := ""
+	configPath := ""
+	taskEngineWorkerCount := 0 // 0 表示使用 container 默认值
+	if len(args) > 0 && args[0] != "" {
+		configPath = args[0]
+	}
+	if configPath == "" {
+		configPath, _ = cmd.Root().PersistentFlags().GetString("config")
+	}
+	if configPath == "" {
+		configPath = viper.ConfigFileUsed()
+	}
+	if configPath != "" {
+		data, err := os.ReadFile(configPath)
+		if err == nil {
+			var cfg struct {
+				Database struct {
+					DSN string `yaml:"dsn"`
+				} `yaml:"database"`
+				QuantDB struct {
+					DuckDBPath string `yaml:"duckdb_path"`
+				} `yaml:"quantdb"`
+				TaskEngine struct {
+					WorkerCount int `yaml:"worker_count"`
+				} `yaml:"task_engine"`
+			}
+			if err := yaml.Unmarshal(data, &cfg); err == nil {
+				if cfg.Database.DSN != "" {
+					dbDSN = cfg.Database.DSN
+				}
+				if cfg.QuantDB.DuckDBPath != "" {
+					duckDBPath = cfg.QuantDB.DuckDBPath
+				}
+				if cfg.TaskEngine.WorkerCount > 0 {
+					taskEngineWorkerCount = cfg.TaskEngine.WorkerCount
+				}
+			}
+		}
+	}
+	// Fall back to viper (flags + env) when not from config file
+	if dbDSN == "" {
+		dbDSN = viper.GetString("database.dsn")
+	}
+	if duckDBPath == "" {
+		duckDBPath = viper.GetString("quantdb.duckdb_path")
+	}
+
 	host := viper.GetString("server.host")
 	port := viper.GetInt("server.port")
 	mode := viper.GetString("server.mode")
 	dbDriver := viper.GetString("database.driver")
-	dbDSN := viper.GetString("database.dsn")
-	duckDBPath := viper.GetString("quantdb.duckdb_path")
 
 	// Apply defaults if not set
 	if host == "" {
@@ -88,11 +136,23 @@ func runServer(cmd *cobra.Command, args []string) error {
 	log.Printf("  Port: %d", port)
 	log.Printf("  Mode: %s", mode)
 	log.Printf("  Database: %s (%s)", dbDriver, dbDSN)
+	// E2E: 写入 .dsn_resolved 到 config 所在目录，便于测试对比 server 实际使用的 DB（不依赖 dbDSN 是否含 /）
+	if configPath != "" && dbDSN != "" {
+		dsnDebugPath := filepath.Join(filepath.Dir(configPath), ".dsn_resolved")
+		if writeErr := os.WriteFile(dsnDebugPath, []byte(dbDSN), 0600); writeErr != nil {
+			log.Printf("  [e2e] 写入 .dsn_resolved 失败: %v", writeErr)
+		} else {
+			log.Printf("  [e2e] 已写入 .dsn_resolved -> %s", dsnDebugPath)
+		}
+	}
 	log.Printf("  DuckDB Path (from config): '%s'", viper.GetString("quantdb.duckdb_path"))
 	log.Printf("  DuckDB Path (from flag): '%s'", defaultDuckDBPath)
 	log.Printf("  DuckDB Path (final): '%s'", duckDBPath)
 	if duckDBPath != "" {
 		log.Printf("  ✅ DuckDB Path: %s", duckDBPath)
+	}
+	if taskEngineWorkerCount > 0 {
+		log.Printf("  Task Engine worker_count (from config): %d", taskEngineWorkerCount)
 	}
 
 	// Create container configuration
@@ -103,6 +163,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	config.ServerPort = port
 	config.ServerMode = mode
 	config.DefaultDuckDBPath = duckDBPath
+	if taskEngineWorkerCount > 0 {
+		config.TaskEngineMaxConcurrency = taskEngineWorkerCount
+	}
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)

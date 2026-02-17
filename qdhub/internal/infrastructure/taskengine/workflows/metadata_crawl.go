@@ -139,11 +139,14 @@ func (b *MetadataCrawlWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	// Task 5: 保存 API 元数据（等待所有子任务完成后执行）
+	// Task Engine 在触发 SaveAllMetadata 时，须向下游注入模板任务 FetchAPIDetails 的子任务执行结果，
+	// 格式为 _cached_<FetchAPIDetails> 含 subtask_results（或 sub_tasks）: []{ result: { api_metadata: map } }，
+	// 否则 SaveAPIMetadataBatch 无法拿到 api_metadata 会报 no api_metadata from upstream。
 	saveMetadataTask, err := builder.NewTaskBuilder("SaveAllMetadata", "保存所有 API 元数据", b.registry).
 		WithJobFunction("SaveAPIMetadataBatch", map[string]interface{}{
 			"data_source_id": dataSourceID,
 		}).
-		WithDependency("FetchAPIDetails"). // 依赖模板任务（会等待所有子任务完成）
+		WithDependency("FetchAPIDetails"). // 依赖模板任务（须等所有子任务完成，并注入 subtask_results）
 		WithDependency("SaveCategories").
 		WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshComplete").
 		WithTaskHandler(task.TaskStatusFailed, "MetadataRefreshFailure").

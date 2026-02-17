@@ -19,11 +19,13 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
@@ -142,12 +144,61 @@ type httpTestContext struct {
 	dsRepo         *repository.QuantDataStoreRepositoryImpl
 	syncPlanRepo   *repository.SyncPlanRepositoryImpl
 	workflowRepo   *repository.WorkflowDefinitionRepositoryImpl
+	accessToken    string
+}
+
+// setAuth sets the JWT Authorization header on req for protected API calls.
+func (c *httpTestContext) setAuth(req *http.Request) {
+	if c.accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	}
 }
 
 func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	gin.SetMode(gin.TestMode)
 
 	db, cleanup := setupIntegrationDB(t)
+
+	// Auth: run migration and create auth components for protected routes
+	runAuthMigration(t, db)
+	userRepo := repository.NewUserRepository(db)
+	passwordHasher := auth.NewBcryptPasswordHasher(0)
+	jwtManager := authinfra.NewJWTManager("test_secret_key_123456789012345678901234567890", 1*time.Hour, 24*time.Hour)
+	enforcer, err := authinfra.NewCasbinEnforcer(db.DB, persistence.DBTypeSQLite)
+	if err != nil {
+		cleanup()
+		t.Fatalf("Failed to create casbin enforcer: %v", err)
+	}
+	err = authinfra.InitializeDefaultPolicies(enforcer)
+	if err != nil {
+		cleanup()
+		t.Fatalf("Failed to initialize default policies: %v", err)
+	}
+	authSvc := impl.NewAuthApplicationService(userRepo, userRepo, passwordHasher, jwtManager)
+
+	// Register test user, assign admin role for full API access, then login to get token
+	ctx := context.Background()
+	registerResp, err := authSvc.Register(ctx, contracts.RegisterRequest{
+		Username: "integration_test",
+		Email:    "integration@test.com",
+		Password: "password123",
+	})
+	if err != nil {
+		cleanup()
+		t.Fatalf("Failed to register test user: %v", err)
+	}
+	if err := userRepo.AssignRole(ctx, shared.ID(registerResp.UserID), "admin"); err != nil {
+		cleanup()
+		t.Fatalf("Failed to assign admin role to test user: %v", err)
+	}
+	loginResp, err := authSvc.Login(ctx, contracts.LoginRequest{
+		Username: "integration_test",
+		Password: "password123",
+	})
+	if err != nil {
+		cleanup()
+		t.Fatalf("Failed to login test user: %v", err)
+	}
 
 	// Create repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
@@ -173,13 +224,13 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
-	// Create HTTP server
+	// Create HTTP server with auth
 	config := httphandler.ServerConfig{
 		Host: "127.0.0.1",
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, metadataSvc, dataStoreSvc, syncSvc, workflowSvc)
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, jwtManager, enforcer, "")
 
 	return &httpTestContext{
 		db:             db,
@@ -192,6 +243,7 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 		dsRepo:         dsRepo,
 		syncPlanRepo:   syncPlanRepo,
 		workflowRepo:   workflowRepo,
+		accessToken:    loginResp.AccessToken,
 	}, cleanup
 }
 
@@ -230,6 +282,7 @@ func TestHTTP_DataSource_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datasources", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -244,6 +297,7 @@ func TestHTTP_DataSource_CRUD(t *testing.T) {
 	// List data sources
 	t.Run("ListDataSources", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/datasources", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -252,7 +306,8 @@ func TestHTTP_DataSource_CRUD(t *testing.T) {
 		var response map[string]interface{}
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
-		data := response["data"].([]interface{})
+		data, ok := response["data"].([]interface{})
+		require.True(t, ok)
 		assert.Len(t, data, 1)
 	})
 
@@ -264,6 +319,7 @@ func TestHTTP_DataSource_CRUD(t *testing.T) {
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/api/v1/datasources/"+ds.ID.String(), nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -290,6 +346,7 @@ func TestHTTP_Token_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datasources/"+ds.ID.String()+"/token", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -299,6 +356,7 @@ func TestHTTP_Token_CRUD(t *testing.T) {
 	// Get token
 	t.Run("GetToken", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/datasources/"+ds.ID.String()+"/token", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -325,6 +383,7 @@ func TestHTTP_DataStore_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datastores", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -348,6 +407,7 @@ func TestHTTP_DataStore_CRUD(t *testing.T) {
 	// Get data store
 	t.Run("GetDataStore", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/datastores/"+dataStoreID, nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -357,6 +417,7 @@ func TestHTTP_DataStore_CRUD(t *testing.T) {
 	// List data stores
 	t.Run("ListDataStores", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/datastores", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -382,6 +443,7 @@ func TestHTTP_DataStore_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datastores/"+dataStoreID+"/create-tables", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -423,6 +485,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/sync-plans", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -454,6 +517,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 			t.Skip("Skipping - no sync plan created")
 		}
 		req, _ := http.NewRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -463,6 +527,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	// List sync plans
 	t.Run("ListSyncPlans", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/sync-plans", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -489,6 +554,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("PUT", "/api/v1/sync-plans/"+syncPlanID, bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -498,6 +564,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	// Resolve sync plan dependencies (required before enabling)
 	t.Run("ResolveSyncPlan", func(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/resolve", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -509,6 +576,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	// Enable sync plan
 	t.Run("EnableSyncPlan", func(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/enable", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -520,6 +588,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	// Disable sync plan
 	t.Run("DisableSyncPlan", func(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/v1/sync-plans/"+syncPlanID+"/disable", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -529,6 +598,7 @@ func TestHTTP_SyncPlan_CRUD(t *testing.T) {
 	// Delete sync plan
 	t.Run("DeleteSyncPlan", func(t *testing.T) {
 		req, _ := http.NewRequest("DELETE", "/api/v1/sync-plans/"+syncPlanID, nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -545,6 +615,7 @@ func TestHTTP_ErrorHandling(t *testing.T) {
 	// Not found error
 	t.Run("NotFound", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1/datasources/nonexistent-id", nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -555,6 +626,7 @@ func TestHTTP_ErrorHandling(t *testing.T) {
 	t.Run("InvalidRequestBody", func(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/v1/datasources", bytes.NewBuffer([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -570,6 +642,7 @@ func TestHTTP_ErrorHandling(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datasources", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 
@@ -611,6 +684,7 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datasources", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusCreated, w.Code)
@@ -629,6 +703,7 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/datastores", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusCreated, w.Code)
@@ -648,6 +723,7 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 		req, _ := http.NewRequest("POST", "/api/v1/sync-plans", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusCreated, w.Code)
@@ -658,18 +734,21 @@ func TestHTTP_E2E_DataSyncFlow(t *testing.T) {
 	{
 		// Verify data source
 		req, _ := http.NewRequest("GET", "/api/v1/datasources/"+dataSourceID, nil)
+		ctx.setAuth(req)
 		w := httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		// Verify data store
 		req, _ = http.NewRequest("GET", "/api/v1/datastores/"+dataStoreID, nil)
+		ctx.setAuth(req)
 		w = httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		// Verify sync plan
 		req, _ = http.NewRequest("GET", "/api/v1/sync-plans/"+syncPlanID, nil)
+		ctx.setAuth(req)
 		w = httptest.NewRecorder()
 		ctx.router.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)

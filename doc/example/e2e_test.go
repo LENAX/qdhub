@@ -146,9 +146,9 @@ func setupE2E(t *testing.T) *E2EContext {
 	}
 
 	// 创建Engine（真实模式使用50并发，mock模式使用10）
-	workerCount := 10
+	workerCount := 100
 	if cfg.Mode == "real" {
-		workerCount = 50
+		workerCount = 200
 	}
 	eng, err := engine.NewEngine(workerCount, 60, repos.Workflow, repos.WorkflowInstance, repos.Task)
 	if err != nil {

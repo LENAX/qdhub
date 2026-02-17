@@ -2,6 +2,8 @@
 package handlers
 
 import (
+	"context"
+
 	"github.com/sirupsen/logrus"
 
 	"github.com/LENAX/task-engine/pkg/core/task"
@@ -55,11 +57,41 @@ func DataSyncFailureHandler(tc *task.TaskContext) {
 	// Could implement retry logic or fallback strategies here
 }
 
+// syncCallbackInvoker 由 SyncApplicationService 实现，用于 DataSyncComplete 时触发 execution 回调（Plan.MarkCompleted）。
+type syncCallbackInvoker interface {
+	HandleExecutionCallbackByWorkflowInstance(ctx context.Context, workflowInstID string, success bool, recordCount int64, errMsg *string) error
+}
+
 // DataSyncCompleteHandler handles completion of the entire data sync workflow.
+// 若注入了 SyncCallbackInvoker，则调用 HandleExecutionCallbackByWorkflowInstance，从而更新 execution/plan 状态、触发 Plan.MarkCompleted。
+// 若 GetDependency 因 nil registry（如单元测试 mock）panic，则 recover 后跳过回调。
 func DataSyncCompleteHandler(tc *task.TaskContext) {
 	status := tc.GetParamString("_status")
 	logrus.Printf("[DataSync] 🏁 Workflow completed - WorkflowInstanceID: %s, Status: %s",
 		tc.WorkflowInstanceID, status)
+
+	invokeCallback := func() {
+		invoker, ok := tc.GetDependency("SyncCallbackInvoker")
+		if !ok || invoker == nil {
+			return
+		}
+		svc, ok := invoker.(syncCallbackInvoker)
+		if !ok {
+			return
+		}
+		ctx := context.Background()
+		if err := svc.HandleExecutionCallbackByWorkflowInstance(ctx, tc.WorkflowInstanceID, true, 0, nil); err != nil {
+			logrus.Warnf("[DataSync] execution callback failed: %v", err)
+		}
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// 单元测试等场景下 registry 为 nil，GetDependency 会 panic，跳过回调即可
+			}
+		}()
+		invokeCallback()
+	}()
 }
 
 // ==================== 建表工作流 Handlers ====================

@@ -72,7 +72,7 @@ func Default() *Config {
 			DSN:    "./data/qdhub.db",
 		},
 		TaskEngine: TaskEngineConfig{
-			WorkerCount: 10,
+			WorkerCount: 100,
 			TaskTimeout: 60,
 		},
 		DataSource: DataSourceConfig{

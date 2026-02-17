@@ -18,8 +18,8 @@ import (
 const (
 	// DefaultDocURL is the default Tushare documentation URL.
 	DefaultDocURL = "https://tushare.pro/document/2"
-	// DefaultCrawlerTimeout is the default crawler timeout in seconds.
-	DefaultCrawlerTimeout = 30
+	// DefaultCrawlerTimeout is the default crawler timeout in seconds (metadata crawl 等单次请求可能较慢).
+	DefaultCrawlerTimeout = 60
 )
 
 // Crawler implements datasource.Crawler for Tushare documentation.
