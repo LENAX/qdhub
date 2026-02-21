@@ -122,15 +122,18 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	"stock_basic": {PreferredParam: "none", Dependencies: nil},
 	"namechange":  {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},
 	"index_basic": {PreferredParam: "none", RequiredParams: []string{"market"}, Dependencies: nil},
+	"concept":     {PreferredParam: "none", Dependencies: nil}, // 概念股分类列表，ListConcepts 读此表
 	"hs_const":    {PreferredParam: "none", RequiredParams: []string{"hs_type"}, Dependencies: nil},
 	"stk_limit":   {PreferredParam: "none", SupportDateRange: true, Dependencies: nil},
 
 	// ========== 支持 trade_date（按日期查询全市场）==========
-	"daily":         {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
-	"weekly":        {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"monthly":       {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"daily_basic":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
-	"adj_factor":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	// daily：传入单日 trade_date 只能获取一天数据，需将 date range 扩展为多个 trade_date，通过 trade_cal 在 [start_date,end_date] 内截取交易日逐日拉取
+	"daily":       {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"weekly":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"monthly":     {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"daily_basic": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	// adj_factor：同 daily，按 trade_date 从 trade_cal 截取日期范围逐日拉取
+	"adj_factor":    {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"top_list":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"top_inst":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"margin":        {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
