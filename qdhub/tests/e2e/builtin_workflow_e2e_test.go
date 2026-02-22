@@ -21,6 +21,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -38,12 +39,12 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	analysisinfra "qdhub/internal/infrastructure/analysis"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
-	analysisinfra "qdhub/internal/infrastructure/analysis"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -59,27 +60,29 @@ type e2eTestConfig struct {
 	SQLiteDBPath string // SQLite 数据库路径
 }
 
+// getE2EDataDir 返回 e2e 测试数据目录 qdhub/tests/e2e/data，与当前工作目录无关，便于 DuckDB 保留复用
+func getE2EDataDir() string {
+	_, filename, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(filename), "data")
+}
+
 // loadE2ETestConfig 从环境变量加载配置
+// 真实模式需设置 QDHUB_TUSHARE_TOKEN 获取真实 Tushare Token；DuckDB/SQLite 固定使用 qdhub/tests/e2e/data，拉取的数据可保留复用
 func loadE2ETestConfig(t *testing.T) *e2eTestConfig {
-	token := os.Getenv("QDHUB_TUSHARE_TOKEN")
-	if token == "" {
-		token = os.Getenv("TUSHARE_TOKEN")
-	}
-	token = strings.TrimSpace(token)
+	token := strings.TrimSpace(os.Getenv("QDHUB_TUSHARE_TOKEN"))
 
 	isRealMode := token != ""
 
 	var duckDBPath, sqliteDBPath string
 	if isRealMode {
-		// 真实模式：使用持久化数据库
-		dataDir, err := filepath.Abs(filepath.Join(".", "data"))
-		require.NoError(t, err)
+		// 真实模式：使用 qdhub/tests/e2e/data 下的持久化数据库，拉取后的 DuckDB 可复用
+		dataDir := getE2EDataDir()
 		if err := os.MkdirAll(dataDir, 0755); err != nil {
 			require.NoError(t, err)
 		}
 		duckDBPath = filepath.Join(dataDir, "e2e_quant.duckdb")
 		sqliteDBPath = filepath.Join(dataDir, "e2e_app.db")
-		t.Logf("🔥 真实模式: DuckDB=%s, SQLite=%s", duckDBPath, sqliteDBPath)
+		t.Logf("🔥 真实模式: DuckDB=%s, SQLite=%s (数据保留在 e2e/data 可复用)", duckDBPath, sqliteDBPath)
 	} else {
 		t.Logf("🧪 Mock 模式: 使用临时数据库")
 	}
@@ -278,6 +281,9 @@ func (p *mockTushareParser) ParseAPIDetail(content string) (*metadata.APIMetadat
 				{Name: "close", Type: "float", Description: "收盘价"},
 				{Name: "vol", Type: "float", Description: "成交量"},
 				{Name: "amount", Type: "float", Description: "成交额"},
+				{Name: "pre_close", Type: "float", Description: "昨收价"},
+				{Name: "change", Type: "float", Description: "涨跌额"},
+				{Name: "pct_chg", Type: "float", Description: "涨跌幅"},
 			},
 		}, nil
 	}
@@ -401,6 +407,9 @@ func getMockDailyHTML() string {
 			<tr><td>close</td><td>float</td><td>收盘价</td></tr>
 			<tr><td>vol</td><td>float</td><td>成交量</td></tr>
 			<tr><td>amount</td><td>float</td><td>成交额</td></tr>
+			<tr><td>pre_close</td><td>float</td><td>昨收价</td></tr>
+			<tr><td>change</td><td>float</td><td>涨跌额</td></tr>
+			<tr><td>pct_chg</td><td>float</td><td>涨跌幅</td></tr>
 		</table>
 	</body></html>`
 }
@@ -578,6 +587,15 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	_, err = db.Exec(string(apiSyncStrategyMigrationSQL))
 	require.NoError(t, err)
 
+	// 执行 SyncPlan 默认参数与 daily/adj_factor 按 trade_date 扩展迁移
+	for _, name := range []string{"005_sync_plan_default_params.up.sql", "007_daily_adj_factor_trade_date_expand.up.sql"} {
+		sql, err := os.ReadFile(filepath.Join("../../migrations", name))
+		if err != nil {
+			continue
+		}
+		_, _ = db.Exec(string(sql))
+	}
+
 	// 2. 创建 Task Engine
 	aggregateRepo, err := sqlite.NewWorkflowAggregateRepoFromDSN(dsn)
 	require.NoError(t, err)
@@ -679,7 +697,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		var readers *analysisinfra.Readers
 		if dsRegistry != nil && metadataRepo != nil {
 			tokenResolver := &analysisinfra.TokenResolverImpl{Repo: metadataRepo}
-			fallback := analysisinfra.NewFallbackProvider("tushare", dsRegistry, tokenResolver)
+			fallback := analysisinfra.NewFallbackProvider("Tushare", dsRegistry, tokenResolver)
 			readers = analysisinfra.NewReadersWithFallback(duckDBAdapter, fallback)
 		} else {
 			readers = analysisinfra.NewReaders(duckDBAdapter)
