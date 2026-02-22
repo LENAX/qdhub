@@ -108,7 +108,7 @@ ORDER BY d.trade_date`
 
 // GetLimitDatesBefore 返回某股票在 beforeDate 之前的所有涨停日期（倒序）
 func (r *Readers) GetLimitDatesBefore(ctx context.Context, tsCode, beforeDate string) ([]string, error) {
-	sql := `SELECT trade_date FROM limit_list WHERE ts_code = ? AND trade_date <= ? AND pct_chg >= 9.8 ORDER BY trade_date DESC`
+	sql := `SELECT trade_date FROM limit_list_d WHERE ts_code = ? AND trade_date <= ? AND pct_chg >= 9.8 ORDER BY trade_date DESC`
 	rows, err := r.db.Query(ctx, sql, tsCode, beforeDate)
 	if err != nil {
 		return nil, fmt.Errorf("limit list dates: %w", err)
@@ -261,9 +261,9 @@ func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType str
 		threshold = -9.8
 	}
 	sql := `
-SELECT l.ts_code, COALESCE(s.name, '') AS name, COALESCE(l.first_time, '') AS limit_time, COALESCE(l.reason, '') AS limit_reason,
-       l.close, l.pct_chg, COALESCE(l.turnover_rate, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(s.industry, '') AS industry
-FROM limit_list l
+SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name, COALESCE(l.first_time, '') AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason,
+       l.close, l.pct_chg, COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(s.industry, l.industry, '') AS industry
+FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l.pct_chg >= ?
 ORDER BY l.first_time`
@@ -287,20 +287,139 @@ ORDER BY l.first_time`
 	return out, nil
 }
 
-// GetLimitLadderByDate 内部实现，供 LimitLadderReader 包装使用
+// GetLimitLadderByDate 内部实现，供 LimitLadderReader 包装使用。
+// 天梯结构来自 limit_step；展示字段优先 limit_list_ths（同花顺，涨停原因等更详），其次 limit_list_d。
 func (r *Readers) GetLimitLadderByDate(ctx context.Context, tradeDate string) (*analysis.LimitLadderStats, error) {
-	// 简化：按连板天数分组，组内按 first_time 排序
+	if ok, _ := r.db.TableExists(ctx, "limit_step"); ok {
+		// 优先：limit_step + limit_list_ths + limit_list_d + stock_basic（同花顺提供涨停原因、状态、封单等）
+		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+			sqlThs := `
+SELECT s.ts_code, COALESCE(sb.name, ths.name, s.name) AS name, s.nums,
+       COALESCE(ths.first_lu_time, l.first_time) AS first_time,
+       ths.last_lu_time AS last_limit_time,
+       COALESCE(ths.lu_desc, l.up_stat, l.limit, '') AS limit_reason,
+       COALESCE(ths.status, '') AS limit_status,
+       COALESCE(ths.price, l.close, 0) AS close,
+       COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
+       COALESCE(ths.turnover_rate, l.turnover_ratio, 0) AS turnover_rate,
+       COALESCE(ths.turnover, l.amount, 0) AS amount,
+       COALESCE(ths.free_float, 0) AS float_cap,
+       COALESCE(ths.sum_float, 0) AS total_cap,
+       COALESCE(ths.limit_amount, 0) AS limit_amount,
+       COALESCE(ths.open_num, 0) AS open_times,
+       COALESCE(sb.industry, '') AS industry
+FROM limit_step s
+LEFT JOIN limit_list_ths ths ON ths.ts_code = s.ts_code AND ths.trade_date = s.trade_date
+LEFT JOIN limit_list_d l ON l.ts_code = s.ts_code AND l.trade_date = s.trade_date AND l.pct_chg >= 9.8
+LEFT JOIN stock_basic sb ON sb.ts_code = s.ts_code
+WHERE s.trade_date = ?`
+			rows, err := r.db.Query(ctx, sqlThs, tradeDate)
+			if err == nil && len(rows) > 0 {
+				return r.buildLimitLadderFromLimitStep(tradeDate, rows)
+			}
+		}
+		// 其次：limit_step + limit_list_d + stock_basic
+		sql := `
+SELECT s.ts_code, COALESCE(sb.name, s.name) AS name, s.nums,
+       l.first_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason, l.close, l.pct_chg,
+       COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount,
+       COALESCE(sb.industry, '') AS industry
+FROM limit_step s
+LEFT JOIN limit_list_d l ON l.ts_code = s.ts_code AND l.trade_date = s.trade_date AND l.pct_chg >= 9.8
+LEFT JOIN stock_basic sb ON sb.ts_code = s.ts_code
+WHERE s.trade_date = ?`
+		rows, err := r.db.Query(ctx, sql, tradeDate)
+		if err == nil && len(rows) > 0 {
+			return r.buildLimitLadderFromLimitStep(tradeDate, rows)
+		}
+		// 无 detail 表时仅 limit_step
+		rows, err = r.db.Query(ctx, "SELECT ts_code, name, nums FROM limit_step WHERE trade_date = ?", tradeDate)
+		if err == nil && len(rows) > 0 {
+			return r.buildLimitLadderFromLimitStep(tradeDate, rows)
+		}
+	}
+	return r.getLimitLadderByDateFromLimitListD(ctx, tradeDate)
+}
+
+// isSTStock 判断是否为 ST/*ST 股（默认天梯统计中排除，除非调用方明确要求包含）
+func isSTStock(name string) bool {
+	n := strings.TrimSpace(name)
+	return strings.HasPrefix(n, "*ST") || strings.HasPrefix(n, "ST")
+}
+
+// buildLimitLadderFromLimitStep 用 limit_step 表数据按 nums（连板数）聚合为天梯，默认排除 ST/*ST；展示字段来自 limit_list_d/stock_basic（若有）
+func (r *Readers) buildLimitLadderFromLimitStep(tradeDate string, rows []map[string]any) (*analysis.LimitLadderStats, error) {
+	byDays := make(map[int][]analysis.LimitStock)
+	maxConsecutive := 0
+	for _, m := range rows {
+		if isSTStock(str(m, "name")) {
+			continue
+		}
+		numsVal := m["nums"]
+		var days int
+		switch v := numsVal.(type) {
+		case int64:
+			days = int(v)
+		case float64:
+			days = int(v)
+		case string:
+			days, _ = strconv.Atoi(v)
+		default:
+			days = int_(m, "nums")
+		}
+		if days < 1 {
+			days = 1
+		}
+		if days > maxConsecutive {
+			maxConsecutive = days
+		}
+		st := analysis.LimitStock{
+			TsCode:          str(m, "ts_code"),
+			Name:            str(m, "name"),
+			LimitTime:       str(m, "first_time"),
+			LastLimitTime:   str(m, "last_limit_time"),
+			LimitReason:     str(m, "limit_reason"),
+			LimitStatus:     str(m, "limit_status"),
+			ConsecutiveDays: days,
+			FirstLimitDate:  tradeDate,
+			Close:           float(m, "close"),
+			PctChg:          float(m, "pct_chg"),
+			TurnoverRate:    float(m, "turnover_rate"),
+			Amount:          float(m, "amount"),
+			FloatCap:        float(m, "float_cap"),
+			TotalCap:        float(m, "total_cap"),
+			LimitAmount:     float(m, "limit_amount"),
+			OpenTimes:       int_(m, "open_times"),
+			Industry:        str(m, "industry"),
+		}
+		byDays[days] = append(byDays[days], st)
+	}
+	ladders := make([]analysis.LimitLadder, 0)
+	totalCount := 0
+	for d := maxConsecutive; d >= 1; d-- {
+		if stks, ok := byDays[d]; ok && len(stks) > 0 {
+			ladders = append(ladders, analysis.LimitLadder{ConsecutiveDays: d, StockCount: len(stks), Stocks: stks})
+			totalCount += len(stks)
+		}
+	}
+	return &analysis.LimitLadderStats{
+		TradeDate: tradeDate, TotalLimitUp: totalCount, Ladders: ladders, MaxConsecutive: maxConsecutive,
+	}, nil
+}
+
+// getLimitLadderByDateFromLimitListD 从 limit_list_d 用 CTE 计算连续涨停天数（回退逻辑）
+func (r *Readers) getLimitLadderByDateFromLimitListD(ctx context.Context, tradeDate string) (*analysis.LimitLadderStats, error) {
 	sql := `
 WITH limit_dates AS (
-    SELECT ts_code, trade_date FROM limit_list WHERE pct_chg >= 9.8 AND trade_date <= ?
+    SELECT ts_code, trade_date FROM limit_list_d WHERE pct_chg >= 9.8 AND trade_date <= ?
 ),
 consecutive AS (
     SELECT ts_code, trade_date, ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY trade_date DESC) AS rn
     FROM limit_dates
 ),
-grps AS (
-    SELECT ts_code, trade_date, rn,
-           (CAST(strptime(trade_date, '%%Y%%m%%d') AS DATE) - (rn - 1)) AS grp
+        grps AS (
+            SELECT ts_code, trade_date, rn,
+                   (CAST(strptime(trade_date, '%Y%m%d') AS DATE) + CAST(rn - 1 AS INTEGER)) AS grp
     FROM consecutive
 ),
 days AS (
@@ -309,10 +428,10 @@ days AS (
     GROUP BY ts_code, grp
     HAVING MAX(trade_date) = ?
 )
-SELECT l.ts_code, s.name, l.first_time AS limit_time, l.reason AS limit_reason, l.close, l.pct_chg,
-       COALESCE(l.turnover_rate, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, s.industry,
+SELECT l.ts_code, COALESCE(s.name, l.name) AS name, l.first_time AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason, l.close, l.pct_chg,
+       COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(s.industry, l.industry) AS industry,
        d.first_limit_date, d.consecutive_days
-FROM limit_list l
+FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 LEFT JOIN days d ON l.ts_code = d.ts_code
 WHERE l.trade_date = ? AND l.pct_chg >= 9.8
@@ -324,6 +443,9 @@ ORDER BY d.consecutive_days DESC, l.first_time`
 	byDays := make(map[int][]analysis.LimitStock)
 	maxConsecutive := 0
 	for _, m := range rows {
+		if isSTStock(str(m, "name")) {
+			continue
+		}
 		days := int_(m, "consecutive_days")
 		if days > maxConsecutive {
 			maxConsecutive = days
@@ -333,18 +455,20 @@ ORDER BY d.consecutive_days DESC, l.first_time`
 			LimitReason: str(m, "limit_reason"), ConsecutiveDays: days, FirstLimitDate: str(m, "first_limit_date"),
 			Close: float(m, "close"), PctChg: float(m, "pct_chg"),
 			TurnoverRate: float(m, "turnover_rate"), Amount: float(m, "amount"),
-			Industry: str(m, "industry"), Concepts: nil,
+			OpenTimes: int_(m, "open_times"), Industry: str(m, "industry"), Concepts: nil,
 		}
 		byDays[days] = append(byDays[days], st)
 	}
 	ladders := make([]analysis.LimitLadder, 0)
+	totalCount := 0
 	for d := maxConsecutive; d >= 1; d-- {
 		if stks, ok := byDays[d]; ok && len(stks) > 0 {
 			ladders = append(ladders, analysis.LimitLadder{ConsecutiveDays: d, StockCount: len(stks), Stocks: stks})
+			totalCount += len(stks)
 		}
 	}
 	return &analysis.LimitLadderStats{
-		TradeDate: tradeDate, TotalLimitUp: len(rows), Ladders: ladders, MaxConsecutive: maxConsecutive,
+		TradeDate: tradeDate, TotalLimitUp: totalCount, Ladders: ladders, MaxConsecutive: maxConsecutive,
 	}, nil
 }
 
@@ -404,7 +528,7 @@ SELECT %s AS sector_code, %s AS sector_name, ? AS sector_type,
        CAST(COUNT(DISTINCT l.ts_code) AS DOUBLE) / NULLIF(COUNT(DISTINCT s.ts_code), 0) * 100 AS limit_up_ratio,
        AVG(d.pct_chg) AS avg_pct_chg
 FROM stock_basic s
-LEFT JOIN limit_list l ON s.ts_code = l.ts_code AND l.trade_date = ? AND l.pct_chg >= 9.8
+LEFT JOIN limit_list_d l ON s.ts_code = l.ts_code AND l.trade_date = ? AND l.pct_chg >= 9.8
 LEFT JOIN daily d ON s.ts_code = d.ts_code AND d.trade_date = ?
 WHERE s.industry IS NOT NULL
 GROUP BY %s
@@ -432,9 +556,9 @@ func (r *Readers) GetSectorLimitStocksBySectorAndDate(ctx context.Context, secto
 		cond = "cd.concept_code = ?"
 	}
 	sql := fmt.Sprintf(`
-SELECT l.ts_code, s.name, l.first_time AS limit_time, l.reason AS limit_reason, l.close, l.pct_chg,
-       COALESCE(l.turnover_rate, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, s.industry
-FROM limit_list l
+SELECT l.ts_code, COALESCE(s.name, l.name) AS name, l.first_time AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason, l.close, l.pct_chg,
+       COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(s.industry, l.industry) AS industry
+FROM limit_list_d l
 JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l.pct_chg >= 9.8 AND %s
 ORDER BY l.first_time`, cond)
@@ -636,9 +760,11 @@ func (r *Readers) ListConcepts(ctx context.Context, req analysis.ConceptListRequ
 }
 
 // GetDragonTigerList DragonTigerReader.GetList
+// 表 top_list 由 Tushare 元数据建表，列名为 pct_change / l_buy / l_sell，此处用 AS 与实体字段对齐
 func (r *Readers) GetDragonTigerList(ctx context.Context, req analysis.DragonTigerRequest) ([]analysis.DragonTigerList, error) {
-	sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name, close, pct_chg, turnover_rate, amount, reason,
-       COALESCE(buy_amount, 0) AS buy_amount, COALESCE(sell_amount, 0) AS sell_amount, COALESCE(net_amount, 0) AS net_amount
+	sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name, close,
+       COALESCE(pct_change, 0) AS pct_chg, turnover_rate, amount, reason,
+       COALESCE(l_buy, 0) AS buy_amount, COALESCE(l_sell, 0) AS sell_amount, COALESCE(net_amount, 0) AS net_amount
 FROM top_list WHERE 1=1`
 	args := []any{}
 	if req.TradeDate != nil && *req.TradeDate != "" {
@@ -672,9 +798,11 @@ FROM top_list WHERE 1=1`
 }
 
 // GetMoneyFlow MoneyFlowReader
+// 表 moneyflow 由 Tushare 个股资金流向 API 建表，仅含 ts_code/trade_date 与 *_amount/net_mf_amount，无 name、net_mf_ratio；不查不存在的列，实体缺省为 ""/0
 func (r *Readers) GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error) {
-	sql := `SELECT trade_date, ts_code, name, buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount,
-       buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount, net_mf_ratio
+	sql := `SELECT trade_date, ts_code,
+       buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount,
+       buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount
 FROM moneyflow WHERE trade_date = ?`
 	args := []any{req.TradeDate}
 	if req.TsCode != nil && *req.TsCode != "" {
@@ -719,8 +847,8 @@ func (r *Readers) ListNews(ctx context.Context, req analysis.NewsListRequest) ([
 // GetLimitUpListByDate 当日涨停列表（供 LimitUpListReader 使用）
 func (r *Readers) GetLimitUpListByDate(ctx context.Context, tradeDate string) ([]analysis.LimitUpStock, error) {
 	sql := `
-SELECT l.ts_code, s.name, l.trade_date, l.first_time AS limit_time, l.reason, l.close, l.pct_chg, l.vol AS volume, l.amount, l.turnover_rate, s.industry
-FROM limit_list l
+SELECT l.ts_code, COALESCE(s.name, l.name) AS name, l.trade_date, l.first_time AS limit_time, COALESCE(l.up_stat, l.limit, '') AS reason, l.close, l.pct_chg, 0 AS volume, l.amount, COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(s.industry, l.industry) AS industry
+FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l.pct_chg >= 9.8 ORDER BY l.first_time`
 	rows, err := r.db.Query(ctx, sql, tradeDate)
@@ -914,9 +1042,10 @@ func (l *limitUpListReaderImpl) GetList(ctx context.Context, req analysis.LimitU
 }
 
 // GetByTsCode StockBasicReader
+// 表 stock_basic 由 Tushare stock_basic API 建表，无 reg_capital/website/email 等（在 stock_company），仅查实际存在的列
 func (r *Readers) GetByTsCode(ctx context.Context, tsCode string) (*analysis.StockBasicInfo, error) {
 	sql := `SELECT ts_code, symbol, name, area, industry, market, list_date, list_status, is_hs,
-       fullname, enname, cnspell, exchange, curr_type, reg_capital, website, email, office, employees, introduction, business, main_business
+       fullname, enname, cnspell, exchange, curr_type
 FROM stock_basic WHERE ts_code = ?`
 	rows, err := r.db.Query(ctx, sql, tsCode)
 	if err != nil || len(rows) == 0 {

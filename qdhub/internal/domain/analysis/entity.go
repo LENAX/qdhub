@@ -36,19 +36,26 @@ type LimitStats struct {
 }
 
 // LimitStock 涨停股票信息（值对象）
+// 展示字段优先从 limit_list_ths（同花顺涨跌停榜单）获取，其次 limit_list_d
 type LimitStock struct {
-	TsCode          string   `json:"ts_code"`          // 股票代码
-	Name            string   `json:"name"`            // 股票名称
-	LimitTime       string   `json:"limit_time"`       // 涨停时间（HH:MM:SS）
-	LimitReason     string   `json:"limit_reason"`     // 涨停原因
-	ConsecutiveDays int      `json:"consecutive_days"` // 连续涨停天数（连板数）
-	FirstLimitDate  string   `json:"first_limit_date"` // 首次涨停日期
-	Close           float64  `json:"close"`            // 收盘价
-	PctChg          float64  `json:"pct_chg"`          // 涨跌幅
-	TurnoverRate    float64  `json:"turnover_rate"`    // 换手率
-	Amount          float64  `json:"amount"`           // 成交额
+	TsCode          string   `json:"ts_code"`           // 股票代码
+	Name            string   `json:"name"`              // 股票名称
+	LimitTime       string   `json:"limit_time"`        // 首次封板时间（HH:MM:SS）
+	LastLimitTime   string   `json:"last_limit_time"`   // 最后封板时间
+	LimitReason     string   `json:"limit_reason"`      // 涨停原因（优先 limit_list_ths.lu_desc）
+	LimitStatus     string   `json:"limit_status"`      // 涨停状态（N连板、一字板等）
+	ConsecutiveDays int      `json:"consecutive_days"`  // 连续涨停天数（连板数）
+	FirstLimitDate  string   `json:"first_limit_date"`  // 首次涨停日期
+	Close           float64  `json:"close"`             // 收盘价
+	PctChg          float64  `json:"pct_chg"`           // 涨跌幅
+	TurnoverRate    float64  `json:"turnover_rate"`     // 换手率
+	Amount          float64  `json:"amount"`            // 成交额
+	FloatCap        float64  `json:"float_cap"`         // 流通市值（元）
+	TotalCap        float64  `json:"total_cap"`         // 总市值（亿元）
+	LimitAmount     float64  `json:"limit_amount"`      // 封单金额（元）
+	OpenTimes       int      `json:"open_times"`        // 炸板次数
 	Industry        string   `json:"industry"`         // 所属行业
-	Concepts        []string `json:"concepts"`        // 关联概念列表
+	Concepts        []string `json:"concepts"`          // 关联概念列表
 }
 
 // LimitLadder 涨停天梯（值对象）

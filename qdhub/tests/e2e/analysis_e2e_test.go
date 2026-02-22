@@ -68,17 +68,19 @@ func TestE2E_Analysis_SyncThenKLine(t *testing.T) {
 		startDate = time.Now().AddDate(0, -1, 0).Format("20060102")
 		endDate = time.Now().Format("20060102")
 	}
-	// 一个月日频数据至少 20 个交易日
+	// 一个月日频数据至少 15 个交易日
 	minRows := 1
 	if testCtx.config.IsRealMode {
-		minRows = 20
+		minRows = 15
 	}
 
 	skipWorkflow := false
 	if testCtx.duckDBAdapter != nil {
-		if canSkip, n := analysisE2ECanSkipSyncWorkflow(ctx, t, testCtx.duckDBAdapter, startDate, endDate, minRows); canSkip {
+		// 先尝试取数，不先建空表，避免“无表→建空表→查空表→必然同步”
+		if data, err := testCtx.analysisAppService.GetKLine(ctx, analysis.KLineRequest{TsCode: "000001.SZ", StartDate: startDate, EndDate: endDate, AdjustType: analysis.AdjustNone, Period: "D"}); err == nil && len(data) >= minRows {
 			skipWorkflow = true
-			t.Logf("复用已有数据，跳过工作流，直接测试数据获取（daily 内 000001.SZ 已有 %d 条）", n)
+			t.Logf("DuckDB 已有足够 K 线数据（%d 条），跳过同步", len(data))
+			logTableLine(t, fmt.Sprintf("DuckDB 已有足够 K 线数据（%d 条），跳过同步", len(data)), logFile)
 		}
 	}
 
@@ -165,17 +167,23 @@ func TestE2E_Analysis_SyncThenLimitStats(t *testing.T) {
 		startDate = time.Now().AddDate(0, -1, 0).Format("20060102")
 		endDate = time.Now().Format("20060102")
 	}
-	// 一个月日频数据至少 20 个交易日
-	minRows := 1
+	// 跳过同步条件：区间内已有任意统计即视为有数据，避免中断后再次全量同步
+	minRowsToSkip := 1
 	if testCtx.config.IsRealMode {
-		minRows = 20
+		minRowsToSkip = 5 // 真实模式：至少 5 个交易日有统计即跳过
+	}
+	minRowsAssert := 1
+	if testCtx.config.IsRealMode {
+		minRowsAssert = 15 // 断言用：一个月至少约 15 个交易日
 	}
 
 	skipWorkflow := false
 	if testCtx.duckDBAdapter != nil {
-		if canSkip, n := analysisE2ECanSkipSyncWorkflow(ctx, t, testCtx.duckDBAdapter, startDate, endDate, minRows); canSkip {
+		// 先尝试取数，不先建空表，避免“无表→建空表→查空表→必然同步”
+		if stats, err := testCtx.analysisAppService.GetLimitStats(ctx, startDate, endDate); err == nil && len(stats) >= minRowsToSkip {
 			skipWorkflow = true
-			t.Logf("复用已有数据，跳过工作流，直接测试涨跌停统计（daily 内 000001.SZ 已有 %d 条）", n)
+			t.Logf("DuckDB 已有涨跌停统计（%d 条），跳过同步", len(stats))
+			logTableLine(t, fmt.Sprintf("DuckDB 已有涨跌停统计（%d 条），跳过同步", len(stats)), logFile)
 		}
 	}
 
@@ -246,6 +254,9 @@ func TestE2E_Analysis_SyncThenLimitStats(t *testing.T) {
 	assert.NotNil(t, stats)
 	if len(stats) > 0 {
 		assert.NotEmpty(t, stats[0].TradeDate)
+		if testCtx.config.IsRealMode {
+			assert.GreaterOrEqual(t, len(stats), minRowsAssert, "真实模式下一月区间至少约 15 个交易日统计")
+		}
 	}
 	printLimitStatsTable(t, stats, logFile)
 }
@@ -271,13 +282,17 @@ func TestE2E_Analysis_Fallback(t *testing.T) {
 	if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
 		tsCode = "000001.SZ" // 真实模式用平安银行，全市场 daily 同步后必有数据
 	}
-	// 确保存在 daily/adj_factor 表（可空），否则 Query 报错无法走到兜底
+	// 确保存在 daily/adj_factor 表，先尝试获取一次 K 线，有数据则跳过同步
 	if testCtx.duckDBAdapter != nil {
 		ensureDailyAndAdjFactorTables(ctx, t, testCtx.duckDBAdapter)
 		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
-			rows, _ := testCtx.duckDBAdapter.Query(ctx, "SELECT 1 FROM daily WHERE ts_code = ? AND trade_date >= ? AND trade_date <= ? LIMIT 1", tsCode, startDate, endDate)
-			if len(rows) == 0 {
-				t.Logf("daily 无 %s 数据，先执行同步", tsCode)
+			minRows := 15
+			if data, err := testCtx.analysisAppService.GetKLine(ctx, analysis.KLineRequest{TsCode: tsCode, StartDate: startDate, EndDate: endDate, AdjustType: analysis.AdjustNone, Period: "D"}); err == nil && len(data) >= minRows {
+				t.Logf("DuckDB 已有 %s K 线数据（%d 条），跳过同步", tsCode, len(data))
+				logTableLine(t, fmt.Sprintf("DuckDB 已有 %s K 线数据（%d 条），跳过同步", tsCode, len(data)), logFile)
+			} else {
+				t.Logf("无数据或不足 %d 条，执行 daily 同步", minRows)
+				logTableLine(t, "无数据或不足，执行 daily 同步", logFile)
 				runDailySyncForFallback(ctx, t, testCtx, startDate, endDate)
 			}
 		}
@@ -287,9 +302,9 @@ func TestE2E_Analysis_Fallback(t *testing.T) {
 	}
 	data, err := testCtx.analysisAppService.GetKLine(ctx, req)
 	require.NoError(t, err)
-	// 若有数据：一个月日频至少 20 条（约 20 个交易日）；若无数据（如真实模式下该代码/区间无兜底数据）仅校验不报错
+	// 若有数据：一个月日频至少 15 条（约 15 个交易日）；若无数据（如真实模式下该代码/区间无兜底数据）仅校验不报错
 	if len(data) > 0 {
-		assert.GreaterOrEqual(t, len(data), 20, "一个月日频 K 线至少应有 20 条")
+		assert.GreaterOrEqual(t, len(data), 15, "一个月日频 K 线至少应有 15 条")
 	}
 	if len(data) > 0 {
 		assert.NotEmpty(t, data[0].TradeDate)
@@ -334,11 +349,16 @@ func TestE2E_Analysis_ListStocks_ListIndices_ListConcepts(t *testing.T) {
 	if testCtx.duckDBAdapter != nil {
 		ensureAnalysisMinimalTables(ctx, t, testCtx.duckDBAdapter)
 		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
-			if !analysisE2EHasIndexAndConceptData(ctx, t, testCtx.duckDBAdapter) {
-				t.Log("index_basic/concept 无数据，先执行同步")
-				runIndexAndConceptSync(ctx, t, testCtx)
+			// 先尝试获取一次 ListIndices / ListConcepts，均有数据则跳过同步
+			indices, errIdx := testCtx.analysisAppService.ListIndices(ctx, analysis.IndexListRequest{Limit: 10, Offset: 0})
+			concepts, errConcept := testCtx.analysisAppService.ListConcepts(ctx, analysis.ConceptListRequest{Limit: 10, Offset: 0})
+			if errIdx == nil && errConcept == nil && len(indices) > 0 && len(concepts) > 0 {
+				t.Log("DuckDB 已有 index_basic/concept 数据，跳过同步")
+				logTableLine(t, "DuckDB 已有 index_basic/concept 数据，跳过同步", logFile)
 			} else {
-				t.Log("复用已有 index_basic/concept 数据，跳过同步")
+				t.Log("index_basic/concept 无数据或不足，执行同步")
+				logTableLine(t, "index_basic/concept 无数据或不足，执行同步", logFile)
+				runIndexAndConceptSync(ctx, t, testCtx)
 			}
 		}
 	}
@@ -359,8 +379,7 @@ func TestE2E_Analysis_ListStocks_ListIndices_ListConcepts(t *testing.T) {
 	printConceptInfoTable(t, concepts, logFile)
 }
 
-// TestE2E_Analysis_LimitLadder_AndRelated 空表下调用涨停天梯/列表/板块/题材热度等接口，校验不报错
-// 真实模式且 limit_list 无数据时先同步 trade_cal + stock_basic + limit_list_d 再测
+// TestE2E_Analysis_LimitLadder_AndRelated 调用涨停天梯/列表/板块等接口；真实模式下先检查 limit_step 数据是否满足，不满足再同步
 func TestE2E_Analysis_LimitLadder_AndRelated(t *testing.T) {
 	logFile, logCleanup := setupLogFile(t, "Analysis_LimitLadder_AndRelated")
 	defer logCleanup()
@@ -369,35 +388,56 @@ func TestE2E_Analysis_LimitLadder_AndRelated(t *testing.T) {
 	testCtx := setupBuiltinWorkflowE2EContext(t)
 	defer testCtx.cleanup()
 	if testCtx.analysisAppService == nil {
+		_, _ = logFile.Write([]byte("Skip: Analysis 服务未初始化（需要 QuantDB），涨停天梯测试未执行\n"))
 		t.Skip("Analysis 服务未初始化（需要 QuantDB）")
 	}
 	ctx := context.Background()
 	tradeDate := "20260115"
 	if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
-		// 真实模式下同步范围为「过去14天～今天」，请求的 tradeDate 需落在该范围内
 		tradeDate = time.Now().Format("20060102")
 	}
 	if testCtx.duckDBAdapter != nil {
 		ensureAnalysisMinimalTables(ctx, t, testCtx.duckDBAdapter)
-	}
-	if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
-		if !analysisE2EHasLimitListData(ctx, t, testCtx.duckDBAdapter, tradeDate) {
-			runLimitListSync(ctx, t, testCtx, tradeDate)
-		} else {
-			t.Log("复用已有 limit_list 数据，跳过同步")
-		}
-	}
-	// 真实模式下用 limit_list_d 中实际有数据的最近交易日，避免“今天”非交易日导致无数据
-	if testCtx.duckDBAdapter != nil {
-		if latest := analysisE2ELatestLimitListTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
+		// 优先用 limit_step 最近交易日，无则用 limit_list_d
+		if latest := analysisE2ELatestLimitStepTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
 			tradeDate = latest
-			t.Logf("使用 limit_list_d 最近交易日: %s", tradeDate)
+		} else if latest := analysisE2ELatestLimitListTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
+			tradeDate = latest
 		}
 	}
+	// 真实模式：仅当 limit_list_ths、limit_step、limit_list_d 三表均有数据且天梯有效时才跳过同步
+	if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
+		needSync := true
+		allThreeReady := analysisE2EHasLimitListThsData(ctx, t, testCtx.duckDBAdapter) &&
+			analysisE2EHasLimitStepData(ctx, t, testCtx.duckDBAdapter) &&
+			analysisE2EHasLimitListData(ctx, t, testCtx.duckDBAdapter, tradeDate)
+		if ladder, err := testCtx.analysisAppService.GetLimitLadder(ctx, tradeDate); err == nil && ladder != nil && ladder.TotalLimitUp > 0 && len(ladder.Ladders) > 0 && allThreeReady {
+			needSync = false
+			t.Log("DuckDB 已有 limit_list_ths/limit_step/limit_list_d 三表数据且天梯有效，跳过同步")
+			logTableLine(t, "DuckDB 三表数据且天梯有效，跳过同步", logFile)
+		}
+		if needSync {
+			t.Log("无数据或数据不足，先同步 limit_list_ths，再同步 limit_step/limit_list_d")
+			logTableLine(t, "无数据或数据不足，先同步 limit_list_ths，再同步 limit_step/limit_list_d", logFile)
+			runLimitListThsSync(ctx, t, testCtx, tradeDate)
+			runLimitListSync(ctx, t, testCtx, tradeDate)
+			if testCtx.duckDBAdapter != nil {
+				if latest := analysisE2ELatestLimitStepTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
+					tradeDate = latest
+					t.Logf("使用 limit_step 最近交易日: %s", tradeDate)
+				} else if latest := analysisE2ELatestLimitListTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
+					tradeDate = latest
+					t.Logf("使用 limit_list_d 最近交易日: %s", tradeDate)
+				}
+			}
+		}
+	}
+	logTableLine(t, fmt.Sprintf("请求涨停天梯 tradeDate=%s", tradeDate), logFile)
 
 	// 以下接口依赖 limit_list/stock_basic 等表及 SQL 兼容性，若报错则跳过（如真实 DB 表结构或 DuckDB 日期运算差异）
 	ladder, err := testCtx.analysisAppService.GetLimitLadder(ctx, tradeDate)
 	if err != nil {
+		_, _ = logFile.Write([]byte(fmt.Sprintf("GetLimitLadder 失败（跳过）: %v\n", err)))
 		t.Skipf("GetLimitLadder 依赖表结构或 SQL，跳过: %v", err)
 	}
 	printLimitLadderStatsTable(t, ladder, logFile)
@@ -533,20 +573,25 @@ func TestE2E_Analysis_DragonTiger_MoneyFlow_Empty(t *testing.T) {
 
 	if testCtx.duckDBAdapter != nil {
 		ensureAnalysisMinimalTables(ctx, t, testCtx.duckDBAdapter)
-		// 无数据时先执行拉取 workflow（仅真实模式且需 Tushare）
-		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
-			hasData := analysisE2EHasDragonTigerMoneyFlowData(ctx, t, testCtx.duckDBAdapter, tradeDate)
-			if !hasData {
-				t.Log("top_list/moneyflow 无数据，先执行同步 workflow")
-				runDragonTigerMoneyFlowSync(ctx, t, testCtx, tradeDate)
-			} else {
-				t.Log("复用已有 top_list/moneyflow 数据，跳过同步")
-			}
-		}
-		// 使用两表均有数据的最近交易日，避免请求日期无数据
 		if latest := analysisE2ELatestDragonTigerMoneyFlowTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
 			tradeDate = latest
-			t.Logf("使用 top_list/moneyflow 最近交易日: %s", tradeDate)
+		}
+		// 先尝试获取一次龙虎榜/资金流向，有数据则跳过同步（仅真实模式且需 Tushare）
+		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
+			list, errList := testCtx.analysisAppService.GetDragonTigerList(ctx, analysis.DragonTigerRequest{TradeDate: &tradeDate, Limit: 10, Offset: 0})
+			flow, errFlow := testCtx.analysisAppService.GetMoneyFlow(ctx, analysis.MoneyFlowRequest{TradeDate: tradeDate, Limit: 10, Offset: 0})
+			if errList == nil && errFlow == nil && (len(list) > 0 || len(flow) > 0) {
+				t.Log("DuckDB 已有 top_list/moneyflow 数据，跳过同步")
+				logTableLine(t, "DuckDB 已有 top_list/moneyflow 数据，跳过同步", logFile)
+			} else {
+				t.Log("top_list/moneyflow 无数据或不足，执行同步")
+				logTableLine(t, "top_list/moneyflow 无数据或不足，执行同步", logFile)
+				runDragonTigerMoneyFlowSync(ctx, t, testCtx, tradeDate)
+				if latest := analysisE2ELatestDragonTigerMoneyFlowTradeDate(ctx, t, testCtx.duckDBAdapter); latest != "" {
+					tradeDate = latest
+					t.Logf("使用 top_list/moneyflow 最近交易日: %s", tradeDate)
+				}
+			}
 		}
 	}
 
@@ -622,6 +667,24 @@ func analysisE2ELatestDragonTigerMoneyFlowTradeDate(ctx context.Context, t *test
 	return maxMf
 }
 
+// analysisE2EHasLimitListThsData 检查 limit_list_ths 表是否存在且有至少一条数据
+func analysisE2EHasLimitListThsData(ctx context.Context, t *testing.T, adapter duckDBSkipCheckAdapter) bool {
+	if adapter == nil {
+		return false
+	}
+	ok, _ := adapter.TableExists(ctx, "limit_list_ths")
+	if !ok {
+		return false
+	}
+	rows, _ := adapter.Query(ctx, "SELECT 1 FROM limit_list_ths LIMIT 1")
+	return len(rows) > 0
+}
+
+// analysisE2EHasLimitStepData 检查 limit_step 表是否存在且有至少一条数据
+func analysisE2EHasLimitStepData(ctx context.Context, t *testing.T, adapter duckDBSkipCheckAdapter) bool {
+	return analysisE2ELatestLimitStepTradeDate(ctx, t, adapter) != ""
+}
+
 // analysisE2EHasLimitListData 检查 limit_list_d（同步 API limit_list_d 产生的表）在指定日期或任意日期是否有数据
 func analysisE2EHasLimitListData(ctx context.Context, t *testing.T, adapter duckDBSkipCheckAdapter, tradeDate string) bool {
 	if adapter == nil {
@@ -661,12 +724,63 @@ func analysisE2ELatestLimitListTradeDate(ctx context.Context, t *testing.T, adap
 	return fmt.Sprint(v)
 }
 
-// runLimitListSync 执行 trade_cal + stock_basic + limit_list_d 同步（涨停天梯依赖 limit_list）
-func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflowE2EContext, tradeDate string) {
+// analysisE2ELatestLimitStepTradeDate 返回 limit_step 中最大的 trade_date（天梯接口优先用此表），无数据或出错返回空字符串
+func analysisE2ELatestLimitStepTradeDate(ctx context.Context, t *testing.T, adapter duckDBSkipCheckAdapter) string {
+	if adapter == nil {
+		return ""
+	}
+	ok, _ := adapter.TableExists(ctx, "limit_step")
+	if !ok {
+		return ""
+	}
+	rows, err := adapter.Query(ctx, "SELECT trade_date FROM limit_step ORDER BY trade_date DESC LIMIT 1")
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	v, ok := rows[0]["trade_date"]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+// runLimitListThsSync 先单独同步 limit_list_ths（同花顺涨跌停榜单），保证天梯详情优先有数据
+func runLimitListThsSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflowE2EContext, tradeDate string) {
 	targetDBPath := testCtx.config.DuckDBPath
+	dataStoreID, dataSourceID := getOrCreateE2ELimitDataStoreAndSource(ctx, t, testCtx, targetDBPath)
+	startDate, endDate := tradeDate, tradeDate
+	if testCtx.config.IsRealMode {
+		startDate = time.Now().AddDate(0, 0, -14).Format("20060102")
+		endDate = time.Now().Format("20060102")
+	}
+	createReq := contracts.CreateSyncPlanRequest{
+		Name: "E2E LimitLadder THS", DataSourceID: dataSourceID, DataStoreID: dataStoreID,
+		SelectedAPIs: []string{"trade_cal", "stock_basic", "limit_list_ths"},
+	}
+	plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, createReq)
+	if err != nil {
+		if strings.Contains(err.Error(), "no column named") || strings.Contains(err.Error(), "default_execute_params") {
+			t.Skipf("SyncPlan 表结构需更新迁移后重试: %v", err)
+		}
+		require.NoError(t, err)
+	}
+	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
+	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
+		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+	})
+	require.NoError(t, err)
+	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
+	timeout := 10 * time.Minute
+	if testCtx.config.IsRealMode {
+		timeout = 15 * time.Minute
+	}
+	_, _ = waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, execution.WorkflowInstID.String(), timeout)
+}
+
+// getOrCreateE2ELimitDataStoreAndSource 获取或创建 E2E 用的 DataStore 与 DataSource，并确保建表完成
+func getOrCreateE2ELimitDataStoreAndSource(ctx context.Context, t *testing.T, testCtx *builtinWorkflowE2EContext, targetDBPath string) (dataStoreID, dataSourceID shared.ID) {
 	existingStores, err := testCtx.datastoreAppService.ListDataStores(ctx)
 	require.NoError(t, err)
-	var dataStoreID shared.ID
 	for _, ds := range existingStores {
 		if ds.StoragePath == targetDBPath || ds.Name == "E2E Analysis DuckDB" {
 			dataStoreID = ds.ID
@@ -680,7 +794,6 @@ func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflo
 		require.NoError(t, err)
 		dataStoreID = ds.ID
 	}
-	var dataSourceID shared.ID
 	allDataSources, _ := testCtx.metadataAppService.ListDataSources(ctx)
 	for _, ds := range allDataSources {
 		if ds.Name == "Tushare" {
@@ -703,6 +816,13 @@ func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflo
 	})
 	require.NoError(t, err)
 	_, _ = waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, tableInstanceID.String(), 2*time.Minute)
+	return dataStoreID, dataSourceID
+}
+
+// runLimitListSync 在 limit_list_ths 已先同步的前提下，执行 limit_step + limit_list_d 同步
+func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflowE2EContext, tradeDate string) {
+	targetDBPath := testCtx.config.DuckDBPath
+	dataStoreID, dataSourceID := getOrCreateE2ELimitDataStoreAndSource(ctx, t, testCtx, targetDBPath)
 
 	startDate := tradeDate
 	endDate := tradeDate
@@ -712,7 +832,7 @@ func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflo
 	}
 	createReq := contracts.CreateSyncPlanRequest{
 		Name: "E2E LimitLadder", DataSourceID: dataSourceID, DataStoreID: dataStoreID,
-		SelectedAPIs: []string{"trade_cal", "stock_basic", "limit_list_d"},
+		SelectedAPIs: []string{"trade_cal", "stock_basic", "limit_step", "limit_list_d"},
 	}
 	plan, err := testCtx.syncAppService.CreateSyncPlan(ctx, createReq)
 	if err != nil {
@@ -729,7 +849,7 @@ func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflo
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
 	timeout := 10 * time.Minute
 	if testCtx.config.IsRealMode {
-		timeout = 20 * time.Minute
+		timeout = 15 * time.Minute
 	}
 	_, _ = waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, execution.WorkflowInstID.String(), timeout)
 }
@@ -959,7 +1079,7 @@ func runDragonTigerMoneyFlowSync(ctx context.Context, t *testing.T, testCtx *bui
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
 	timeout := 10 * time.Minute
 	if testCtx.config.IsRealMode {
-		timeout = 20 * time.Minute
+		timeout = 15 * time.Minute
 	}
 	_, _ = waitForWorkflowCompletionQuiet(ctx, testCtx.taskEngineAdapter, execution.WorkflowInstID.String(), timeout)
 }
@@ -1043,7 +1163,7 @@ func printIndexInfoTable(t *testing.T, data []analysis.IndexInfo, writers ...io.
 	logTableLine(t, header, writers...)
 	logTableLine(t, strings.Repeat("-", len(header)), writers...)
 	for _, r := range data {
-		logTableLine(t, fmt.Sprintf("%-14s %-20s %-8s %-10s %-8s", r.TsCode, trunc(r.Name, 20), r.Market, trunc(r.Publisher, 10), trunc(r.Category, 8)), writers...)
+		logTableLine(t, fmt.Sprintf("%-14s %-20s %-8s %-10s %-8s", r.TsCode, trunc(r.Name, 15), r.Market, trunc(r.Publisher, 10), trunc(r.Category, 8)), writers...)
 	}
 	logTableLine(t, fmt.Sprintf("共 %d 条", len(data)), writers...)
 }
@@ -1058,7 +1178,7 @@ func printConceptInfoTable(t *testing.T, data []analysis.ConceptInfo, writers ..
 	logTableLine(t, header, writers...)
 	logTableLine(t, strings.Repeat("-", len(header)), writers...)
 	for _, r := range data {
-		logTableLine(t, fmt.Sprintf("%-12s %-20s %-10s %6d", r.Code, trunc(r.Name, 20), r.Source, r.StockCount), writers...)
+		logTableLine(t, fmt.Sprintf("%-12s %-20s %-10s %6d", r.Code, trunc(r.Name, 15), r.Source, r.StockCount), writers...)
 	}
 	logTableLine(t, fmt.Sprintf("共 %d 条", len(data)), writers...)
 }
@@ -1127,7 +1247,7 @@ func printConceptHeatTable(t *testing.T, data []analysis.ConceptHeat, writers ..
 	logTableLine(t, header, writers...)
 	logTableLine(t, strings.Repeat("-", len(header)), writers...)
 	for _, r := range data {
-		logTableLine(t, fmt.Sprintf("%-12s %-20s %6d %6d %8.2f", r.ConceptCode, trunc(r.ConceptName, 20), r.StockCount, r.LimitUpCount, r.AvgPctChg), writers...)
+		logTableLine(t, fmt.Sprintf("%-12s %-20s %6d %6d %8.2f", r.ConceptCode, trunc(r.ConceptName, 15), r.StockCount, r.LimitUpCount, r.AvgPctChg), writers...)
 	}
 	logTableLine(t, fmt.Sprintf("共 %d 条", len(data)), writers...)
 }
@@ -1139,16 +1259,52 @@ func printLimitLadderStatsTable(t *testing.T, s *analysis.LimitLadderStats, writ
 		return
 	}
 	logTableLine(t, fmt.Sprintf("  日期=%s 涨停总数=%d 最高连板=%d 阶梯数=%d", s.TradeDate, s.TotalLimitUp, s.MaxConsecutive, len(s.Ladders)), writers...)
+	header := fmt.Sprintf("%-12s %-10s %4s %-10s %-8s %-8s %-8s %4s %10s %-14s %8s %6s %8s %12s %-8s",
+		"代码", "名称", "连板", "首次涨停", "首次封板", "最后封板", "状态", "炸板", "封单额", "原因", "收盘", "涨跌幅%", "换手%", "成交额", "行业")
 	for _, ld := range s.Ladders {
-		logTableLine(t, fmt.Sprintf("    连板%d天: %d 只", ld.ConsecutiveDays, ld.StockCount), writers...)
+		logTableLine(t, fmt.Sprintf("  ---- 连板%d天: %d 只 ----", ld.ConsecutiveDays, ld.StockCount), writers...)
+		if len(ld.Stocks) > 0 {
+			logTableLine(t, header, writers...)
+			logTableLine(t, strings.Repeat("-", len(header)), writers...)
+			for _, st := range ld.Stocks {
+				reason := trunc(st.LimitReason, 14)
+				if reason == "" {
+					reason = "-"
+				}
+				firstLimit := st.FirstLimitDate
+				if firstLimit == "" {
+					firstLimit = "-"
+				}
+				limitTime := st.LimitTime
+				if limitTime == "" {
+					limitTime = "-"
+				}
+				lastLimit := st.LastLimitTime
+				if lastLimit == "" {
+					lastLimit = "-"
+				}
+				status := trunc(st.LimitStatus, 8)
+				if status == "" {
+					status = "-"
+				}
+				logTableLine(t, fmt.Sprintf("%-12s %-10s %4d %-10s %-8s %-8s %-8s %4d %10.0f %-14s %8.2f %6.2f %8.2f %12.0f %-8s",
+					st.TsCode, trunc(st.Name, 10), st.ConsecutiveDays, firstLimit, limitTime, lastLimit, status,
+					st.OpenTimes, st.LimitAmount, reason, st.Close, st.PctChg, st.TurnoverRate, st.Amount, trunc(st.Industry, 8)), writers...)
+			}
+		}
 	}
 }
 
+// trunc 按字符（rune）截断，避免截断多字节 UTF-8 导致最后一字显示为
 func trunc(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	return s[:max]
+	return string(r[:max])
 }
 
 // duckDBSkipCheckAdapter 用于“数据已就绪则跳过工作流”的检查

@@ -155,7 +155,9 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	// ========== 龙虎榜相关 API ==========
 	"hsgt_top10":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"limit_list_d": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"limit_list_d":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"limit_list_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 同花顺涨跌停榜单，涨停原因等详情优先用此表
+	"limit_step":     {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 涨停连板天梯
 
 	// ========== 同花顺概念板块 API ==========
 	"ths_index":  {PreferredParam: "none", Dependencies: nil},
