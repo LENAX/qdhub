@@ -2,6 +2,7 @@
 /doc
 /README.md
 /scripts
+/qdhub-frontend
 .vscode
 /key
 qdhub/logs
