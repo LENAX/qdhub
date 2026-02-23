@@ -1,3 +1,11 @@
+# 本仓库只跟踪 qdhub/ 目录（后端）；前端用独立 repo 管理
+/doc
+/README.md
+/scripts
+.vscode
+/key
+qdhub/logs
+
 .DS_Store
 .cursor/plans/qdhub_迭代开发计划_5bd94df0.plan.md
 .cursor
@@ -34,5 +42,9 @@ qdhub/logs/qdhub.log
 qdhub/*.test
 qdhub/logs/e2e_server.log
 qdhub/logs/qdhub.log
+qdhub/data/qdhub.db-shm
+qdhub/data/qdhub.db-wal
+qdhub/logs/qdhub.log
+qdhub/configs/.dsn_resolved
 qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal
