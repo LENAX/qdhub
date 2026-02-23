@@ -246,6 +246,24 @@ func TestWorkflowExecutor_ParameterMapping(t *testing.T) {
 		assert.NotEmpty(t, instanceID)
 	})
 
+	t.Run("ExecuteBatchDataSync - accepts APIConfigs only (SyncPlan path)", func(t *testing.T) {
+		req := workflow.BatchDataSyncRequest{
+			DataSourceName: "tushare",
+			Token:          "test-token",
+			TargetDBPath:   "/tmp/test.duckdb",
+			StartDate:      "20251201",
+			EndDate:        "20251231",
+			APIConfigs: []workflow.APISyncConfig{
+				{APIName: "daily", SyncMode: "template", ParamKey: "trade_date", UpstreamTask: "FetchTradeCal", Dependencies: []string{"FetchTradeCal"}},
+			},
+			MaxStocks: 0,
+		}
+
+		instanceID, err := workflowExecutor.ExecuteBatchDataSync(ctx, req)
+		assert.NoError(t, err, "ExecuteBatchDataSync with APIConfigs only should succeed")
+		assert.NotEmpty(t, instanceID)
+	})
+
 	t.Run("CreateTables - optional MaxTables not added when zero", func(t *testing.T) {
 		req := workflow.CreateTablesRequest{
 			DataSourceID:   shared.NewID(),

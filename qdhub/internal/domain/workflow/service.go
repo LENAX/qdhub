@@ -74,17 +74,19 @@ type CreateTablesRequest struct {
 }
 
 // BatchDataSyncRequest 批量同步请求参数
+// APIConfigs 与 APINames 二选一：有 APIConfigs 时优先使用（用于 SyncPlan 执行），否则使用 APINames + 默认策略。
 type BatchDataSyncRequest struct {
-	DataSourceID   shared.ID // 数据源 ID（可选，用于查询策略）
-	DataSourceName string    // 数据源名称（必填）
-	Token          string    // API Token（必填）
-	TargetDBPath   string    // 目标数据库路径（必填）
-	StartDate      string    // 开始日期（必填，格式: "20251201"）
-	EndDate        string    // 结束日期（必填，格式: "20251231"）
-	StartTime      string    // 开始时间（可选，格式: "09:30:00"）
-	EndTime        string    // 结束时间（可选，格式: "15:00:00"）
-	APINames       []string  // 需要同步的 API 列表（必填）
-	MaxStocks      int       // 最大股票数量（可选，0表示不限制）
+	DataSourceID   shared.ID         // 数据源 ID（可选，用于查询策略）
+	DataSourceName string            // 数据源名称（必填）
+	Token          string            // API Token（必填）
+	TargetDBPath   string            // 目标数据库路径（必填）
+	StartDate      string            // 开始日期（必填，格式: "20251201"）
+	EndDate        string            // 结束日期（必填，格式: "20251231"）
+	StartTime      string            // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string            // 结束时间（可选，格式: "15:00:00"）
+	APINames       []string          // 需要同步的 API 列表（与 APIConfigs 二选一）
+	APIConfigs     []APISyncConfig   // API 同步配置（与 APINames 二选一，优先使用）
+	MaxStocks      int               // 最大股票数量（可选，0表示不限制）
 }
 
 // RealtimeDataSyncRequest 实时同步请求参数
@@ -100,12 +102,13 @@ type RealtimeDataSyncRequest struct {
 
 // APISyncConfig API 同步配置（用于 SyncPlan 执行）
 type APISyncConfig struct {
-	APIName      string                 // API 名称
-	SyncMode     string                 // 同步模式: direct | template
-	ParamKey     string                 // 参数键（用于上游任务传递）
-	UpstreamTask string                 // 上游任务名称
-	Dependencies []string               // 依赖的任务列表
-	ExtraParams  map[string]interface{} // 额外参数
+	APIName        string                 // API 名称
+	SyncMode       string                 // 同步模式: direct | template
+	ParamKey       string                 // 参数键（模板任务时用于拆分子任务）
+	UpstreamTask   string                 // 上游任务名称（如 FetchTradeCal, FetchStockBasic）
+	UpstreamParams map[string]interface{} // 上游参数映射（direct 模式，用于 SyncAPIData upstream_params）
+	Dependencies   []string               // 依赖的任务列表
+	ExtraParams    map[string]interface{} // 额外固定参数
 }
 
 // ExecutionGraphSyncRequest 基于 ExecutionGraph 的同步请求参数

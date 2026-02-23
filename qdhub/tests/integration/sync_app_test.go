@@ -23,6 +23,8 @@ type MockSyncWorkflowExecutor struct {
 	// FixedBatchSyncInstanceID when set, ExecuteBatchDataSync returns this ID instead of NewID().
 	// Use in tests that insert workflow_instance (e.g. UoW ExecuteSyncPlan) to satisfy FK.
 	FixedBatchSyncInstanceID *shared.ID
+	// LastBatchDataSyncRequest captures the last BatchDataSyncRequest passed to ExecuteBatchDataSync (for regression tests).
+	LastBatchDataSyncRequest *workflow.BatchDataSyncRequest
 }
 
 func (m *MockSyncWorkflowExecutor) ExecuteBuiltInWorkflow(ctx context.Context, name string, params map[string]interface{}) (shared.ID, error) {
@@ -38,6 +40,8 @@ func (m *MockSyncWorkflowExecutor) ExecuteCreateTables(ctx context.Context, req 
 }
 
 func (m *MockSyncWorkflowExecutor) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
+	// Capture request for regression tests (shallow copy of request, configs slice is shared)
+	m.LastBatchDataSyncRequest = &req
 	if m.FixedBatchSyncInstanceID != nil {
 		return *m.FixedBatchSyncInstanceID, nil
 	}
@@ -91,6 +95,31 @@ func (m *MockSyncDependencyResolver) Resolve(selectedAPIs []string, allAPIDepend
 		}
 	}
 	return graph, selectedAPIs, nil
+}
+
+// ResolverWithParamMappings returns a graph where the first API has template mode and ParamMappings (for regression tests).
+type ResolverWithParamMappings struct{}
+
+func (m *ResolverWithParamMappings) Resolve(selectedAPIs []string, allAPIDependencies map[string][]sync.ParamDependency) (*sync.ExecutionGraph, []string, error) {
+	// Level 0: base deps; Level 1: selected APIs
+	levels := [][]string{{"trade_cal", "stock_basic"}, selectedAPIs}
+	graph := &sync.ExecutionGraph{
+		Levels:      levels,
+		TaskConfigs: make(map[string]*sync.TaskConfig),
+	}
+	graph.TaskConfigs["trade_cal"] = &sync.TaskConfig{APIName: "trade_cal", SyncMode: sync.TaskSyncModeDirect}
+	graph.TaskConfigs["stock_basic"] = &sync.TaskConfig{APIName: "stock_basic", SyncMode: sync.TaskSyncModeDirect}
+	for _, api := range selectedAPIs {
+		graph.TaskConfigs[api] = &sync.TaskConfig{
+			APIName:      api,
+			SyncMode:     sync.TaskSyncModeTemplate,
+			Dependencies: []string{"FetchTradeCal"},
+			ParamMappings: []sync.ParamMapping{
+				{ParamName: "trade_date", SourceTask: "FetchTradeCal", SourceField: "cal_date", Select: "last"},
+			},
+		}
+	}
+	return graph, append([]string{"trade_cal", "stock_basic"}, selectedAPIs...), nil
 }
 
 // ==================== Integration Tests ====================
@@ -358,5 +387,150 @@ func TestSyncApplicationService_Integration_CreateSyncPlan_DataSourceNotFound(t 
 	})
 	if err == nil {
 		t.Error("Expected error for non-existent data source")
+	}
+}
+
+// TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs 回归测试：执行同步计划时必须将 APIConfigs 传给工作流，而非仅 APINames
+func TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	fixedWfInstID := shared.ID("test-wf-inst-apiconfigs")
+	capturingExecutor := &MockSyncWorkflowExecutor{FixedBatchSyncInstanceID: &fixedWfInstID}
+
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, capturingExecutor, dependencyResolver, nil, uowImpl)
+
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("create data source: %v", err)
+	}
+	token := metadata.NewToken(dataSource.ID, "test-token", nil)
+	if err := dataSourceRepo.SetToken(token); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+	apiMeta := metadata.NewAPIMetadata(dataSource.ID, "api1", "API 1", "GET", "/api1")
+	if err := dataSourceRepo.AddAPIMetadata(apiMeta); err != nil {
+		t.Fatalf("add api metadata: %v", err)
+	}
+
+	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Plan",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"api1"},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if err := svc.ResolveSyncPlan(ctx, plan.ID); err != nil {
+		t.Fatalf("resolve plan: %v", err)
+	}
+	if err := svc.EnablePlan(ctx, plan.ID); err != nil {
+		t.Fatalf("enable plan: %v", err)
+	}
+
+	_, _ = db.Exec(`INSERT INTO workflow_definition (id, name) VALUES (?, ?)`, "wf-def-apiconfigs", "Test")
+	_, _ = db.Exec(`INSERT INTO workflow_instance (id, workflow_id, status) VALUES (?, ?, ?)`, string(fixedWfInstID), "wf-def-apiconfigs", "Running")
+
+	_, err = svc.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
+		TargetDBPath: "/tmp/test.db",
+		StartDate:    "20250101",
+		EndDate:      "20250131",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSyncPlan: %v", err)
+	}
+
+	req := capturingExecutor.LastBatchDataSyncRequest
+	if req == nil {
+		t.Fatal("ExecuteBatchDataSync was not called or request was not captured")
+	}
+	if len(req.APIConfigs) == 0 {
+		t.Errorf("expected APIConfigs to be set (SyncPlan path); got len(APIConfigs)=0")
+	}
+	if len(req.APINames) != 0 {
+		t.Errorf("expected APINames to be empty when using APIConfigs; got len(APINames)=%d", len(req.APINames))
+	}
+}
+
+// TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamKeyAndUpstreamTask 回归测试：当计划任务含 ParamMappings 时，APIConfigs 中应带上 ParamKey 与 UpstreamTask
+func TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamKeyAndUpstreamTask(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	fixedWfInstID := shared.ID("test-wf-inst-paramkey")
+	capturingExecutor := &MockSyncWorkflowExecutor{FixedBatchSyncInstanceID: &fixedWfInstID}
+	resolverWithMappings := &ResolverWithParamMappings{}
+
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	uowImpl := uow.NewUnitOfWork(db)
+
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, capturingExecutor, resolverWithMappings, nil, uowImpl)
+
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("create data source: %v", err)
+	}
+	token := metadata.NewToken(dataSource.ID, "test-token", nil)
+	if err := dataSourceRepo.SetToken(token); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+	for _, name := range []string{"trade_cal", "stock_basic", "daily"} {
+		apiMeta := metadata.NewAPIMetadata(dataSource.ID, name, name, "GET", "/"+name)
+		if err := dataSourceRepo.AddAPIMetadata(apiMeta); err != nil {
+			t.Fatalf("add api metadata %s: %v", name, err)
+		}
+	}
+
+	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:         "Plan",
+		DataSourceID: dataSource.ID,
+		SelectedAPIs: []string{"daily"},
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	if err := svc.ResolveSyncPlan(ctx, plan.ID); err != nil {
+		t.Fatalf("resolve plan: %v", err)
+	}
+	if err := svc.EnablePlan(ctx, plan.ID); err != nil {
+		t.Fatalf("enable plan: %v", err)
+	}
+
+	_, _ = db.Exec(`INSERT INTO workflow_definition (id, name) VALUES (?, ?)`, "wf-def-paramkey", "Test")
+	_, _ = db.Exec(`INSERT INTO workflow_instance (id, workflow_id, status) VALUES (?, ?, ?)`, string(fixedWfInstID), "wf-def-paramkey", "Running")
+
+	_, err = svc.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
+		TargetDBPath: "/tmp/test.db",
+		StartDate:    "20250101",
+		EndDate:      "20250131",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSyncPlan: %v", err)
+	}
+
+	req := capturingExecutor.LastBatchDataSyncRequest
+	if req == nil || len(req.APIConfigs) == 0 {
+		t.Fatal("ExecuteBatchDataSync was not called or APIConfigs empty")
+	}
+
+	var foundWithParamKey bool
+	for _, c := range req.APIConfigs {
+		if c.APIName == "daily" && c.ParamKey == "trade_date" && c.UpstreamTask == "FetchTradeCal" {
+			foundWithParamKey = true
+			break
+		}
+	}
+	if !foundWithParamKey {
+		t.Errorf("expected at least one APIConfig (daily) to have ParamKey=trade_date and UpstreamTask=FetchTradeCal; got configs: %+v", req.APIConfigs)
 	}
 }

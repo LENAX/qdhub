@@ -110,8 +110,8 @@ func (e *WorkflowExecutorImpl) ExecuteCreateTables(ctx context.Context, req work
 // ExecuteBatchDataSync executes the batch_data_sync built-in workflow.
 // IMPORTANT: Unlike other built-in workflows that use parameter replacement,
 // BatchDataSync dynamically builds the workflow at execution time based on
-// the provided API list. This is because each API requires a separate task,
-// and the workflow structure cannot be determined at initialization time.
+// the provided API list or APIConfigs. When APIConfigs is set (e.g. from SyncPlan),
+// it takes precedence over APINames and uses the plan's dependency and param config.
 func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req workflow.BatchDataSyncRequest) (shared.ID, error) {
 	// Validate required parameters
 	if req.DataSourceName == "" {
@@ -129,7 +129,7 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 	if req.EndDate == "" {
 		return "", workflows.ErrEmptyEndDate
 	}
-	if len(req.APINames) == 0 {
+	if len(req.APIConfigs) == 0 && len(req.APINames) == 0 {
 		return "", workflows.ErrEmptyAPINames
 	}
 
@@ -140,22 +140,35 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 		return "", fmt.Errorf("failed to get function registry: invalid type")
 	}
 
-	// Dynamically build the workflow with the actual API list
-	// This creates a separate task for each API, rather than using
-	// parameter replacement on a placeholder template
 	wfBuilder := workflows.NewBatchDataSyncWorkflowBuilder(registry).
 		WithDataSource(req.DataSourceName, req.Token).
 		WithTargetDB(req.TargetDBPath).
 		WithDateRange(req.StartDate, req.EndDate).
-		WithAPIs(req.APINames...).
 		WithMaxStocks(req.MaxStocks)
 
-	// Add optional time parameters if set
+	if len(req.APIConfigs) > 0 {
+		// SyncPlan 路径：使用解析后的 API 配置（依赖与参数来源由计划决定）
+		configs := make([]workflows.APISyncConfig, 0, len(req.APIConfigs))
+		for _, c := range req.APIConfigs {
+			configs = append(configs, workflows.APISyncConfig{
+				APIName:        c.APIName,
+				SyncMode:       c.SyncMode,
+				ParamKey:       c.ParamKey,
+				UpstreamTask:   c.UpstreamTask,
+				UpstreamParams: c.UpstreamParams,
+				ExtraParams:    c.ExtraParams,
+				Dependencies:   c.Dependencies,
+			})
+		}
+		wfBuilder.WithAPIConfigs(configs...)
+	} else {
+		wfBuilder.WithAPIs(req.APINames...)
+	}
+
 	if req.StartTime != "" || req.EndTime != "" {
 		wfBuilder.WithTimeRange(req.StartTime, req.EndTime)
 	}
 
-	// If DataSourceID is provided, create strategy provider and inject it
 	if !req.DataSourceID.IsEmpty() {
 		provider := workflows.NewRepositoryStrategyProvider(e.metadataRepo)
 		wfBuilder.WithStrategyProvider(provider, req.DataSourceID)
@@ -166,7 +179,6 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 		return "", fmt.Errorf("failed to build batch data sync workflow: %w", err)
 	}
 
-	// Submit the dynamically built workflow directly to Task Engine
 	controller, err := e.taskEngineAdapter.SubmitDynamicWorkflow(ctx, wf)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit workflow: %w", err)

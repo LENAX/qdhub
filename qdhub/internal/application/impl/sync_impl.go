@@ -327,8 +327,8 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		return "", shared.NewDomainError(shared.ErrCodeValidation, "token not configured for data source", nil)
 	}
 
-	// Convert to API configs (for future use with advanced workflow execution)
-	_ = s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
+	// 使用计划解析出的任务配置（依赖与参数来源），避免工作流仅按 APINames 用默认策略推断
+	apiConfigs := s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
 
 	// Execute workflow (external async operation, not part of transaction)
 	instanceID, err := s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
@@ -340,7 +340,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		EndDate:        req.EndDate,
 		StartTime:      req.StartTime,
 		EndTime:        req.EndTime,
-		APINames:       s.extractAPINames(needSyncTasks),
+		APIConfigs:     apiConfigs,
 		MaxStocks:      0,
 	})
 	if err != nil {
@@ -410,6 +410,7 @@ func (s *SyncApplicationServiceImpl) filterTasksByFrequency(tasks []*sync.SyncTa
 }
 
 // convertToAPIConfigs converts ExecutionGraph and tasks to API configs.
+// 从 SyncTask.ParamMappings 填充 ParamKey、UpstreamTask、UpstreamParams，使工作流按计划依赖与参数执行。
 func (s *SyncApplicationServiceImpl) convertToAPIConfigs(graph *sync.ExecutionGraph, tasks []*sync.SyncTask) []workflow.APISyncConfig {
 	configs := make([]workflow.APISyncConfig, 0, len(tasks))
 
@@ -419,14 +420,40 @@ func (s *SyncApplicationServiceImpl) convertToAPIConfigs(graph *sync.ExecutionGr
 			SyncMode: task.SyncMode.String(),
 		}
 
-		// Add dependencies
 		if len(task.Dependencies) > 0 {
 			config.Dependencies = task.Dependencies
 		}
-
-		// Add params
 		if len(task.Params) > 0 {
 			config.ExtraParams = task.Params
+		}
+
+		// 从 ParamMappings 填充模板/直接任务的参数来源
+		if len(task.ParamMappings) > 0 {
+			first := task.ParamMappings[0]
+			config.ParamKey = first.ParamName
+			config.UpstreamTask = first.SourceTask
+			if task.SyncMode == sync.TaskSyncModeDirect {
+				// direct 模式：构建 upstream_params 供 SyncAPIData 的 resolveUpstreamParams 使用
+				config.UpstreamParams = make(map[string]interface{})
+				for _, m := range task.ParamMappings {
+					extractedField := m.SourceField
+					if extractedField == "cal_date" {
+						extractedField = "cal_dates"
+					}
+					if extractedField == "ts_code" {
+						extractedField = "ts_codes"
+					}
+					selectVal := m.Select
+					if selectVal == "" {
+						selectVal = "last"
+					}
+					config.UpstreamParams[m.ParamName] = map[string]interface{}{
+						"task_name":       m.SourceTask,
+						"extracted_field": extractedField,
+						"select":          selectVal,
+					}
+				}
+			}
 		}
 
 		configs = append(configs, config)
