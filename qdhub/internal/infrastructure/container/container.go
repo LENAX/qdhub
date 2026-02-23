@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -413,32 +414,97 @@ func (c *Container) initDatabase() error {
 	return nil
 }
 
-// runMigrations runs database migrations.
+// runMigrations runs database migrations in order.
+// Order: 001 -> 002_auth -> 002_seed_mapping_rules (SQLite only) -> 003 -> 004 (SQLite only) -> 005 -> 006_seed -> 007.
 func (c *Container) runMigrations() error {
 	if c.config.MigrationPath == "" {
 		return nil
 	}
 
+	// 001_init_schema
 	migrationSQL, err := os.ReadFile(c.config.MigrationPath)
 	if err != nil {
 		return fmt.Errorf("failed to read migration file: %w", err)
 	}
-
 	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
 		return fmt.Errorf("failed to run migration: %w", err)
 	}
 
-	// Run auth migration
+	// 002_auth_schema (driver-specific)
 	if err := c.runAuthMigration(); err != nil {
 		return fmt.Errorf("failed to run auth migration: %w", err)
 	}
 
-	// Seed default admin user if not exists
+	// 002_seed_mapping_rules (SQLite: INSERT OR IGNORE)
+	if c.config.DBDriver == "sqlite" {
+		if err := c.runMigrationFile("./migrations/002_seed_mapping_rules.up.sql"); err != nil {
+			return fmt.Errorf("failed to run 002_seed_mapping_rules: %w", err)
+		}
+	} else {
+		logrus.Info("Skipping 002_seed_mapping_rules (SQLite only)")
+	}
+
+	// 003_sync_plan_migration
+	if err := c.runMigrationFile("./migrations/003_sync_plan_migration.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 003_sync_plan_migration: %w", err)
+	}
+
+	// 004_api_sync_strategy (SQLite: INSERT OR REPLACE, randomblob)
+	if c.config.DBDriver == "sqlite" {
+		if err := c.runMigrationFile("./migrations/004_api_sync_strategy.up.sql"); err != nil {
+			return fmt.Errorf("failed to run 004_api_sync_strategy: %w", err)
+		}
+	} else {
+		logrus.Info("Skipping 004_api_sync_strategy (SQLite only)")
+	}
+
+	// 005_sync_plan_default_params (idempotent: ignore "duplicate column" on re-run)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/005_sync_plan_default_params.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 005_sync_plan_default_params: %w", err)
+	}
+
+	// 006_seed_default_admin (driver-specific)
 	if err := c.runDefaultAdminSeed(); err != nil {
 		return fmt.Errorf("failed to seed default admin: %w", err)
 	}
 
+	// 007_daily_adj_factor_trade_date_expand
+	if err := c.runMigrationFile("./migrations/007_daily_adj_factor_trade_date_expand.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 007_daily_adj_factor_trade_date_expand: %w", err)
+	}
+
 	logrus.Info("Database migrations applied successfully")
+	return nil
+}
+
+// runMigrationFile reads and executes a single migration file.
+func (c *Container) runMigrationFile(path string) error {
+	migrationSQL, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
+		return err
+	}
+	logrus.Infof("Migration applied: %s", path)
+	return nil
+}
+
+// runMigrationFileOrIgnoreDuplicateColumn runs a migration file; on "duplicate column" error (e.g. 005 re-run) it logs and returns nil.
+func (c *Container) runMigrationFileOrIgnoreDuplicateColumn(path string) error {
+	migrationSQL, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	_, err = c.DB.Exec(string(migrationSQL))
+	if err != nil && (strings.Contains(err.Error(), "duplicate column") || strings.Contains(err.Error(), "Duplicate column")) {
+		logrus.Infof("Migration %s already applied (column exists), skipping", path)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	logrus.Infof("Migration applied: %s", path)
 	return nil
 }
 
