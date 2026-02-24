@@ -64,6 +64,7 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // @Success      201      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans [post]
 func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 	var req CreateSyncPlanReq
@@ -96,6 +97,7 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 // @Produce      json
 // @Success      200  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans [get]
 func (h *SyncHandler) ListSyncPlans(c *gin.Context) {
 	plans, err := h.syncSvc.ListSyncPlans(c.Request.Context())
@@ -116,6 +118,7 @@ func (h *SyncHandler) ListSyncPlans(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id} [get]
 func (h *SyncHandler) GetSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -140,6 +143,7 @@ func (h *SyncHandler) GetSyncPlan(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id} [put]
 func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -181,6 +185,7 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 // @Success      204  {object}  nil
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id} [delete]
 func (h *SyncHandler) DeleteSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -205,6 +210,7 @@ func (h *SyncHandler) DeleteSyncPlan(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/resolve [post]
 func (h *SyncHandler) ResolveSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -228,6 +234,7 @@ func (h *SyncHandler) ResolveSyncPlan(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/trigger [post]
 func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -265,6 +272,7 @@ func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/enable [post]
 func (h *SyncHandler) EnablePlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -287,6 +295,7 @@ func (h *SyncHandler) EnablePlan(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/disable [post]
 func (h *SyncHandler) DisablePlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -311,6 +320,7 @@ func (h *SyncHandler) DisablePlan(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/executions [get]
 func (h *SyncHandler) ListExecutions(c *gin.Context) {
 	planID := shared.ID(c.Param("id"))
@@ -333,6 +343,7 @@ func (h *SyncHandler) ListExecutions(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /executions/{id} [get]
 func (h *SyncHandler) GetExecution(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -355,6 +366,7 @@ func (h *SyncHandler) GetExecution(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /executions/{id}/cancel [post]
 func (h *SyncHandler) CancelExecution(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -379,6 +391,7 @@ func (h *SyncHandler) CancelExecution(c *gin.Context) {
 // @Success      200      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /sync/callback [post]
 func (h *SyncHandler) HandleCallback(c *gin.Context) {
 	var req ExecutionCallbackReq
@@ -507,6 +520,7 @@ func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanPro
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/progress [get]
 func (h *SyncHandler) GetPlanProgress(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -531,6 +545,7 @@ func (h *SyncHandler) GetPlanProgress(c *gin.Context) {
 // @Success      200  {string}  string  "SSE stream of progress events"
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /sync-plans/{id}/progress-stream [get]
 func (h *SyncHandler) StreamPlanProgress(c *gin.Context) {
 	id := shared.ID(c.Param("id"))

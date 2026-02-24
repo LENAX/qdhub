@@ -19,4 +19,9 @@
 // @in                          header
 // @name                        Authorization
 // @description                 API Key for authentication
+//
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 JWT Bearer token (e.g. "Bearer <access_token>")
 package docs

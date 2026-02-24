@@ -43,6 +43,7 @@ func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // @Success      201      {object}  Response
 // @Failure      400      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datastores [post]
 func (h *DataStoreHandler) CreateDataStore(c *gin.Context) {
 	var req CreateDataStoreReq
@@ -73,6 +74,7 @@ func (h *DataStoreHandler) CreateDataStore(c *gin.Context) {
 // @Produce      json
 // @Success      200  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /datastores [get]
 func (h *DataStoreHandler) ListDataStores(c *gin.Context) {
 	stores, err := h.dataStoreSvc.ListDataStores(c.Request.Context())
@@ -93,6 +95,7 @@ func (h *DataStoreHandler) ListDataStores(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /datastores/{id} [get]
 func (h *DataStoreHandler) GetDataStore(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -117,6 +120,7 @@ func (h *DataStoreHandler) GetDataStore(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datastores/{id}/create-tables [post]
 func (h *DataStoreHandler) CreateTablesForDatasource(c *gin.Context) {
 	dataStoreID := shared.ID(c.Param("id"))

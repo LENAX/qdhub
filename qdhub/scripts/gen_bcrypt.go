@@ -16,4 +16,8 @@ func main() {
 	const defaultAdminPassword = "admin123" // 与 e2e 常量 e2eAdminPassword 及 006 迁移一致
 	h, _ := bcrypt.GenerateFromPassword([]byte(defaultAdminPassword), bcrypt.DefaultCost)
 	fmt.Println(string(h))
+
+	const guestPassword = "guest123" // 与 008_seed_guest_user 迁移一致，仅查看数据
+	h2, _ := bcrypt.GenerateFromPassword([]byte(guestPassword), bcrypt.DefaultCost)
+	fmt.Println("guest:", string(h2))
 }

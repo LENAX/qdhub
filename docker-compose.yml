@@ -1,0 +1,34 @@
+# QDHub - base compose (production or default)
+# Dev with hot reload: use docker-compose.override.yml (auto-merged when present)
+services:
+  backend:
+    build:
+      context: ./qdhub
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - QDHUB_SERVER_HOST=0.0.0.0
+      - QDHUB_SERVER_PORT=8080
+    volumes:
+      # Persist SQLite + DuckDB data
+      - qdhub_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./qdhub-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  qdhub_data:

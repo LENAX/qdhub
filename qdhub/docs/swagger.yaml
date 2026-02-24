@@ -1,5 +1,42 @@
 basePath: /api/v1
 definitions:
+  contracts.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  contracts.RegisterRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 8
+        type: string
+      username:
+        maxLength: 64
+        minLength: 3
+        type: string
+    required:
+    - email
+    - password
+    - username
+    type: object
+  contracts.UpdatePasswordRequest:
+    properties:
+      new_password:
+        minLength: 8
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
   http.CreateAPISyncStrategyReq:
     properties:
       api_name:
@@ -61,6 +98,8 @@ definitions:
         type: string
       data_store_id:
         type: string
+      default_execute_params:
+        $ref: '#/definitions/sync.ExecuteParams'
       description:
         type: string
       name:
@@ -166,6 +205,8 @@ definitions:
         type: string
       data_store_id:
         type: string
+      default_execute_params:
+        $ref: '#/definitions/sync.ExecuteParams'
       description:
         type: string
       name:
@@ -174,6 +215,19 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  sync.ExecuteParams:
+    properties:
+      end_date:
+        type: string
+      end_time:
+        type: string
+      start_date:
+        type: string
+      start_time:
+        type: string
+      target_db_path:
+        type: string
     type: object
 host: localhost:8080
 info:
@@ -190,6 +244,904 @@ info:
   title: QDHub API
   version: "1.0"
 paths:
+  /analysis/concept-heat:
+    get:
+      consumes:
+      - application/json
+      description: Get concept theme heat for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept heat
+      tags:
+      - Analysis
+  /analysis/concept-rotation:
+    get:
+      consumes:
+      - application/json
+      description: Get concept rotation stats for a date range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: pct_chg
+        description: Rank by field
+        in: query
+        name: rank_by
+        type: string
+      - description: Top N
+        in: query
+        name: top_n
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept rotation
+      tags:
+      - Analysis
+  /analysis/concept-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get stocks under a concept for a trade date
+      parameters:
+      - description: Concept code
+        in: query
+        name: concept_code
+        required: true
+        type: string
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept stocks
+      tags:
+      - Analysis
+  /analysis/concepts:
+    get:
+      consumes:
+      - application/json
+      description: List concept themes with optional source filter
+      parameters:
+      - description: Source filter
+        in: query
+        name: source
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List concepts
+      tags:
+      - Analysis
+  /analysis/custom-query/query:
+    post:
+      consumes:
+      - application/json
+      description: Execute a read-only SQL query (max_rows, timeout_seconds apply)
+      parameters:
+      - description: sql, max_rows, timeout_seconds
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Execute read-only query
+      tags:
+      - Analysis
+  /analysis/dragon-tiger:
+    get:
+      consumes:
+      - application/json
+      description: Get dragon-tiger (龙虎榜) list with optional trade_date/ts_code filter
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        type: string
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get dragon-tiger list
+      tags:
+      - Analysis
+  /analysis/factors:
+    post:
+      consumes:
+      - application/json
+      description: Calculate factor values for given stocks and date range
+      parameters:
+      - description: ts_codes, start_date, end_date, factors
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Calculate factors
+      tags:
+      - Analysis
+  /analysis/financial/indicators:
+    get:
+      consumes:
+      - application/json
+      description: Get financial indicators for a stock
+      parameters:
+      - description: Stock code
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get financial indicators
+      tags:
+      - Analysis
+  /analysis/financial/reports:
+    get:
+      consumes:
+      - application/json
+      description: Get financial reports for a stock
+      parameters:
+      - description: Stock code
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get financial reports
+      tags:
+      - Analysis
+  /analysis/indices:
+    get:
+      consumes:
+      - application/json
+      description: List market indices with optional market/category filter
+      parameters:
+      - description: Market filter
+        in: query
+        name: market
+        type: string
+      - description: Category filter
+        in: query
+        name: category
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List indices
+      tags:
+      - Analysis
+  /analysis/kline:
+    get:
+      consumes:
+      - application/json
+      description: Get daily/weekly/monthly K-line data for a stock
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: none
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - default: D
+        description: 'Period: D, W, M'
+        in: query
+        name: period
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get K-line data
+      tags:
+      - Analysis
+  /analysis/limit-stats:
+    get:
+      consumes:
+      - application/json
+      description: Get daily limit statistics for a date range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up/down stats
+      tags:
+      - Analysis
+  /analysis/limit-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get list of limit up or limit down stocks for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: up
+        description: up or down
+        in: query
+        name: limit_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up/down stock list
+      tags:
+      - Analysis
+  /analysis/limit-up-comparison:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up comparison for today vs previous days
+      parameters:
+      - description: Today date YYYYMMDD
+        in: query
+        name: today_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up comparison
+      tags:
+      - Analysis
+  /analysis/limit-up-ladder:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up ladder stats for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up ladder
+      tags:
+      - Analysis
+  /analysis/limit-up-list:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated limit up stock list for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up list
+      tags:
+      - Analysis
+  /analysis/money-flow:
+    get:
+      consumes:
+      - application/json
+      description: Get main/net money flow for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - description: Market
+        in: query
+        name: market
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get money flow
+      tags:
+      - Analysis
+  /analysis/news:
+    get:
+      consumes:
+      - application/json
+      description: List news with optional ts_code, category, date range
+      parameters:
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - description: News category
+        in: query
+        name: category
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 20
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List news
+      tags:
+      - Analysis
+  /analysis/popularity-rank:
+    get:
+      consumes:
+      - application/json
+      description: Get stock popularity rank by volume or other metric
+      parameters:
+      - default: volume
+        description: Rank type (e.g. volume)
+        in: query
+        name: rank_type
+        type: string
+      - default: 20
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get popularity rank
+      tags:
+      - Analysis
+  /analysis/sector-limit-up-stats:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up statistics by sector (industry/concept) for a trade
+        date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: industry
+        description: industry or concept
+        in: query
+        name: sector_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sector limit up stats
+      tags:
+      - Analysis
+  /analysis/sector-limit-up-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up stocks for a specific sector on a trade date
+      parameters:
+      - description: Sector code
+        in: query
+        name: sector_code
+        required: true
+        type: string
+      - default: industry
+        description: industry or concept
+        in: query
+        name: sector_type
+        type: string
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sector limit up stocks
+      tags:
+      - Analysis
+  /analysis/stocks:
+    get:
+      consumes:
+      - application/json
+      description: List stocks with optional market/industry/list_status filter
+      parameters:
+      - description: Market filter
+        in: query
+        name: market
+        type: string
+      - description: Industry filter
+        in: query
+        name: industry
+        type: string
+      - description: List status filter
+        in: query
+        name: list_status
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List stocks
+      tags:
+      - Analysis
+  /analysis/stocks/{ts_code}/basic:
+    get:
+      consumes:
+      - application/json
+      description: Get basic information for a stock by ts_code
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: path
+        name: ts_code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get stock basic info
+      tags:
+      - Analysis
   /api-sync-strategies/{id}:
     delete:
       consumes:
@@ -214,6 +1166,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Delete API sync strategy
       tags:
       - DataSources
@@ -242,6 +1196,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get API sync strategy
       tags:
       - DataSources
@@ -280,9 +1236,162 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Update API sync strategy
       tags:
       - DataSources
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user and return access tokens
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Login user
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      description: Get current authenticated user information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get current user
+      tags:
+      - Auth
+  /auth/password:
+    put:
+      consumes:
+      - application/json
+      description: Update current user's password
+      parameters:
+      - description: Password update details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.UpdatePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update password
+      tags:
+      - Auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refresh access token using refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: refresh_token
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Refresh access token
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Register a new user account
+      parameters:
+      - description: Registration details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Register a new user
+      tags:
+      - Auth
   /datasources:
     get:
       consumes:
@@ -295,10 +1404,16 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List all data sources
       tags:
       - DataSources
@@ -324,10 +1439,16 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Create a new data source
       tags:
       - DataSources
@@ -357,6 +1478,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get a data source
       tags:
       - DataSources
@@ -386,6 +1509,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List API sync strategies
       tags:
       - DataSources
@@ -424,6 +1549,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Create API sync strategy
       tags:
       - DataSources
@@ -463,6 +1590,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Refresh metadata from data source
       tags:
       - DataSources
@@ -493,6 +1622,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get data source token
       tags:
       - DataSources
@@ -531,6 +1662,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Set data source token
       tags:
       - DataSources
@@ -550,6 +1683,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List all data stores
       tags:
       - DataStores
@@ -579,6 +1714,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Create a new data store
       tags:
       - DataStores
@@ -608,6 +1745,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get a data store
       tags:
       - DataStores
@@ -648,6 +1787,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Create tables for datasource
       tags:
       - DataStores
@@ -677,6 +1818,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get sync execution
       tags:
       - SyncPlans
@@ -706,6 +1849,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Cancel sync execution
       tags:
       - SyncPlans
@@ -739,6 +1884,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List workflow instances
       tags:
       - Workflows
@@ -768,6 +1915,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get workflow instance
       tags:
       - Workflows
@@ -797,6 +1946,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Cancel workflow instance
       tags:
       - Workflows
@@ -826,7 +1977,41 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get instance progress
+      tags:
+      - Workflows
+  /instances/{id}/progress-stream:
+    get:
+      consumes:
+      - application/json
+      description: Stream the progress status of a workflow instance via Server-Sent
+        Events (SSE)
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of progress events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Stream instance progress
       tags:
       - Workflows
   /instances/{id}/tasks:
@@ -855,6 +2040,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get task instances
       tags:
       - Workflows
@@ -874,6 +2061,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List all sync plans
       tags:
       - SyncPlans
@@ -903,6 +2092,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Create a new sync plan
       tags:
       - SyncPlans
@@ -930,6 +2121,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Delete a sync plan
       tags:
       - SyncPlans
@@ -958,6 +2151,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Get a sync plan
       tags:
       - SyncPlans
@@ -996,6 +2191,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Update a sync plan
       tags:
       - SyncPlans
@@ -1025,6 +2222,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Disable a sync plan
       tags:
       - SyncPlans
@@ -1054,6 +2253,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Enable a sync plan
       tags:
       - SyncPlans
@@ -1083,7 +2284,72 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: List sync executions
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/progress:
+    get:
+      consumes:
+      - application/json
+      description: Get aggregated progress of the latest execution for a sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync plan progress
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/progress-stream:
+    get:
+      consumes:
+      - application/json
+      description: Stream aggregated progress of the latest execution for a sync plan
+        via SSE
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of progress events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Stream sync plan progress
       tags:
       - SyncPlans
   /sync-plans/{id}/resolve:
@@ -1112,6 +2378,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Resolve sync plan dependencies
       tags:
       - SyncPlans
@@ -1147,6 +2415,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Trigger a sync plan
       tags:
       - SyncPlans
@@ -1178,12 +2448,19 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
       summary: Handle execution callback
       tags:
       - SyncPlans
 securityDefinitions:
   ApiKeyAuth:
     description: API Key for authentication
+    in: header
+    name: Authorization
+    type: apiKey
+  BearerAuth:
+    description: JWT Bearer token (e.g. "Bearer <access_token>")
     in: header
     name: Authorization
     type: apiKey

@@ -43,6 +43,10 @@ help:
 	@echo "  make docs           Generate Swagger API documentation"
 	@echo "  make deploy-dev     Deploy to dev environment"
 	@echo "  make deploy-prod    Deploy to production"
+	@echo "  make compose-dev    Docker Compose dev (hot reload, from repo root)"
+	@echo "  make compose-prod   Docker Compose prod (no override)"
+	@echo "  make compose-up     Compose up -d (uses override if present)"
+	@echo "  make compose-down   Compose down"
 	@echo ""
 
 # Dependencies
@@ -103,7 +107,7 @@ run: build
 	./$(BIN_DIR)/$(APP_NAME) server --config configs/config.yaml
 
 run-dev:
-	$(GO) run . -config configs/config.yaml
+	$(GO) run . server --config configs/config.yaml
 
 # Swagger documentation
 install-swag:
@@ -140,9 +144,35 @@ deploy-dev:
 deploy-prod:
 	@./scripts/deploy.sh prod
 
-# Docker (future)
+# Docker (single-image, legacy)
 docker-build:
 	docker build -t $(APP_NAME):$(VERSION) .
 
 docker-run:
 	docker run -p 8080:8080 $(APP_NAME):$(VERSION)
+
+# Docker Compose: dev (hot reload) vs prod
+# Compose files live at repo root (parent of qdhub/)
+COMPOSE_ROOT := $(dir $(CURDIR))..
+COMPOSE_FILES := -f $(COMPOSE_ROOT)/docker-compose.yml
+
+.PHONY: compose-up compose-down compose-build compose-dev compose-prod
+compose-up:
+	cd $(COMPOSE_ROOT) && docker compose $(COMPOSE_FILES) up -d
+
+compose-down:
+	cd $(COMPOSE_ROOT) && docker compose $(COMPOSE_FILES) down
+
+compose-build:
+	cd $(COMPOSE_ROOT) && docker compose $(COMPOSE_FILES) build
+
+# Dev: with override (hot reload, host data). Run from repo root: docker compose up
+compose-dev:
+	@echo "Dev: ensure docker-compose.override.yml is present, then from repo root run:"
+	@echo "  docker compose up"
+	@echo "Backend: Air hot reload, frontend: Vite HMR, data: ./qdhub/data (SQLite + DuckDB)"
+	cd $(COMPOSE_ROOT) && docker compose up
+
+# Prod: no override, only base compose
+compose-prod:
+	cd $(COMPOSE_ROOT) && docker compose $(COMPOSE_FILES) up -d

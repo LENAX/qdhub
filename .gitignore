@@ -6,6 +6,7 @@
 .vscode
 /key
 qdhub/logs
+qdhub/tmp
 
 .DS_Store
 .cursor/plans/qdhub_迭代开发计划_5bd94df0.plan.md
@@ -47,5 +48,9 @@ qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal
 qdhub/logs/qdhub.log
 qdhub/configs/.dsn_resolved
+qdhub/data/qdhub.db-shm
+qdhub/data/qdhub.db-wal
+qdhub/logs/qdhub.log
+qdhub/data/qdhub.db
 qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal

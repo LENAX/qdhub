@@ -51,7 +51,9 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  Response
+// @Failure      401  {object}  Response  "Unauthorized"
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources [get]
 func (h *MetadataHandler) ListDataSources(c *gin.Context) {
 	sources, err := h.metadataSvc.ListDataSources(c.Request.Context())
@@ -71,7 +73,9 @@ func (h *MetadataHandler) ListDataSources(c *gin.Context) {
 // @Param        request  body      CreateDataSourceReq  true  "Data source details"
 // @Success      201      {object}  Response
 // @Failure      400      {object}  Response
+// @Failure      401      {object}  Response  "Unauthorized"
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources [post]
 func (h *MetadataHandler) CreateDataSource(c *gin.Context) {
 	var req CreateDataSourceReq
@@ -99,6 +103,7 @@ func (h *MetadataHandler) CreateDataSource(c *gin.Context) {
 // @Tags         DataSources
 // @Accept       json
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id   path      string  true  "Data source ID"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
@@ -129,6 +134,7 @@ func (h *MetadataHandler) GetDataSource(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources/{id}/refresh [post]
 func (h *MetadataHandler) RefreshMetadata(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -165,6 +171,7 @@ func (h *MetadataHandler) RefreshMetadata(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources/{id}/token [post]
 func (h *MetadataHandler) SetToken(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -197,6 +204,7 @@ func (h *MetadataHandler) SetToken(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources/{id}/token [get]
 func (h *MetadataHandler) GetToken(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -230,6 +238,7 @@ func (h *MetadataHandler) GetToken(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources/{id}/api-sync-strategies [post]
 func (h *MetadataHandler) CreateAPISyncStrategy(c *gin.Context) {
 	dataSourceID := shared.ID(c.Param("id"))
@@ -266,6 +275,7 @@ func (h *MetadataHandler) CreateAPISyncStrategy(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /datasources/{id}/api-sync-strategies [get]
 func (h *MetadataHandler) ListAPISyncStrategies(c *gin.Context) {
 	dataSourceID := shared.ID(c.Param("id"))
@@ -288,6 +298,7 @@ func (h *MetadataHandler) ListAPISyncStrategies(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /api-sync-strategies/{id} [get]
 func (h *MetadataHandler) GetAPISyncStrategy(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -314,6 +325,7 @@ func (h *MetadataHandler) GetAPISyncStrategy(c *gin.Context) {
 // @Failure      400      {object}  Response
 // @Failure      404      {object}  Response
 // @Failure      500      {object}  Response
+// @Security     BearerAuth
 // @Router       /api-sync-strategies/{id} [put]
 func (h *MetadataHandler) UpdateAPISyncStrategy(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -354,6 +366,7 @@ func (h *MetadataHandler) UpdateAPISyncStrategy(c *gin.Context) {
 // @Success      204  {object}  nil
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /api-sync-strategies/{id} [delete]
 func (h *MetadataHandler) DeleteAPISyncStrategy(c *gin.Context) {
 	id := shared.ID(c.Param("id"))

@@ -415,7 +415,7 @@ func (c *Container) initDatabase() error {
 }
 
 // runMigrations runs database migrations in order.
-// Order: 001 -> 002_auth -> 002_seed_mapping_rules (SQLite only) -> 003 -> 004 (SQLite only) -> 005 -> 006_seed -> 007.
+// Order: 001 -> 002_auth -> 002_seed_mapping_rules (SQLite only) -> 003 -> 004 (SQLite only) -> 005 -> 006_seed -> 007 -> 008_seed_guest.
 func (c *Container) runMigrations() error {
 	if c.config.MigrationPath == "" {
 		return nil
@@ -471,6 +471,11 @@ func (c *Container) runMigrations() error {
 	// 007_daily_adj_factor_trade_date_expand
 	if err := c.runMigrationFile("./migrations/007_daily_adj_factor_trade_date_expand.up.sql"); err != nil {
 		return fmt.Errorf("failed to run 007_daily_adj_factor_trade_date_expand: %w", err)
+	}
+
+	// 008_seed_guest_user (driver-specific)
+	if err := c.runGuestSeed(); err != nil {
+		return fmt.Errorf("failed to seed guest user: %w", err)
 	}
 
 	logrus.Info("Database migrations applied successfully")
@@ -558,6 +563,32 @@ func (c *Container) runDefaultAdminSeed() error {
 	}
 
 	logrus.Info("Default admin seed applied successfully")
+	return nil
+}
+
+// runGuestSeed runs the guest user (viewer role) seed migration based on database type.
+func (c *Container) runGuestSeed() error {
+	var migrationFile string
+	switch c.config.DBDriver {
+	case "postgres":
+		migrationFile = "./migrations/008_seed_guest_user.postgres.up.sql"
+	case "mysql":
+		migrationFile = "./migrations/008_seed_guest_user.mysql.up.sql"
+	default:
+		migrationFile = "./migrations/008_seed_guest_user.sqlite.up.sql"
+	}
+
+	migrationSQL, err := os.ReadFile(migrationFile)
+	if err != nil {
+		logrus.Warnf("Guest seed file not found: %s", migrationFile)
+		return nil
+	}
+
+	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
+		return fmt.Errorf("failed to run guest seed: %w", err)
+	}
+
+	logrus.Info("Guest user seed applied successfully")
 	return nil
 }
 

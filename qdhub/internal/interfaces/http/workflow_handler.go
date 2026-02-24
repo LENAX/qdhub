@@ -50,6 +50,7 @@ func (h *WorkflowHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // @Success      200          {object}  Response
 // @Failure      400          {object}  Response
 // @Failure      500          {object}  Response
+// @Security     BearerAuth
 // @Router       /instances [get]
 func (h *WorkflowHandler) ListInstances(c *gin.Context) {
 	workflowDefID := c.Query("workflow_id")
@@ -84,6 +85,7 @@ func (h *WorkflowHandler) ListInstances(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /instances/{id} [get]
 func (h *WorkflowHandler) GetInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -106,6 +108,7 @@ func (h *WorkflowHandler) GetInstance(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /instances/{id}/tasks [get]
 func (h *WorkflowHandler) GetTaskInstances(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -128,6 +131,7 @@ func (h *WorkflowHandler) GetTaskInstances(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /instances/{id}/progress [get]
 func (h *WorkflowHandler) GetInstanceProgress(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -150,6 +154,7 @@ func (h *WorkflowHandler) GetInstanceProgress(c *gin.Context) {
 // @Success      200  {string}  string  "SSE stream of progress events"
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /instances/{id}/progress-stream [get]
 func (h *WorkflowHandler) StreamInstanceProgress(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
@@ -222,6 +227,7 @@ func (h *WorkflowHandler) StreamInstanceProgress(c *gin.Context) {
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
+// @Security     BearerAuth
 // @Router       /instances/{id}/cancel [post]
 func (h *WorkflowHandler) CancelInstance(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
