@@ -14,18 +14,18 @@ import (
 //   - Manage data store connection configuration
 //   - Manage table schema definitions
 type QuantDataStore struct {
-	ID          shared.ID
-	Name        string
-	Description string
-	Type        DataStoreType
-	DSN         string // encrypted
-	StoragePath string
-	Status      shared.Status
-	CreatedAt   shared.Timestamp
-	UpdatedAt   shared.Timestamp
+	ID          shared.ID        `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Type        DataStoreType    `json:"type"`
+	DSN         string           `json:"dsn,omitempty"` // encrypted
+	StoragePath string           `json:"storage_path,omitempty"`
+	Status      shared.Status    `json:"status"`
+	CreatedAt   shared.Timestamp `json:"created_at"`
+	UpdatedAt   shared.Timestamp `json:"updated_at"`
 
 	// Aggregated entities (lazy loaded)
-	Schemas []TableSchema
+	Schemas []TableSchema `json:"schemas,omitempty"`
 }
 
 // NewQuantDataStore creates a new QuantDataStore aggregate.
@@ -68,17 +68,17 @@ func (ds *QuantDataStore) UpdateConnection(dsn, storagePath string) {
 // TableSchema represents a table schema entity.
 // Belongs to: QuantDataStore aggregate
 type TableSchema struct {
-	ID            shared.ID
-	DataStoreID   shared.ID
-	APIMetadataID shared.ID
-	TableName     string
-	Columns       []ColumnDef
-	PrimaryKeys   []string
-	Indexes       []IndexDef
-	Status        SchemaStatus
-	CreatedAt     shared.Timestamp
-	UpdatedAt     shared.Timestamp
-	ErrorMessage  *string
+	ID            shared.ID        `json:"id"`
+	DataStoreID   shared.ID        `json:"data_store_id"`
+	APIMetadataID shared.ID        `json:"api_metadata_id"`
+	TableName     string           `json:"table_name"`
+	Columns       []ColumnDef      `json:"columns,omitempty"`
+	PrimaryKeys   []string         `json:"primary_keys,omitempty"`
+	Indexes       []IndexDef       `json:"indexes,omitempty"`
+	Status        SchemaStatus     `json:"status"`
+	CreatedAt     shared.Timestamp `json:"created_at"`
+	UpdatedAt     shared.Timestamp `json:"updated_at"`
+	ErrorMessage  *string          `json:"error_message,omitempty"`
 }
 
 // NewTableSchema creates a new TableSchema.

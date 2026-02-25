@@ -13,19 +13,19 @@ import (
 // SyncExecution represents a sync execution entity.
 // Belongs to: SyncPlan aggregate
 type SyncExecution struct {
-	ID             shared.ID
-	SyncPlanID     shared.ID // 关联 SyncPlan
-	WorkflowInstID shared.ID
-	Status         ExecStatus
-	StartedAt      shared.Timestamp
-	FinishedAt     *shared.Timestamp
-	RecordCount    int64
-	ErrorMessage   *string
+	ID             shared.ID         `json:"id"`
+	SyncPlanID     shared.ID         `json:"sync_plan_id"`
+	WorkflowInstID shared.ID         `json:"workflow_instance_id,omitempty"`
+	Status         ExecStatus       `json:"status"`
+	StartedAt      shared.Timestamp  `json:"started_at"`
+	FinishedAt     *shared.Timestamp `json:"finished_at,omitempty"`
+	RecordCount    int64             `json:"record_count"`
+	ErrorMessage   *string           `json:"error_message,omitempty"`
 
 	// New fields for SyncPlan
-	ExecuteParams *ExecuteParams // 执行参数快照
-	SyncedAPIs    []string       // 本次实际同步的 API 列表
-	SkippedAPIs   []string       // 本次跳过的 API 列表（基于频率）
+	ExecuteParams *ExecuteParams `json:"execute_params,omitempty"`
+	SyncedAPIs    []string       `json:"synced_apis,omitempty"`
+	SkippedAPIs   []string       `json:"skipped_apis,omitempty"`
 }
 
 // NewSyncExecution creates a new SyncExecution for SyncPlan.
@@ -197,37 +197,37 @@ func (eg *ExecutionGraph) UnmarshalJSON(data []byte) error {
 //   - 维护 SyncExecution 集合（执行记录）
 //   - 存储解析后的执行图
 type SyncPlan struct {
-	ID           shared.ID
-	Name         string
-	Description  string
-	DataSourceID shared.ID
-	DataStoreID  shared.ID // 目标数据存储
+	ID           shared.ID  `json:"id"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description"`
+	DataSourceID shared.ID  `json:"data_source_id"`
+	DataStoreID  shared.ID  `json:"data_store_id"`
 
 	// 用户配置
-	SelectedAPIs []string // 用户选择的 API 列表
+	SelectedAPIs []string `json:"selected_apis,omitempty"`
 
 	// 解析结果
-	ResolvedAPIs   []string        // 解析后的完整 API 列表（含自动补充的）
-	ExecutionGraph *ExecutionGraph // 依赖解析后的执行图
+	ResolvedAPIs   []string         `json:"resolved_apis,omitempty"`
+	ExecutionGraph *ExecutionGraph `json:"execution_graph,omitempty"`
 
 	// 调度配置
-	CronExpression *string // 定时表达式（可选）
+	CronExpression *string `json:"cron_expression,omitempty"`
 
 	// 默认执行参数（用于定时触发）
-	DefaultExecuteParams *ExecuteParams
+	DefaultExecuteParams *ExecuteParams `json:"default_execute_params,omitempty"`
 
 	// 状态
-	Status         PlanStatus
-	LastExecutedAt *time.Time
-	NextExecuteAt  *time.Time
+	Status         PlanStatus  `json:"status"`
+	LastExecutedAt *time.Time  `json:"last_run_at,omitempty"`
+	NextExecuteAt  *time.Time  `json:"next_run_at,omitempty"`
 
 	// 时间戳
-	CreatedAt shared.Timestamp
-	UpdatedAt shared.Timestamp
+	CreatedAt shared.Timestamp `json:"created_at"`
+	UpdatedAt shared.Timestamp `json:"updated_at"`
 
 	// 聚合内实体（懒加载）
-	Tasks      []*SyncTask      // 各 API 的同步配置
-	Executions []*SyncExecution // 执行记录
+	Tasks      []*SyncTask      `json:"tasks,omitempty"`
+	Executions []*SyncExecution `json:"executions,omitempty"`
 }
 
 // NewSyncPlan creates a new SyncPlan aggregate.
@@ -407,27 +407,27 @@ func (sp *SyncPlan) UnmarshalDefaultExecuteParamsJSON(jsonStr string) error {
 // SyncTask 单个 API 的同步配置（聚合内实体）
 // 替代原 SyncJob 的参数配置部分
 type SyncTask struct {
-	ID         shared.ID
-	SyncPlanID shared.ID
-	APIName    string       // API 名称
-	SyncMode   TaskSyncMode // 同步模式: direct | template
+	ID         shared.ID     `json:"id"`
+	SyncPlanID shared.ID     `json:"sync_plan_id"`
+	APIName    string        `json:"api_name"`
+	SyncMode   TaskSyncMode  `json:"sync_mode"`
 
 	// 参数配置
-	Params        map[string]interface{} // 固定参数
-	ParamMappings []ParamMapping         // 参数映射规则（从上游获取）
+	Params        map[string]interface{} `json:"params,omitempty"`
+	ParamMappings []ParamMapping         `json:"param_mappings,omitempty"`
 
 	// 任务级依赖（解析后填充）
-	Dependencies []string // 依赖的任务名称
+	Dependencies []string `json:"dependencies,omitempty"`
 
 	// 排序
-	Level     int // 执行层级（0=无依赖）
-	SortOrder int // 同层级内的排序
+	Level     int `json:"level"`
+	SortOrder int `json:"sort_order"`
 
 	// 同步频率控制
-	SyncFrequency time.Duration // 同步频率（如 24h, 168h=7d, 720h=30d）
-	LastSyncedAt  *time.Time    // 上次成功同步时间
+	SyncFrequency time.Duration `json:"sync_frequency,omitempty"`
+	LastSyncedAt  *time.Time   `json:"last_synced_at,omitempty"`
 
-	CreatedAt shared.Timestamp
+	CreatedAt shared.Timestamp `json:"created_at"`
 }
 
 // 常用同步频率常量
