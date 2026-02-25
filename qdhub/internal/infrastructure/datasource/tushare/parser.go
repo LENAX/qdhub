@@ -33,65 +33,58 @@ func (p *Parser) SupportedType() metadata.DocumentType {
 }
 
 // ParseCatalog parses the catalog structure from Tushare documentation HTML.
-// Returns: category list, API detail page URLs
-func (p *Parser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+// Returns: category list, API detail page URLs, and category ID per URL (same length; nil = no category).
+func (p *Parser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	var categories []metadata.APICategory
 	var apiURLs []string
+	var apiCategoryIDs []*shared.ID
 	categoryMap := make(map[string]*metadata.APICategory)
 
 	// Tushare navigation structure: #document > div > div > nav
-	// The nav contains nested <ul> and <li> elements
 	nav := doc.Find("#document > div > div > nav")
 	if nav.Length() == 0 {
-		// Fallback: try finding any nav element
 		nav = doc.Find("nav")
 	}
 
-	// Parse the navigation menu (ul > li structure)
 	nav.Find("ul").First().Each(func(i int, menu *goquery.Selection) {
-		p.parseMenu(menu, nil, categoryMap, &categories, &apiURLs)
+		p.parseMenu(menu, nil, categoryMap, &categories, &apiURLs, &apiCategoryIDs)
 	})
 
-	// If no menu found, try to find links directly in nav
 	if len(apiURLs) == 0 {
 		nav.Find("li > a").Each(func(i int, link *goquery.Selection) {
 			href, exists := link.Attr("href")
 			if exists && href != "" && isAPIDocLink(href) {
 				apiURLs = append(apiURLs, href)
+				apiCategoryIDs = append(apiCategoryIDs, nil)
 			}
 		})
 	}
 
-	// If still no links found, try to find links in the main content
 	if len(apiURLs) == 0 {
 		doc.Find("a[href*='/document/']").Each(func(i int, link *goquery.Selection) {
 			href, exists := link.Attr("href")
-			if exists && href != "" {
-				// Filter out non-API links
-				if isAPIDocLink(href) {
-					apiURLs = append(apiURLs, href)
-				}
+			if exists && href != "" && isAPIDocLink(href) {
+				apiURLs = append(apiURLs, href)
+				apiCategoryIDs = append(apiCategoryIDs, nil)
 			}
 		})
 	}
 
-	return categories, apiURLs, nil
+	return categories, apiURLs, apiCategoryIDs, nil
 }
 
-// parseMenu recursively parses a menu structure.
-func (p *Parser) parseMenu(menu *goquery.Selection, parentID *shared.ID, categoryMap map[string]*metadata.APICategory, categories *[]metadata.APICategory, apiURLs *[]string) {
+// parseMenu recursively parses a menu structure. parentID is the current category (nil at top level).
+func (p *Parser) parseMenu(menu *goquery.Selection, parentID *shared.ID, categoryMap map[string]*metadata.APICategory, categories *[]metadata.APICategory, apiURLs *[]string, apiCategoryIDs *[]*shared.ID) {
 	menu.ChildrenFiltered("li, .menu-item").Each(func(i int, item *goquery.Selection) {
-		// Check if this item has a submenu (category) or is a leaf (API)
 		submenu := item.Find("ul, .submenu").First()
 		link := item.ChildrenFiltered("a, .menu-link").First()
 
 		if submenu.Length() > 0 {
-			// This is a category
 			categoryName := strings.TrimSpace(link.Text())
 			if categoryName == "" {
 				categoryName = strings.TrimSpace(item.ChildrenFiltered("span, .menu-title").First().Text())
@@ -109,15 +102,14 @@ func (p *Parser) parseMenu(menu *goquery.Selection, parentID *shared.ID, categor
 				*categories = append(*categories, *category)
 				categoryMap[categoryName] = category
 
-				// Recursively parse submenu
 				categoryID := category.ID
-				p.parseMenu(submenu, &categoryID, categoryMap, categories, apiURLs)
+				p.parseMenu(submenu, &categoryID, categoryMap, categories, apiURLs, apiCategoryIDs)
 			}
 		} else if link.Length() > 0 {
-			// This is an API link
 			href, exists := link.Attr("href")
 			if exists && href != "" && isAPIDocLink(href) {
 				*apiURLs = append(*apiURLs, href)
+				*apiCategoryIDs = append(*apiCategoryIDs, parentID)
 			}
 		}
 	})

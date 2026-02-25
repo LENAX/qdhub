@@ -4,11 +4,13 @@ package impl
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 )
 
@@ -16,10 +18,11 @@ import (
 type DataStoreApplicationServiceImpl struct {
 	dataStoreRepo  datastore.QuantDataStoreRepository
 	dataSourceRepo metadata.DataSourceRepository
+	syncPlanRepo   sync.SyncPlanRepository
 
 	schemaValidator datastore.SchemaValidator
+	quantDBAdapter  QuantDBAdapter // optional: for create-file/connect and validation
 
-	// Workflow executor for executing built-in workflows (领域服务接口)
 	workflowExecutor workflow.WorkflowExecutor
 }
 
@@ -34,27 +37,34 @@ type QuantDBAdapter interface {
 
 	// TableExists checks if a table exists in the data store.
 	TableExists(ctx context.Context, ds *datastore.QuantDataStore, tableName string) (bool, error)
+
+	// InvalidateConnection drops the cached connection for the given data store ID (e.g. after connection info update).
+	InvalidateConnection(id shared.ID)
 }
 
 // NewDataStoreApplicationService creates a new DataStoreApplicationService implementation.
+// quantDBAdapter can be nil: then CreateDataStore will not run post-create validation, and ValidateDataStore will only do schema validation.
 func NewDataStoreApplicationService(
 	dataStoreRepo datastore.QuantDataStoreRepository,
 	dataSourceRepo metadata.DataSourceRepository,
+	syncPlanRepo sync.SyncPlanRepository,
 	workflowExecutor workflow.WorkflowExecutor,
+	quantDBAdapter QuantDBAdapter,
 ) contracts.DataStoreApplicationService {
 	return &DataStoreApplicationServiceImpl{
 		dataStoreRepo:    dataStoreRepo,
 		dataSourceRepo:   dataSourceRepo,
+		syncPlanRepo:     syncPlanRepo,
 		schemaValidator:  datastore.NewSchemaValidator(),
+		quantDBAdapter:   quantDBAdapter,
 		workflowExecutor: workflowExecutor,
 	}
 }
 
 // ==================== Data Store Management ====================
 
-// CreateDataStore creates a new data store.
+// CreateDataStore creates a new data store. For DuckDB, Connect creates the DB file if missing; for others, attempts connection. Runs validation after create.
 func (s *DataStoreApplicationServiceImpl) CreateDataStore(ctx context.Context, req contracts.CreateDataStoreRequest) (*datastore.QuantDataStore, error) {
-	// Create domain entity
 	ds := datastore.NewQuantDataStore(
 		req.Name,
 		req.Description,
@@ -63,14 +73,19 @@ func (s *DataStoreApplicationServiceImpl) CreateDataStore(ctx context.Context, r
 		req.StoragePath,
 	)
 
-	// Validate
 	if err := s.schemaValidator.ValidateDataStore(ds); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Persist
 	if err := s.dataStoreRepo.Create(ds); err != nil {
 		return nil, fmt.Errorf("failed to create data store: %w", err)
+	}
+
+	// Post-create validation: DuckDB file is created on first Connect; others attempt connection
+	if s.quantDBAdapter != nil {
+		if err := s.quantDBAdapter.TestConnection(ctx, ds); err != nil {
+			return ds, fmt.Errorf("data store created but validation failed (database unreachable): %w", err)
+		}
 	}
 
 	return ds, nil
@@ -95,6 +110,96 @@ func (s *DataStoreApplicationServiceImpl) ListDataStores(ctx context.Context) ([
 		return nil, fmt.Errorf("failed to list data stores: %w", err)
 	}
 	return stores, nil
+}
+
+// UpdateDataStore updates an existing data store.
+func (s *DataStoreApplicationServiceImpl) UpdateDataStore(ctx context.Context, id shared.ID, req contracts.UpdateDataStoreRequest) (*datastore.QuantDataStore, error) {
+	ds, err := s.dataStoreRepo.Get(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data store: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+
+	if req.Name != nil {
+		ds.Name = strings.TrimSpace(*req.Name)
+	}
+	if req.Description != nil {
+		ds.Description = *req.Description
+	}
+	if req.Type != nil {
+		ds.Type = *req.Type
+	}
+	if req.DSN != nil {
+		ds.DSN = *req.DSN
+	}
+	if req.StoragePath != nil {
+		ds.StoragePath = *req.StoragePath
+	}
+	ds.UpdatedAt = shared.Now()
+
+	if err := s.schemaValidator.ValidateDataStore(ds); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	if err := s.dataStoreRepo.Update(ds); err != nil {
+		return nil, fmt.Errorf("failed to update data store: %w", err)
+	}
+
+	if s.quantDBAdapter != nil {
+		s.quantDBAdapter.InvalidateConnection(id)
+		if err := s.quantDBAdapter.TestConnection(ctx, ds); err != nil {
+			return ds, fmt.Errorf("data store updated but validation failed (database unreachable): %w", err)
+		}
+	}
+
+	return ds, nil
+}
+
+// DeleteDataStore deletes a data store. Fails if any sync plan references it.
+func (s *DataStoreApplicationServiceImpl) DeleteDataStore(ctx context.Context, id shared.ID) error {
+	_, err := s.dataStoreRepo.Get(id)
+	if err != nil {
+		return fmt.Errorf("failed to get data store: %w", err)
+	}
+
+	exists, err := s.syncPlanRepo.Exists(shared.Eq("data_store_id", id.String()))
+	if err != nil {
+		return fmt.Errorf("failed to check sync plans: %w", err)
+	}
+	if exists {
+		return shared.NewDomainError(shared.ErrCodeValidation, "data store is in use by one or more sync plans", nil)
+	}
+
+	if err := s.dataStoreRepo.Delete(id); err != nil {
+		return fmt.Errorf("failed to delete data store: %w", err)
+	}
+	return nil
+}
+
+// ValidateDataStore checks whether the data store's database actually exists and is reachable.
+func (s *DataStoreApplicationServiceImpl) ValidateDataStore(ctx context.Context, id shared.ID) (*contracts.ValidateDataStoreResult, error) {
+	ds, err := s.dataStoreRepo.Get(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data store: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+
+	if err := s.schemaValidator.ValidateDataStore(ds); err != nil {
+		return &contracts.ValidateDataStoreResult{Valid: false, Message: err.Error()}, nil
+	}
+
+	if s.quantDBAdapter == nil {
+		return &contracts.ValidateDataStoreResult{Valid: true}, nil
+	}
+
+	if err := s.quantDBAdapter.TestConnection(ctx, ds); err != nil {
+		return &contracts.ValidateDataStoreResult{Valid: false, Message: err.Error()}, nil
+	}
+	return &contracts.ValidateDataStoreResult{Valid: true}, nil
 }
 
 // CreateTablesForDatasource creates tables for all APIs of a data source in the data store.

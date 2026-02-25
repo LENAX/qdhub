@@ -62,7 +62,7 @@ type Client struct {
 	// 方案 B：全局限流器，nil 表示不启用
 	rateLimiter *rate.Limiter
 	// 方案 A：限流错误后的退避与抖动
-	rateLimitBackoff      time.Duration
+	rateLimitBackoff       time.Duration
 	rateLimitBackoffJitter time.Duration
 }
 
@@ -218,14 +218,14 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 
 	c := &Client{
-		baseURL:               DefaultBaseURL,
-		transport:             transport,
-		httpClient:            &http.Client{Timeout: DefaultTimeout * time.Second, Transport: transport},
-		retryCount:            DefaultRetryCount,
-		retryDelay:            DefaultRetryDelay * time.Millisecond,
-		maxConcurrent:         DefaultMaxConcurrent,
-		errorMapper:           datasource.NewErrorMapper(TushareErrorMappingRules, datasource.ErrCodeUnknown),
-		rateLimitBackoff:      DefaultRateLimitBackoff,
+		baseURL:                DefaultBaseURL,
+		transport:              transport,
+		httpClient:             &http.Client{Timeout: DefaultTimeout * time.Second, Transport: transport},
+		retryCount:             DefaultRetryCount,
+		retryDelay:             DefaultRetryDelay * time.Millisecond,
+		maxConcurrent:          DefaultMaxConcurrent,
+		errorMapper:            datasource.NewErrorMapper(TushareErrorMappingRules, datasource.ErrCodeUnknown),
+		rateLimitBackoff:       DefaultRateLimitBackoff,
 		rateLimitBackoffJitter: DefaultRateLimitBackoffJitter,
 	}
 
@@ -435,15 +435,17 @@ func (c *Client) doRequest(ctx context.Context, reqBody tushareRequest) (*dataso
 	return result, nil
 }
 
-// ValidateToken validates if the token is valid by making a test API call.
+// ValidateToken 通过实际请求 Tushare 接口校验 token 是否有效。
+// 校验方式：调用 stock_basic 接口，params: { limit: 1 }。
+// 成功（code=0）视为 token 有效；失败时返回的 message 为 Tushare 接口原样返回的 msg（如「服务异常，请稍后再试！」）。
 func (c *Client) ValidateToken(ctx context.Context) (bool, error) {
 	if c.token == "" {
 		return false, nil
 	}
 
-	// Use a simple API to validate token (e.g., stock_basic with limit=1)
+	// 使用 stock_basic + ts_code=000001.SZ 作为轻量校验请求
 	_, err := c.Query(ctx, "stock_basic", map[string]interface{}{
-		"limit": 1,
+		"ts_code": "000001.SZ",
 	})
 	if err != nil {
 		if dsErr, ok := err.(*datasource.DataSourceError); ok {

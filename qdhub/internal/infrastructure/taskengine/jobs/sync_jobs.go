@@ -3,7 +3,6 @@ package jobs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,7 +16,6 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/types"
 
-	"qdhub/internal/domain/datastore"
 	"qdhub/internal/infrastructure/datasource"
 )
 
@@ -127,19 +125,14 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	logrus.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
 
-	// 如果指定了目标数据库，保存数据
+	// 如果指定了目标数据库，保存数据（使用 QuantDBFactory 按 target_db_path 获取与数据存储一致的 DuckDB）
 	var savedCount int64
 	var fields []string
 	if targetDBPath != "" && len(result.Data) > 0 {
-		// 获取 QuantDB Adapter（通过依赖注入）
-		if tc.GetRegistry() == nil {
-			return nil, fmt.Errorf("QuantDB dependency not found (Registry is nil)")
+		quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 		}
-		quantDBInterface, ok := tc.GetDependency("QuantDB")
-		if !ok {
-			return nil, fmt.Errorf("QuantDB dependency not found")
-		}
-		quantDB := quantDBInterface.(datastore.QuantDB)
 
 		// 使用 QuantDB 的 BulkInsertWithBatchID 保存数据
 		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
@@ -344,16 +337,18 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 }
 
 // DeleteSyncedDataJob 删除同步的数据（用于回滚）
+// 使用 QuantDBFactory 按 target_db_path 连接 DuckDB，与 Quant Data Store 一致。
 //
 // Input params:
 //   - api_name: string - API 名称（表名）
-//   - target_db_path: string - 目标数据库路径
+//   - target_db_path: string - 目标数据库路径（DuckDB）
 //   - sync_batch_id: string - 同步批次 ID
 //
 // Output:
 //   - deleted_count: int - 删除的记录数
 //   - api_name: string - API 名称
 func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
 	apiName := tc.GetParamString("api_name")
 	targetDBPath := tc.GetParamString("target_db_path")
 	syncBatchID := tc.GetParamString("sync_batch_id")
@@ -364,19 +359,16 @@ func DeleteSyncedDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	logrus.Printf("🗑️ [DeleteSyncedData] 删除同步数据: %s, BatchID=%s", apiName, syncBatchID)
 
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	defer db.Close()
 
-	deleteSQL := fmt.Sprintf(`DELETE FROM "%s" WHERE sync_batch_id = ?`, apiName)
-	result, err := db.Exec(deleteSQL, syncBatchID)
+	affected, err := quantDB.DeleteBySyncBatchID(ctx, apiName, syncBatchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete data: %w", err)
 	}
 
-	affected, _ := result.RowsAffected()
 	logrus.Printf("✅ [DeleteSyncedData] 删除成功: %s, 记录数=%d", apiName, affected)
 
 	return map[string]interface{}{
@@ -395,10 +387,10 @@ func NotifySyncCompleteJob(tc *task.TaskContext) (interface{}, error) {
 // ==================== 增量实时同步 Job Functions ====================
 
 // GetSyncCheckpointJob 获取同步检查点
-// 从检查点表中获取每个 API 的上次同步位置
+// 从检查点表中获取每个 API 的上次同步位置。使用 QuantDBFactory 按 target_db_path 连接 DuckDB。
 //
 // Input params:
-//   - target_db_path: string - 目标数据库路径
+//   - target_db_path: string - 目标数据库路径（DuckDB）
 //   - checkpoint_table: string - 检查点表名
 //   - api_names: []string - API 名称列表
 //
@@ -406,6 +398,7 @@ func NotifySyncCompleteJob(tc *task.TaskContext) (interface{}, error) {
 //   - checkpoints: map[string]string - API 名称到最后同步日期的映射
 //   - has_checkpoint: bool - 是否存在检查点
 func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
 	targetDBPath := tc.GetParamString("target_db_path")
 	checkpointTable := tc.GetParamString("checkpoint_table")
 
@@ -421,22 +414,21 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 
 	logrus.Printf("📍 [GetSyncCheckpoint] 获取检查点: table=%s, apis=%v", checkpointTable, apiNames)
 
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	defer db.Close()
 
-	// 确保检查点表存在
+	// 确保检查点表存在（DuckDB 兼容的 DDL）（DuckDB 兼容的 DDL）
 	createTableSQL := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS "%s" (
-			api_name TEXT PRIMARY KEY,
-			last_sync_date TEXT NOT NULL,
-			last_sync_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+			api_name VARCHAR PRIMARY KEY,
+			last_sync_date VARCHAR NOT NULL,
+			last_sync_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			record_count INTEGER DEFAULT 0
 		)
 	`, checkpointTable)
-	if _, err := db.Exec(createTableSQL); err != nil {
+	if _, err := quantDB.Execute(ctx, createTableSQL); err != nil {
 		return nil, fmt.Errorf("failed to create checkpoint table: %w", err)
 	}
 
@@ -445,15 +437,20 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	hasCheckpoint := false
 
 	for _, apiName := range apiNames {
-		var lastSyncDate string
 		query := fmt.Sprintf(`SELECT last_sync_date FROM "%s" WHERE api_name = ?`, checkpointTable)
-		err := db.QueryRow(query, apiName).Scan(&lastSyncDate)
-		if err == nil {
-			checkpoints[apiName] = lastSyncDate
-			hasCheckpoint = true
-			logrus.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, lastSyncDate)
-		} else if err != sql.ErrNoRows {
+		rows, err := quantDB.Query(ctx, query, apiName)
+		if err != nil {
 			logrus.Printf("⚠️ [GetSyncCheckpoint] 查询失败: %s, error=%v", apiName, err)
+			continue
+		}
+		if len(rows) > 0 {
+			if v, ok := rows[0]["last_sync_date"]; ok {
+				if s, ok := v.(string); ok {
+					checkpoints[apiName] = s
+					hasCheckpoint = true
+					logrus.Printf("📍 [GetSyncCheckpoint] %s: 上次同步日期=%s", apiName, s)
+				}
+			}
 		}
 	}
 
@@ -699,10 +696,10 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 }
 
 // UpdateSyncCheckpointJob 更新同步检查点
-// 同步完成后更新检查点表中的最后同步日期
+// 同步完成后更新检查点表中的最后同步日期。使用 QuantDBFactory 按 target_db_path 连接 DuckDB。
 //
 // Input params:
-//   - target_db_path: string - 目标数据库路径
+//   - target_db_path: string - 目标数据库路径（DuckDB）
 //   - checkpoint_table: string - 检查点表名
 //   - api_names: []string - API 名称列表
 //
@@ -710,6 +707,7 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 //   - updated: int - 更新的检查点数量
 //   - checkpoints: map[string]string - 更新后的检查点
 func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
 	targetDBPath := tc.GetParamString("target_db_path")
 	checkpointTable := tc.GetParamString("checkpoint_table")
 
@@ -740,23 +738,26 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	logrus.Printf("📝 [UpdateSyncCheckpoint] 更新检查点: table=%s, date=%s, apis=%v",
 		checkpointTable, latestTradeDate, apiNames)
 
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	defer db.Close()
 
 	// 保存旧的检查点（用于补偿）
 	oldCheckpoints := make(map[string]string)
 	for _, apiName := range apiNames {
-		var lastDate string
 		query := fmt.Sprintf(`SELECT last_sync_date FROM "%s" WHERE api_name = ?`, checkpointTable)
-		if err := db.QueryRow(query, apiName).Scan(&lastDate); err == nil {
-			oldCheckpoints[apiName] = lastDate
+		rows, err := quantDB.Query(ctx, query, apiName)
+		if err == nil && len(rows) > 0 {
+			if v, ok := rows[0]["last_sync_date"]; ok {
+				if s, ok := v.(string); ok {
+					oldCheckpoints[apiName] = s
+				}
+			}
 		}
 	}
 
-	// 更新检查点
+	// 更新检查点（DuckDB 兼容的 UPSERT）
 	updatedCount := 0
 	newCheckpoints := make(map[string]string)
 
@@ -769,7 +770,7 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	`, checkpointTable)
 
 	for _, apiName := range apiNames {
-		if _, err := db.Exec(upsertSQL, apiName, latestTradeDate); err != nil {
+		if _, err := quantDB.Execute(ctx, upsertSQL, apiName, latestTradeDate); err != nil {
 			logrus.Printf("⚠️ [UpdateSyncCheckpoint] 更新失败: %s, error=%v", apiName, err)
 			continue
 		}

@@ -23,11 +23,13 @@ import (
 	"qdhub/internal/domain/workflow"
 	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/datasourcevalidator"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
 	analysisinfra "qdhub/internal/infrastructure/analysis"
+	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
@@ -473,6 +475,11 @@ func (c *Container) runMigrations() error {
 		return fmt.Errorf("failed to run 007_daily_adj_factor_trade_date_expand: %w", err)
 	}
 
+	// 009_add_api_metadata_param_dependencies (idempotent: 001 may already have the column)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/009_add_api_metadata_param_dependencies.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 009_add_api_metadata_param_dependencies: %w", err)
+	}
+
 	// 008_seed_guest_user (driver-specific)
 	if err := c.runGuestSeed(); err != nil {
 		return fmt.Errorf("failed to seed guest user: %w", err)
@@ -660,20 +667,21 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		MetadataRepo:       c.MetadataRepo,
 	}
 
-	// 如果配置了默认 DuckDB 路径，创建并注入 QuantDB adapter
-	log.Printf("[Container] DefaultDuckDBPath from config: '%s'", c.config.DefaultDuckDBPath)
+	// QuantDBFactory：按 target_db_path（来自数据库 Quant Data Store）按需创建 DuckDB 连接，与 config 默认路径解耦
+	taskEngineDeps.QuantDBFactory = duckdb.NewFactory()
+	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
+
+	// 可选：若配置了默认 DuckDB 路径，仍注入单例 QuantDB 以兼容旧逻辑（优先使用 QuantDBFactory）
 	if c.config.DefaultDuckDBPath != "" {
-		log.Printf("[Container] Creating DuckDB adapter for: %s", c.config.DefaultDuckDBPath)
+		log.Printf("[Container] DefaultDuckDBPath from config: '%s' (optional)", c.config.DefaultDuckDBPath)
 		quantDBAdapter := duckdb.NewAdapter(c.config.DefaultDuckDBPath)
 		if err := quantDBAdapter.Connect(ctx); err != nil {
 			log.Printf("[Container] WARNING: Failed to connect to default DuckDB at %s: %v", c.config.DefaultDuckDBPath, err)
 		} else {
 			taskEngineDeps.QuantDB = quantDBAdapter
 			c.QuantDBAdapter = quantDBAdapter
-			log.Printf("[Container] ✅ QuantDB (DuckDB) adapter initialized: %s", c.config.DefaultDuckDBPath)
+			log.Printf("[Container] ✅ QuantDB (DuckDB) default adapter also initialized: %s", c.config.DefaultDuckDBPath)
 		}
-	} else {
-		log.Printf("[Container] No DefaultDuckDBPath configured, skipping QuantDB initialization")
 	}
 
 	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
@@ -766,14 +774,15 @@ func (c *Container) initApplicationServices() error {
 	// Metadata service
 	// 注意：MetadataSvc 使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc（应用服务）
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
-	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor)
+	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor, datasourcevalidator.NewTokenValidator())
 
-	// DataStore service
-	// 注意：DataStoreSvc 现在使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc
+	// DataStore service（注入 QuantDBAdapter：新建 DuckDB 时生成文件，非 DuckDB 时尝试连接；校验/更新/删除依赖此 adapter）
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
 		c.DataSourceRepo,
+		c.SyncPlanRepo,
 		c.WorkflowExecutor,
+		quantdb.NewQuantDBAdapter(),
 	)
 
 	// Sync service

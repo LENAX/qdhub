@@ -35,7 +35,7 @@ func TestTushareParser_ParseCatalog_Real(t *testing.T) {
 	t.Logf("Fetched catalog page, docType: %s, content length: %d", docType, len(content))
 
 	// Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(content)
+	categories, apiURLs, _, err := parser.ParseCatalog(content)
 	if err != nil {
 		t.Fatalf("failed to parse catalog: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestTushareParser_FullCrawlFlow_Real(t *testing.T) {
 	}
 
 	// Step 2: Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(catalogContent)
+	categories, apiURLs, _, err := parser.ParseCatalog(catalogContent)
 	if err != nil {
 		t.Fatalf("failed to parse catalog: %v", err)
 	}

@@ -78,7 +78,7 @@ func (f *e2eDocumentParserFactory) RegisterParser(parser metadata.DocumentParser
 
 type e2eDocumentParser struct{}
 
-func (m *e2eDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+func (m *e2eDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	// Return a category for testing
 	return []metadata.APICategory{
 		{
@@ -86,7 +86,7 @@ func (m *e2eDocumentParser) ParseCatalog(content string) ([]metadata.APICategory
 			Name:        "Test Category",
 			Description: "A test category",
 		},
-	}, []string{"http://example.com/api1", "http://example.com/api2"}, nil
+	}, []string{"http://example.com/api1", "http://example.com/api2"}, nil, nil
 }
 
 func (m *e2eDocumentParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
@@ -282,8 +282,8 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 
 	// Create application services
 	metadataRepo := repository.NewMetadataRepository(db)
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 

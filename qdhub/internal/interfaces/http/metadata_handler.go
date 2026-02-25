@@ -1,6 +1,8 @@
 package http
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 
 	"qdhub/internal/application/contracts"
@@ -26,6 +28,7 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/datasources", h.ListDataSources)
 	rg.POST("/datasources", h.CreateDataSource)
 	rg.GET("/datasources/:id", h.GetDataSource)
+	rg.DELETE("/datasources/:id", h.DeleteDataSource)
 
 	// Metadata refresh
 	rg.POST("/datasources/:id/refresh", h.RefreshMetadata)
@@ -33,6 +36,13 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// Token management
 	rg.POST("/datasources/:id/token", h.SetToken)
 	rg.GET("/datasources/:id/token", h.GetToken)
+	rg.GET("/datasources/:id/token/validate", h.ValidateDataSourceToken)
+	rg.GET("/datasources/:id/config", h.GetDataSourceConfig)
+
+	// API Metadata (paginated list + delete)
+	rg.GET("/datasources/:id/api-metadata", h.ListAPIMetadata)
+	rg.GET("/datasources/:id/api-categories", h.ListAPICategories)
+	rg.DELETE("/datasources/:id/api-metadata/:meta_id", h.DeleteAPIMetadata)
 
 	// API Sync Strategy management
 	rg.POST("/datasources/:id/api-sync-strategies", h.CreateAPISyncStrategy)
@@ -118,6 +128,29 @@ func (h *MetadataHandler) GetDataSource(c *gin.Context) {
 		return
 	}
 	Success(c, ds)
+}
+
+// DeleteDataSource handles DELETE /api/v1/datasources/:id
+// Cascades: api_sync_strategies, token, api_metadata, api_categories. Admin only (Casbin: datasources delete).
+// @Summary      Delete a data source
+// @Description  Delete a data source and cascade to api_metadata, api_sync_strategies, api_categories, token. Admin only.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data source ID"
+// @Success      204  "No Content"
+// @Failure      403  {object}  Response  "Forbidden (non-admin)"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id} [delete]
+func (h *MetadataHandler) DeleteDataSource(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+	if err := h.metadataSvc.DeleteDataSource(c.Request.Context(), id); err != nil {
+		HandleError(c, err)
+		return
+	}
+	NoContent(c)
 }
 
 // ==================== Metadata Refresh ====================
@@ -222,6 +255,173 @@ func (h *MetadataHandler) GetToken(c *gin.Context) {
 		"expires_at":     token.ExpiresAt,
 		"created_at":     token.CreatedAt,
 	})
+}
+
+// ValidateDataSourceToken handles GET /api/v1/datasources/:id/token/validate
+// If no token: returns has_token=false, message="未认证". If has token: uses data source adapter to send a test request; success -> valid=true, failure -> valid=false and message with concrete error.
+// @Summary      Validate data source token
+// @Description  Check if data source has a token and validate it via adapter test request. No token returns unauthenticated; with token runs a test request and returns success or error detail.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data source ID"
+// @Success      200  {object}  Response  "has_token, valid, message"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/token/validate [get]
+func (h *MetadataHandler) ValidateDataSourceToken(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	hasToken, valid, message, err := h.metadataSvc.ValidateDataSourceToken(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	Success(c, gin.H{
+		"has_token": hasToken,
+		"valid":    valid,
+		"message":  message,
+	})
+}
+
+// GetDataSourceConfig handles GET /api/v1/datasources/:id/config
+// Returns api_url and token for the config form (token only if present).
+// @Summary      Get data source config for edit
+// @Description  Returns api_url and token for pre-filling the configure modal. Token is only included when present.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data source ID"
+// @Success      200  {object}  Response  "api_url, token (optional)"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/config [get]
+func (h *MetadataHandler) GetDataSourceConfig(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	apiURL, token, err := h.metadataSvc.GetDataSourceConfig(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	out := gin.H{"api_url": apiURL}
+	if token != "" {
+		out["token"] = token
+	}
+	Success(c, out)
+}
+
+// ==================== API Metadata Endpoints ====================
+
+// ListAPIMetadata handles GET /api/v1/datasources/:id/api-metadata
+// @Summary      List API metadata for a data source
+// @Description  Get a paginated list of API metadata. Each item includes category_id. Optional filters: api_metadata_id, name, category_id.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string  true   "Data source ID"
+// @Param        page       query     int     false  "Page number (1-based)"     default(1)
+// @Param        page_size  query     int     false  "Page size (max 100)"       default(20)
+// @Param        api_metadata_id  query     string  false  "Filter by API metadata ID (exact)"
+// @Param        name             query     string  false  "Filter by name (contains)"
+// @Param        category_id      query     string  false  "Filter by API category ID (exact)"
+// @Success      200        {object}  PagedResponse  "data: API metadata list with category_id; total, page, size"
+// @Failure      404        {object}  Response  "Data source not found"
+// @Failure      500        {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/api-metadata [get]
+func (h *MetadataHandler) ListAPIMetadata(c *gin.Context) {
+	dataSourceID := shared.ID(c.Param("id"))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	idStr := c.Query("api_metadata_id")
+	name := c.Query("name")
+	categoryIDStr := c.Query("category_id")
+
+	req := contracts.ListAPIMetadataRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Name:     name,
+	}
+	if idStr != "" {
+		id := shared.ID(idStr)
+		req.ID = &id
+	}
+	if categoryIDStr != "" {
+		cid := shared.ID(categoryIDStr)
+		req.CategoryID = &cid
+	}
+
+	resp, err := h.metadataSvc.ListAPIMetadata(c.Request.Context(), dataSourceID, req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Paged(c, resp.Items, resp.Total, page, pageSize)
+}
+
+// ListAPICategories handles GET /api/v1/datasources/:id/api-categories
+// @Summary      List API categories for a data source
+// @Description  Get API categories. When has_apis_only=true, only categories that have at least one api_metadata are returned (for catalog dropdown).
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id              path      string  true   "Data source ID"
+// @Param        has_apis_only   query     bool    false  "If true, only return categories that have at least one API"
+// @Success      200  {object}  Response  "data: []APICategory"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/api-categories [get]
+func (h *MetadataHandler) ListAPICategories(c *gin.Context) {
+	dataSourceID := shared.ID(c.Param("id"))
+	hasAPIsOnly := c.Query("has_apis_only") == "true" || c.Query("has_apis_only") == "1"
+	list, err := h.metadataSvc.ListAPICategories(c.Request.Context(), dataSourceID, hasAPIsOnly)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	if list == nil {
+		list = []metadata.APICategory{}
+	}
+	Success(c, list)
+}
+
+// DeleteAPIMetadata handles DELETE /api/v1/datasources/:id/api-metadata/:meta_id
+// Admin only (Casbin: datasources delete).
+// @Summary      Delete API metadata
+// @Description  Delete a single API metadata by ID. Admin only.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "Data source ID"
+// @Param        meta_id  path      string  true  "API metadata ID"
+// @Success      204  "No Content"
+// @Failure      403  {object}  Response  "Forbidden (non-admin)"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/api-metadata/{meta_id} [delete]
+func (h *MetadataHandler) DeleteAPIMetadata(c *gin.Context) {
+	metaID := shared.ID(c.Param("meta_id"))
+	if err := h.metadataSvc.DeleteAPIMetadata(c.Request.Context(), metaID); err != nil {
+		HandleError(c, err)
+		return
+	}
+	NoContent(c)
 }
 
 // ==================== API Sync Strategy Endpoints ====================

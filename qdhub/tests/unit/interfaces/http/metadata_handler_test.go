@@ -90,6 +90,24 @@ func (m *MockMetadataService) ListAPISyncStrategies(ctx context.Context, dataSou
 	return args.Get(0).([]*metadata.APISyncStrategy), args.Error(1)
 }
 
+func (m *MockMetadataService) ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req contracts.ListAPIMetadataRequest) (*contracts.ListAPIMetadataResponse, error) {
+	args := m.Called(ctx, dataSourceID, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*contracts.ListAPIMetadataResponse), args.Error(1)
+}
+
+func (m *MockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockMetadataService) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 func (m *MockMetadataService) SaveToken(ctx context.Context, req contracts.SaveTokenRequest) error {
 	args := m.Called(ctx, req)
 	return args.Error(0)
@@ -289,6 +307,74 @@ func TestGetToken(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
+func TestListAPIMetadata(t *testing.T) {
+	mockSvc := new(MockMetadataService)
+	router := setupMetadataRouter(mockSvc)
+
+	api1 := metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "日线", "daily data", "/daily")
+	api2 := metadata.NewAPIMetadata(shared.ID("ds-1"), "adj_factor", "复权因子", "adj factor", "/adj_factor")
+	items := []*metadata.APIMetadata{api1, api2}
+	mockSvc.On("ListAPIMetadata", mock.Anything, shared.ID("ds-1"), mock.MatchedBy(func(req contracts.ListAPIMetadataRequest) bool {
+		return req.Page == 1 && req.PageSize == 20
+	})).Return(&contracts.ListAPIMetadataResponse{Items: items, Total: 2}, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/api-metadata", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var paged httpapi.PagedResponse
+	err := json.Unmarshal(w.Body.Bytes(), &paged)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, paged.Code)
+	assert.Equal(t, int64(2), paged.Total)
+	assert.Equal(t, 1, paged.Page)
+	assert.Equal(t, 20, paged.Size)
+	assert.NotNil(t, paged.Data)
+	dataSlice, ok := paged.Data.([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, dataSlice, 2)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestListAPIMetadataWithQueryParams(t *testing.T) {
+	mockSvc := new(MockMetadataService)
+	router := setupMetadataRouter(mockSvc)
+
+	api1 := metadata.NewAPIMetadata(shared.ID("ds-1"), "daily", "日线", "daily data", "/daily")
+	mockSvc.On("ListAPIMetadata", mock.Anything, shared.ID("ds-1"), mock.MatchedBy(func(req contracts.ListAPIMetadataRequest) bool {
+		return req.Page == 2 && req.PageSize == 10 && req.Name == "daily"
+	})).Return(&contracts.ListAPIMetadataResponse{Items: []*metadata.APIMetadata{api1}, Total: 1}, nil)
+
+	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-1/api-metadata?page=2&page_size=10&name=daily", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var paged httpapi.PagedResponse
+	err := json.Unmarshal(w.Body.Bytes(), &paged)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), paged.Total)
+	assert.Equal(t, 2, paged.Page)
+	assert.Equal(t, 10, paged.Size)
+	mockSvc.AssertExpectations(t)
+}
+
+func TestListAPIMetadataNotFound(t *testing.T) {
+	mockSvc := new(MockMetadataService)
+	router := setupMetadataRouter(mockSvc)
+
+	mockSvc.On("ListAPIMetadata", mock.Anything, shared.ID("ds-missing"), mock.Anything).
+		Return(nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil))
+
+	req, _ := http.NewRequest("GET", "/api/v1/datasources/ds-missing/api-metadata", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	mockSvc.AssertExpectations(t)
+}
 
 func TestRefreshMetadata(t *testing.T) {
 	mockSvc := new(MockMetadataService)

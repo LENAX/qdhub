@@ -3,6 +3,16 @@ package datastore
 
 import (
 	"context"
+	"errors"
+)
+
+var (
+	// ErrUnsupportedQuantDBType is returned when QuantDBFactory does not support the given type.
+	ErrUnsupportedQuantDBType = func(t DataStoreType) error {
+		return errors.New("unsupported quant db type: " + string(t))
+	}
+	// ErrQuantDBPathRequired is returned when StoragePath and DSN are both empty.
+	ErrQuantDBPathRequired = errors.New("quant db storage path or DSN is required")
 )
 
 // QuantDB defines the interface for quant database operations.

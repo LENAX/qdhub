@@ -221,11 +221,12 @@ func newMockTushareParser() *mockTushareParser {
 	return &mockTushareParser{}
 }
 
-func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	// 返回模拟的分类和 API URL 列表
+	catID := shared.NewID()
 	categories := []metadata.APICategory{
 		{
-			ID:          shared.NewID(),
+			ID:          catID,
 			Name:        "股票数据",
 			Description: "股票相关的基础数据",
 		},
@@ -234,7 +235,8 @@ func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory
 		"https://tushare.pro/document/2?doc_id=25",
 		"https://tushare.pro/document/2?doc_id=27",
 	}
-	return categories, apiURLs, nil
+	apiCategoryIDs := []*shared.ID{&catID, &catID}
+	return categories, apiURLs, apiCategoryIDs, nil
 }
 
 func (p *mockTushareParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
@@ -659,6 +661,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		metadataRepo,
 		nil, // parserFactory - not needed for tests (use workflow for metadata crawl)
 		workflowExecutor,
+		nil, // tokenValidator
 	)
 
 	// 10. 创建 WorkflowApplicationService
@@ -672,7 +675,9 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	datastoreAppService := impl.NewDataStoreApplicationService(
 		datastoreRepo,
 		dataSourceRepo,
+		syncPlanRepo,
 		workflowExecutor,
+		nil,
 	)
 
 	// 12. 创建 SyncApplicationService

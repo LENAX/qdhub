@@ -77,16 +77,14 @@ func CreateTableFromMetadataJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("no field definitions found for API: %s", apiName)
 	}
 
-	// 获取 QuantDB Adapter
-	// 注意：需要先检查 Registry 是否存在，避免 nil pointer panic
-	if tc.GetRegistry() == nil {
-		return nil, fmt.Errorf("QuantDB dependency not found (Registry is nil)")
+	// 使用 QuantDBFactory 按 target_db_path 获取与数据存储一致的 DuckDB
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is required for create table (must match Quant Data Store)")
 	}
-	quantDBInterface, ok := tc.GetDependency("QuantDB")
-	if !ok {
-		return nil, fmt.Errorf("QuantDB dependency not found")
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	quantDB := quantDBInterface.(datastore.QuantDB)
 
 	// 构建 TableSchema
 	schema := buildTableSchema(apiName, fields)
@@ -347,24 +345,21 @@ func DropTableJob(tc *task.TaskContext) (interface{}, error) {
 	ctx := context.Background()
 
 	tableName := tc.GetParamString("table_name")
-	_ = tc.GetParamString("target_db_path") // 保留用于日志或未来扩展
+	targetDBPath := tc.GetParamString("target_db_path")
 
 	if tableName == "" {
 		return nil, fmt.Errorf("table_name is required")
 	}
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is required for drop table (must match Quant Data Store)")
+	}
 
 	logrus.Debugf("[DropTable] 删除表: %s", tableName)
 
-	// 获取 QuantDB Adapter
-	// 注意：需要先检查 Registry 是否存在，避免 nil pointer panic
-	if tc.GetRegistry() == nil {
-		return nil, fmt.Errorf("QuantDB dependency not found (Registry is nil)")
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	quantDBInterface, ok := tc.GetDependency("QuantDB")
-	if !ok {
-		return nil, fmt.Errorf("QuantDB dependency not found")
-	}
-	quantDB := quantDBInterface.(datastore.QuantDB)
 
 	// 使用 QuantDB Adapter 删除表
 	if err := quantDB.DropTable(ctx, tableName); err != nil {

@@ -10,6 +10,7 @@ import (
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 )
 
@@ -150,6 +151,59 @@ func (m *MockQuantDataStoreRepository) Count(conditions ...shared.QueryCondition
 
 func (m *MockQuantDataStoreRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
 	return len(m.stores) > 0, nil
+}
+
+// MockSyncPlanRepository is a minimal mock for sync.SyncPlanRepository (used by DataStoreApplicationService.DeleteDataStore).
+type MockSyncPlanRepository struct {
+	existsByDataStoreID bool // Exists(shared.Eq("data_store_id", id)) returns this
+}
+
+func (m *MockSyncPlanRepository) Create(plan *sync.SyncPlan) error                    { return nil }
+func (m *MockSyncPlanRepository) Get(id shared.ID) (*sync.SyncPlan, error)            { return nil, nil }
+func (m *MockSyncPlanRepository) Update(plan *sync.SyncPlan) error                      { return nil }
+func (m *MockSyncPlanRepository) Delete(id shared.ID) error                           { return nil }
+func (m *MockSyncPlanRepository) List() ([]*sync.SyncPlan, error)                      { return nil, nil }
+func (m *MockSyncPlanRepository) FindBy(conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) FindByWithOrder(orderBy []shared.OrderBy, conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) ListWithPagination(pagination shared.Pagination) (*shared.PageResult[sync.SyncPlan], error) {
+	return shared.NewPageResult([]*sync.SyncPlan{}, 0, pagination), nil
+}
+func (m *MockSyncPlanRepository) FindByWithPagination(pagination shared.Pagination, conditions ...shared.QueryCondition) (*shared.PageResult[sync.SyncPlan], error) {
+	return shared.NewPageResult([]*sync.SyncPlan{}, 0, pagination), nil
+}
+func (m *MockSyncPlanRepository) Count(conditions ...shared.QueryCondition) (int64, error) {
+	if m.existsByDataStoreID {
+		return 1, nil
+	}
+	return 0, nil
+}
+func (m *MockSyncPlanRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
+	return m.existsByDataStoreID, nil
+}
+func (m *MockSyncPlanRepository) AddTask(task *sync.SyncTask) error                          { return nil }
+func (m *MockSyncPlanRepository) GetTask(id shared.ID) (*sync.SyncTask, error)              { return nil, nil }
+func (m *MockSyncPlanRepository) GetTasksByPlan(planID shared.ID) ([]*sync.SyncTask, error) { return nil, nil }
+func (m *MockSyncPlanRepository) UpdateTask(task *sync.SyncTask) error                      { return nil }
+func (m *MockSyncPlanRepository) DeleteTasksByPlan(planID shared.ID) error                  { return nil }
+func (m *MockSyncPlanRepository) AddPlanExecution(exec *sync.SyncExecution) error           { return nil }
+func (m *MockSyncPlanRepository) GetPlanExecution(id shared.ID) (*sync.SyncExecution, error) { return nil, nil }
+func (m *MockSyncPlanRepository) GetExecutionsByPlan(planID shared.ID) ([]*sync.SyncExecution, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) GetExecutionByWorkflowInstID(workflowInstID string) (*sync.SyncExecution, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) UpdatePlanExecution(exec *sync.SyncExecution) error { return nil }
+func (m *MockSyncPlanRepository) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) GetEnabledPlans() ([]*sync.SyncPlan, error) { return nil, nil }
+func (m *MockSyncPlanRepository) GetByStatus(status sync.PlanStatus) ([]*sync.SyncPlan, error) {
+	return nil, nil
 }
 
 // MockMappingRuleRepository is a mock implementation of datastore.DataTypeMappingRuleRepository.
@@ -491,7 +545,8 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 
 		workflowSvc := NewMockWorkflowExecutor()
-		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowSvc)
+		syncPlanRepo := &MockSyncPlanRepository{}
+		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowSvc, nil)
 
 		req := contracts.CreateDataStoreRequest{
 			Name:        "Test Store",
@@ -522,7 +577,8 @@ func TestDataStoreApplicationService_CreateDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 
 		workflowSvc := NewMockWorkflowExecutor()
-		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowSvc)
+		syncPlanRepo := &MockSyncPlanRepository{}
+		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowSvc, nil)
 
 		req := contracts.CreateDataStoreRequest{
 			Name:        "Test Store",
@@ -549,7 +605,8 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 		dsRepo.Create(ds)
 
 		workflowSvc := NewMockWorkflowExecutor()
-		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowSvc)
+		syncPlanRepo := &MockSyncPlanRepository{}
+		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowSvc, nil)
 
 		result, err := svc.GetDataStore(ctx, ds.ID)
 		if err != nil {
@@ -565,7 +622,8 @@ func TestDataStoreApplicationService_GetDataStore(t *testing.T) {
 		dataSourceRepo := NewMockDataSourceRepository()
 
 		workflowSvc := NewMockWorkflowExecutor()
-		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowSvc)
+		syncPlanRepo := &MockSyncPlanRepository{}
+		svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowSvc, nil)
 
 		_, err := svc.GetDataStore(ctx, shared.NewID())
 		if err == nil {
@@ -587,7 +645,8 @@ func TestDataStoreApplicationService_ListDataStores(t *testing.T) {
 	}
 
 	workflowSvc := NewMockWorkflowExecutor()
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowSvc)
+	syncPlanRepo := &MockSyncPlanRepository{}
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowSvc, nil)
 
 	stores, err := svc.ListDataStores(ctx)
 	if err != nil {

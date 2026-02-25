@@ -24,9 +24,10 @@ type Dependencies struct {
 	MetadataRepo metadata.Repository
 	// DataStoreRepo is the data store repository (required for table creation jobs).
 	DataStoreRepo datastore.QuantDataStoreRepository
-	// QuantDB is the quant database adapter (required for table creation jobs).
-	// This interface provides methods to create tables in the target database (DuckDB, ClickHouse, etc.)
+	// QuantDB is the quant database adapter (optional, deprecated: use QuantDBFactory + target_db_path).
 	QuantDB datastore.QuantDB
+	// QuantDBFactory creates QuantDB by path; sync/table jobs use this with target_db_path from data store.
+	QuantDBFactory datastore.QuantDBFactory
 	// SyncCallbackInvoker 可选；DataSyncCompleteHandler 用于触发 execution 回调（Plan.MarkCompleted）。
 	// 需实现 HandleExecutionCallbackByWorkflowInstance(ctx, workflowInstID, success, recordCount, errMsg).
 	SyncCallbackInvoker interface{}
@@ -167,9 +168,13 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 		registry.RegisterDependencyWithKey("DataStoreRepo", deps.DataStoreRepo)
 	}
 
-	// Register QuantDB adapter as dependency (required for table creation jobs)
+	// Register QuantDB adapter as dependency (optional, backward compat)
 	if deps.QuantDB != nil {
 		registry.RegisterDependencyWithKey("QuantDB", deps.QuantDB)
+	}
+	// Register QuantDBFactory (sync/table jobs use this with target_db_path from data store)
+	if deps.QuantDBFactory != nil {
+		registry.RegisterDependencyWithKey("QuantDBFactory", deps.QuantDBFactory)
 	}
 
 	// Register SyncCallbackInvoker (optional; for DataSyncCompleteHandler → execution callback)

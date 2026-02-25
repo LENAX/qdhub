@@ -60,6 +60,15 @@ func (m *FullMockMetadataService) DeleteAPISyncStrategy(ctx context.Context, id 
 func (m *FullMockMetadataService) ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error) {
 	return nil, nil
 }
+func (m *FullMockMetadataService) ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req contracts.ListAPIMetadataRequest) (*contracts.ListAPIMetadataResponse, error) {
+	return &contracts.ListAPIMetadataResponse{Items: nil, Total: 0}, nil
+}
+func (m *FullMockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {
+	return nil
+}
+func (m *FullMockMetadataService) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+	return nil
+}
 
 // FullMockDataStoreService implements DataStoreApplicationService.
 type FullMockDataStoreService struct{}
@@ -72,6 +81,15 @@ func (m *FullMockDataStoreService) GetDataStore(ctx context.Context, id shared.I
 }
 func (m *FullMockDataStoreService) ListDataStores(ctx context.Context) ([]*datastore.QuantDataStore, error) {
 	return nil, nil
+}
+func (m *FullMockDataStoreService) UpdateDataStore(ctx context.Context, id shared.ID, req contracts.UpdateDataStoreRequest) (*datastore.QuantDataStore, error) {
+	return nil, nil
+}
+func (m *FullMockDataStoreService) DeleteDataStore(ctx context.Context, id shared.ID) error {
+	return nil
+}
+func (m *FullMockDataStoreService) ValidateDataStore(ctx context.Context, id shared.ID) (*contracts.ValidateDataStoreResult, error) {
+	return &contracts.ValidateDataStoreResult{Valid: true}, nil
 }
 func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
 	return "", nil

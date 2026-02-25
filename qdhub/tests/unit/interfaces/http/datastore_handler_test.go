@@ -48,6 +48,24 @@ func (m *MockDataStoreService) ListDataStores(ctx context.Context) ([]*datastore
 	return args.Get(0).([]*datastore.QuantDataStore), args.Error(1)
 }
 
+func (m *MockDataStoreService) UpdateDataStore(ctx context.Context, id shared.ID, req contracts.UpdateDataStoreRequest) (*datastore.QuantDataStore, error) {
+	args := m.Called(ctx, id, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*datastore.QuantDataStore), args.Error(1)
+}
+func (m *MockDataStoreService) DeleteDataStore(ctx context.Context, id shared.ID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+func (m *MockDataStoreService) ValidateDataStore(ctx context.Context, id shared.ID) (*contracts.ValidateDataStoreResult, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*contracts.ValidateDataStoreResult), args.Error(1)
+}
 func (m *MockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
 	args := m.Called(ctx, req)
 	return args.Get(0).(shared.ID), args.Error(1)

@@ -1,0 +1,2 @@
+-- SQLite does not support DROP COLUMN directly; would require table recreate.
+-- Leave column in place on down to avoid data loss. No-op for rollback.

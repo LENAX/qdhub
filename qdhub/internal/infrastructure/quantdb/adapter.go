@@ -126,6 +126,17 @@ func (a *QuantDBAdapterImpl) TableExists(ctx context.Context, ds *datastore.Quan
 	return conn.TableExists(ctx, tableName)
 }
 
+// InvalidateConnection drops the cached connection for the given data store ID.
+func (a *QuantDBAdapterImpl) InvalidateConnection(id shared.ID) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if conn, exists := a.connections[id]; exists {
+		_ = conn.Close()
+		delete(a.connections, id)
+	}
+}
+
 // Close closes all managed connections.
 func (a *QuantDBAdapterImpl) Close() error {
 	a.mu.Lock()

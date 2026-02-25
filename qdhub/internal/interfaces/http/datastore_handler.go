@@ -22,12 +22,13 @@ func NewDataStoreHandler(dataStoreSvc contracts.DataStoreApplicationService) *Da
 
 // RegisterRoutes registers data store routes to the router group.
 func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
-	// Data Store routes
 	rg.POST("/datastores", h.CreateDataStore)
 	rg.GET("/datastores", h.ListDataStores)
 	rg.GET("/datastores/:id", h.GetDataStore)
+	rg.PUT("/datastores/:id", h.UpdateDataStore)
+	rg.DELETE("/datastores/:id", h.DeleteDataStore)
+	rg.POST("/datastores/:id/validate", h.ValidateDataStore)
 
-	// Create tables for datasource
 	rg.POST("/datastores/:id/create-tables", h.CreateTablesForDatasource)
 }
 
@@ -108,6 +109,98 @@ func (h *DataStoreHandler) GetDataStore(c *gin.Context) {
 	Success(c, ds)
 }
 
+// UpdateDataStore handles PUT /api/v1/datastores/:id
+// @Summary      Update a data store
+// @Description  Update name, description, type, dsn, or storage_path of a data store
+// @Tags         DataStores
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "Data store ID"
+// @Param        request  body      UpdateDataStoreReq  true  "Fields to update"
+// @Success      200      {object}  Response
+// @Failure      400      {object}  Response
+// @Failure      404      {object}  Response
+// @Failure      500      {object}  Response
+// @Security     BearerAuth
+// @Router       /datastores/{id} [put]
+func (h *DataStoreHandler) UpdateDataStore(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	var req UpdateDataStoreReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+
+	r := contracts.UpdateDataStoreRequest{}
+	if req.Name != nil {
+		r.Name = req.Name
+	}
+	if req.Description != nil {
+		r.Description = req.Description
+	}
+	if req.Type != nil {
+		t := datastore.DataStoreType(*req.Type)
+		r.Type = &t
+	}
+	if req.DSN != nil {
+		r.DSN = req.DSN
+	}
+	if req.StoragePath != nil {
+		r.StoragePath = req.StoragePath
+	}
+
+	ds, err := h.dataStoreSvc.UpdateDataStore(c.Request.Context(), id, r)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, ds)
+}
+
+// DeleteDataStore handles DELETE /api/v1/datastores/:id
+// @Summary      Delete a data store
+// @Description  Delete a data store. Fails if any sync plan references it.
+// @Tags         DataStores
+// @Param        id   path      string  true  "Data store ID"
+// @Success      204  "No Content"
+// @Failure      400  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datastores/{id} [delete]
+func (h *DataStoreHandler) DeleteDataStore(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	if err := h.dataStoreSvc.DeleteDataStore(c.Request.Context(), id); err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.Status(204)
+}
+
+// ValidateDataStore handles POST /api/v1/datastores/:id/validate
+// @Summary      Validate a data store
+// @Description  Check whether the data store's database actually exists and is reachable
+// @Tags         DataStores
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response  "Valid: true/false, Message when invalid"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datastores/{id}/validate [post]
+func (h *DataStoreHandler) ValidateDataStore(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	result, err := h.dataStoreSvc.ValidateDataStore(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
+}
+
 // CreateTablesForDatasource handles POST /api/v1/datastores/:id/create-tables
 // @Summary      Create tables for datasource
 // @Description  Create tables for all APIs of a data source in the data store using the built-in create_tables workflow
@@ -152,6 +245,15 @@ type CreateDataStoreReq struct {
 	Type        string `json:"type" binding:"required"` // duckdb, clickhouse, postgresql
 	DSN         string `json:"dsn"`
 	StoragePath string `json:"storage_path"`
+}
+
+// UpdateDataStoreReq represents the request body for updating a data store (all fields optional).
+type UpdateDataStoreReq struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Type        *string `json:"type"` // duckdb, clickhouse, postgresql
+	DSN         *string `json:"dsn"`
+	StoragePath *string `json:"storage_path"`
 }
 
 // CreateTablesForDatasourceReq represents the request body for creating tables for a datasource.

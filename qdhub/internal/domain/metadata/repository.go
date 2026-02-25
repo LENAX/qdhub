@@ -114,9 +114,16 @@ type Repository interface {
 
 	// ListCategoriesByDataSource returns all categories for a data source.
 	ListCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]APICategory, error)
+	// ListCategoriesByDataSourceWithAPIs returns only categories that have at least one api_metadata.
+	ListCategoriesByDataSourceWithAPIs(ctx context.Context, dataSourceID shared.ID) ([]APICategory, error)
 
 	// ListAPIMetadataByDataSource returns all API metadata for a data source.
 	ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]APIMetadata, error)
+
+	// ListAPIMetadataByDataSourcePaginated returns a paginated list of API metadata for a data source.
+	// idFilter, nameFilter, categoryIDFilter are optional; nameFilter uses LIKE %nameFilter%.
+	// Returns (items, totalCount, error).
+	ListAPIMetadataByDataSourcePaginated(ctx context.Context, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, page, pageSize int) ([]APIMetadata, int64, error)
 
 	// ==================== API Sync Strategy 操作 ====================
 

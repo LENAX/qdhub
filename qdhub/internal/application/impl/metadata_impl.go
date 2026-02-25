@@ -19,9 +19,10 @@ type MetadataApplicationServiceImpl struct {
 	dataSourceRepo metadata.DataSourceRepository
 	metadataRepo   metadata.Repository // 用于APISyncStrategy操作
 
-	metadataValidator metadata.MetadataValidator
-	parserFactory     metadata.DocumentParserFactory
-	workflowExecutor  workflow.WorkflowExecutor // 用于执行元数据爬取工作流（领域服务接口）
+	metadataValidator   metadata.MetadataValidator
+	parserFactory       metadata.DocumentParserFactory
+	workflowExecutor    workflow.WorkflowExecutor   // 用于执行元数据爬取工作流（领域服务接口）
+	tokenValidator      contracts.DataSourceTokenValidator
 }
 
 // NewMetadataApplicationService creates a new MetadataApplicationService implementation.
@@ -29,7 +30,8 @@ func NewMetadataApplicationService(
 	dataSourceRepo metadata.DataSourceRepository,
 	metadataRepo metadata.Repository,
 	parserFactory metadata.DocumentParserFactory,
-	workflowExecutor workflow.WorkflowExecutor, // 使用领域服务接口，而非应用服务
+	workflowExecutor workflow.WorkflowExecutor,
+	tokenValidator contracts.DataSourceTokenValidator,
 ) contracts.MetadataApplicationService {
 	return &MetadataApplicationServiceImpl{
 		dataSourceRepo:    dataSourceRepo,
@@ -37,6 +39,7 @@ func NewMetadataApplicationService(
 		metadataValidator: metadata.NewMetadataValidator(),
 		parserFactory:     parserFactory,
 		workflowExecutor:  workflowExecutor,
+		tokenValidator:    tokenValidator,
 	}
 }
 
@@ -87,7 +90,79 @@ func (s *MetadataApplicationServiceImpl) ListDataSources(ctx context.Context) ([
 	return sources, nil
 }
 
+// DeleteDataSource deletes a data source and cascades: api_sync_strategies (via metadataRepo), then token, api_metadata, api_categories, data_source (via dataSourceRepo).
+func (s *MetadataApplicationServiceImpl) DeleteDataSource(ctx context.Context, id shared.ID) error {
+	ds, err := s.dataSourceRepo.Get(id)
+	if err != nil {
+		return fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	if err := s.metadataRepo.DeleteAPISyncStrategiesByDataSource(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete API sync strategies: %w", err)
+	}
+	if err := s.dataSourceRepo.Delete(id); err != nil {
+		return fmt.Errorf("failed to delete data source: %w", err)
+	}
+	return nil
+}
+
 // ==================== API Metadata Management ====================
+
+// ListAPIMetadata returns a paginated list of API metadata for a data source.
+func (s *MetadataApplicationServiceImpl) ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req contracts.ListAPIMetadataRequest) (*contracts.ListAPIMetadataResponse, error) {
+	ds, err := s.dataSourceRepo.Get(dataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	page := req.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := req.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items, total, err := s.metadataRepo.ListAPIMetadataByDataSourcePaginated(ctx, dataSourceID, req.ID, req.Name, req.CategoryID, page, pageSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list api metadata: %w", err)
+	}
+	ptrItems := make([]*metadata.APIMetadata, len(items))
+	for i := range items {
+		ptrItems[i] = &items[i]
+	}
+	return &contracts.ListAPIMetadataResponse{Items: ptrItems, Total: total}, nil
+}
+
+// ListAPICategories returns API categories for a data source. When hasAPIsOnly is true, only categories with at least one api_metadata are returned.
+func (s *MetadataApplicationServiceImpl) ListAPICategories(ctx context.Context, dataSourceID shared.ID, hasAPIsOnly bool) ([]metadata.APICategory, error) {
+	ds, err := s.dataSourceRepo.Get(dataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	if hasAPIsOnly {
+		return s.metadataRepo.ListCategoriesByDataSourceWithAPIs(ctx, dataSourceID)
+	}
+	return s.metadataRepo.ListCategoriesByDataSource(ctx, dataSourceID)
+}
+
+// DeleteAPIMetadata deletes a single API metadata by ID.
+func (s *MetadataApplicationServiceImpl) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+	if err := s.metadataRepo.DeleteAPIMetadata(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete API metadata: %w", err)
+	}
+	return nil
+}
 
 // ParseAndImportMetadata parses documentation and imports metadata.
 // This method uses the built-in metadata_crawl workflow to perform the operation.
@@ -201,6 +276,57 @@ func (s *MetadataApplicationServiceImpl) GetToken(ctx context.Context, dataSourc
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "token not found", nil)
 	}
 	return token, nil
+}
+
+// ValidateDataSourceToken checks if the data source has a token and validates it via adapter test request.
+func (s *MetadataApplicationServiceImpl) ValidateDataSourceToken(ctx context.Context, dataSourceID shared.ID) (hasToken bool, valid bool, message string, err error) {
+	ds, err := s.dataSourceRepo.Get(dataSourceID)
+	if err != nil {
+		return false, false, "", fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return false, false, "", shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	token, err := s.dataSourceRepo.GetTokenByDataSource(dataSourceID)
+	if err != nil {
+		return false, false, "", fmt.Errorf("failed to get token: %w", err)
+	}
+	if token == nil {
+		return false, false, "未认证", nil
+	}
+	if s.tokenValidator == nil {
+		return true, false, "校验器未配置", nil
+	}
+	valid, message, err = s.tokenValidator.Validate(ctx, ds.Name, ds.BaseURL, token.TokenValue)
+	if err != nil {
+		return true, false, err.Error(), nil
+	}
+	if !valid {
+		if message == "" {
+			message = "token无效"
+		}
+		return true, false, message, nil
+	}
+	return true, true, "", nil
+}
+
+// GetDataSourceConfig returns api_url and token for the config form.
+func (s *MetadataApplicationServiceImpl) GetDataSourceConfig(ctx context.Context, dataSourceID shared.ID) (apiURL string, token string, err error) {
+	ds, err := s.dataSourceRepo.Get(dataSourceID)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return "", "", shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	tok, err := s.dataSourceRepo.GetTokenByDataSource(dataSourceID)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get token: %w", err)
+	}
+	if tok != nil {
+		return ds.BaseURL, tok.TokenValue, nil
+	}
+	return ds.BaseURL, "", nil
 }
 
 // ==================== API Sync Strategy Management ====================
