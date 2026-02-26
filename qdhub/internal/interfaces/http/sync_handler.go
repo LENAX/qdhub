@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,10 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// Plan progress
 	rg.GET("/sync-plans/:id/progress", h.GetPlanProgress)
 	rg.GET("/sync-plans/:id/progress-stream", h.StreamPlanProgress)
+
+	// Plan summary and history
+	rg.GET("/sync-plans/:id/summary", h.GetPlanSummary)
+	rg.GET("/sync-plans/:id/history", h.GetPlanHistory)
 
 	// Execution management
 	rg.GET("/sync-plans/:id/executions", h.ListExecutions)
@@ -329,6 +334,67 @@ func (h *SyncHandler) DisablePlan(c *gin.Context) {
 }
 
 // ==================== Execution Endpoints ====================
+
+// GetPlanSummary handles GET /api/v1/sync-plans/:id/summary
+// @Summary      Get sync plan execution summary
+// @Description  Returns the latest execution summary for the plan (status, record_count, synced_apis, skipped_apis). Null when the plan has never been executed.
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync plan ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /sync-plans/{id}/summary [get]
+func (h *SyncHandler) GetPlanSummary(c *gin.Context) {
+	planID := shared.ID(c.Param("id"))
+
+	summary, err := h.syncSvc.GetPlanSummary(c.Request.Context(), planID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, summary)
+}
+
+// GetPlanHistory handles GET /api/v1/sync-plans/:id/history
+// @Summary      Get sync plan execution history
+// @Description  Returns paginated execution history for the plan. Query: limit (default 20), offset (default 0).
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string  true   "Sync plan ID"
+// @Param        limit   query     int     false  "Page size"   default(20)
+// @Param        offset  query     int     false  "Offset"
+// @Success      200     {object}  Response
+// @Failure      404     {object}  Response
+// @Failure      500     {object}  Response
+// @Security     BearerAuth
+// @Router       /sync-plans/{id}/history [get]
+func (h *SyncHandler) GetPlanHistory(c *gin.Context) {
+	planID := shared.ID(c.Param("id"))
+
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	items, total, err := h.syncSvc.ListPlanExecutionHistory(c.Request.Context(), planID, limit, offset)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"items": items, "total": total})
+}
 
 // ListExecutions handles GET /api/v1/sync-plans/:id/executions
 // @Summary      List sync executions

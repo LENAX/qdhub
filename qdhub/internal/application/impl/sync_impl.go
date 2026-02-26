@@ -645,6 +645,41 @@ func (s *SyncApplicationServiceImpl) ListPlanExecutions(ctx context.Context, pla
 	return execs, nil
 }
 
+// GetPlanSummary returns the latest execution summary for a sync plan (or nil if never executed).
+func (s *SyncApplicationServiceImpl) GetPlanSummary(ctx context.Context, planID shared.ID) (*contracts.PlanSummary, error) {
+	_, err := s.syncPlanRepo.Get(planID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync plan: %w", err)
+	}
+	execs, total, err := s.syncPlanRepo.GetExecutionsByPlanPaged(planID, 1, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest execution: %w", err)
+	}
+	if total == 0 || len(execs) == 0 {
+		return nil, nil
+	}
+	latest := execs[0]
+	return &contracts.PlanSummary{
+		ExecutionID:  latest.ID,
+		Status:       latest.Status,
+		StartedAt:    latest.StartedAt,
+		FinishedAt:   latest.FinishedAt,
+		RecordCount:  latest.RecordCount,
+		ErrorMessage: latest.ErrorMessage,
+		SyncedAPIs:   latest.SyncedAPIs,
+		SkippedAPIs:  latest.SkippedAPIs,
+	}, nil
+}
+
+// ListPlanExecutionHistory returns paginated execution history for a sync plan.
+func (s *SyncApplicationServiceImpl) ListPlanExecutionHistory(ctx context.Context, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error) {
+	_, err := s.syncPlanRepo.Get(planID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get sync plan: %w", err)
+	}
+	return s.syncPlanRepo.GetExecutionsByPlanPaged(planID, limit, offset)
+}
+
 // CancelExecution cancels a running sync execution.
 func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, executionID shared.ID) error {
 	// Read operations (no transaction needed)

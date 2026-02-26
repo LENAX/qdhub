@@ -265,16 +265,18 @@ func (h *DataStoreHandler) ListDatastoreTables(c *gin.Context) {
 
 // GetDatastoreTableData handles GET /api/v1/datastores/:id/tables/:tableName/data
 // @Summary      Get paginated table data
-// @Description  Returns a page of rows from a table and total count. Query: page (default 1), page_size (default 20, max 100)
+// @Description  Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional)
 // @Tags         DataStores
 // @Produce      json
-// @Param        id         path      string  true   "Data store ID"
-// @Param        tableName  path      string  true   "Table name"
-// @Param        page       query     int     false  "Page number"       default(1)
-// @Param        page_size  query     int     false  "Page size (max 100)" default(20)
-// @Success      200        {object}  Response  "data: rows, total: count"
-// @Failure      404        {object}  Response
-// @Failure      500        {object}  Response
+// @Param        id             path      string  true   "Data store ID"
+// @Param        tableName      path      string  true   "Table name"
+// @Param        page           query     int     false  "Page number"       default(1)
+// @Param        page_size      query     int     false  "Page size (max 100)" default(20)
+// @Param        q              query     string  false  "Search term (ILIKE)"
+// @Param        search_column  query     string  false  "Column to search in (omit for all)"
+// @Success      200            {object}  Response  "data: rows, total: count"
+// @Failure      404            {object}  Response
+// @Failure      500            {object}  Response
 // @Security     BearerAuth
 // @Router       /datastores/{id}/tables/{tableName}/data [get]
 func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
@@ -286,7 +288,9 @@ func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	rows, total, err := h.dataStoreSvc.GetDatastoreTableData(c.Request.Context(), id, tableName, page, pageSize)
+	searchQ := c.Query("q")
+	searchColumn := c.Query("search_column")
+	rows, total, err := h.dataStoreSvc.GetDatastoreTableData(c.Request.Context(), id, tableName, page, pageSize, searchQ, searchColumn)
 	if err != nil {
 		HandleError(c, err)
 		return

@@ -106,7 +106,7 @@ func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context
 func (m *FullMockDataStoreService) ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error) {
 	return nil, nil
 }
-func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int) ([]map[string]any, int64, error) {
+func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) ([]map[string]any, int64, error) {
 	return nil, 0, nil
 }
 

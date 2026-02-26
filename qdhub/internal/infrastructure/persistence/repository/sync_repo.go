@@ -199,6 +199,19 @@ func (r *SyncPlanRepositoryImpl) GetExecutionsByPlan(planID shared.ID) ([]*sync.
 	return r.syncExecutionDAO.GetByPlanID(r.tx, planID)
 }
 
+// GetExecutionsByPlanPaged retrieves SyncExecutions for a SyncPlan with pagination (ordered by started_at DESC).
+func (r *SyncPlanRepositoryImpl) GetExecutionsByPlanPaged(planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error) {
+	items, err := r.syncExecutionDAO.GetByPlanIDPaged(r.tx, planID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := r.syncExecutionDAO.CountByPlanID(r.tx, planID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 // GetExecutionByWorkflowInstID retrieves a SyncExecution by workflow instance ID.
 func (r *SyncPlanRepositoryImpl) GetExecutionByWorkflowInstID(workflowInstID string) (*sync.SyncExecution, error) {
 	return r.syncExecutionDAO.GetByWorkflowInstID(r.tx, workflowInstID)

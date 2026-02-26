@@ -37,6 +37,9 @@ type SyncPlanRepository interface {
 	// GetExecutionsByPlan 获取计划的所有执行记录
 	GetExecutionsByPlan(planID shared.ID) ([]*SyncExecution, error)
 
+	// GetExecutionsByPlanPaged 分页获取计划的执行记录，按 started_at DESC，返回列表与总数
+	GetExecutionsByPlanPaged(planID shared.ID, limit, offset int) ([]*SyncExecution, int, error)
+
 	// GetExecutionByWorkflowInstID 按 workflow 实例 ID 获取执行记录（用于完成回调）
 	GetExecutionByWorkflowInstID(workflowInstID string) (*SyncExecution, error)
 

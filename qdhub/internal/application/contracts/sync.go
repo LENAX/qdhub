@@ -53,6 +53,12 @@ type SyncApplicationService interface {
 	// ListPlanExecutions lists all executions for a sync plan.
 	ListPlanExecutions(ctx context.Context, planID shared.ID) ([]*sync.SyncExecution, error)
 
+	// GetPlanSummary returns the latest execution summary for a sync plan (or nil if never executed).
+	GetPlanSummary(ctx context.Context, planID shared.ID) (*PlanSummary, error)
+
+	// ListPlanExecutionHistory returns paginated execution history for a sync plan.
+	ListPlanExecutionHistory(ctx context.Context, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error)
+
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
 
@@ -158,4 +164,17 @@ type SyncExecutionProgress struct {
 	// Timeline
 	StartedAt  shared.Timestamp
 	FinishedAt *shared.Timestamp
+}
+
+// PlanSummary represents the latest execution summary for a sync plan.
+// Returned by GetPlanSummary; nil when the plan has no executions.
+type PlanSummary struct {
+	ExecutionID  shared.ID         `json:"execution_id"`
+	Status       sync.ExecStatus    `json:"status"`
+	StartedAt    shared.Timestamp  `json:"started_at"`
+	FinishedAt   *shared.Timestamp `json:"finished_at,omitempty"`
+	RecordCount  int64             `json:"record_count"`
+	ErrorMessage *string           `json:"error_message,omitempty"`
+	SyncedAPIs   []string          `json:"synced_apis,omitempty"`
+	SkippedAPIs  []string          `json:"skipped_apis,omitempty"`
 }

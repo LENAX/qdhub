@@ -594,6 +594,51 @@ func (d *SyncExecutionDAO) GetByWorkflowInstID(tx *sqlx.Tx, workflowInstID strin
 	return d.toEntity(&row)
 }
 
+// GetByPlanIDPaged retrieves sync executions for a plan with limit and offset, ordered by started_at DESC.
+func (d *SyncExecutionDAO) GetByPlanIDPaged(tx *sqlx.Tx, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, error) {
+	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?`
+	var rows []SyncExecutionRow
+
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, planID.String(), limit, offset)
+	} else {
+		err = d.DB().Select(&rows, query, planID.String(), limit, offset)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync executions by plan paged: %w", err)
+	}
+
+	entities := make([]*sync.SyncExecution, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(&row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+// CountByPlanID returns the total number of sync executions for a plan.
+func (d *SyncExecutionDAO) CountByPlanID(tx *sqlx.Tx, planID shared.ID) (int, error) {
+	query := `SELECT COUNT(*) FROM sync_execution WHERE sync_plan_id = ?`
+	var count int
+
+	var err error
+	if tx != nil {
+		err = tx.Get(&count, query, planID.String())
+	} else {
+		err = d.DB().Get(&count, query, planID.String())
+	}
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count sync executions by plan: %w", err)
+	}
+	return count, nil
+}
+
 // toRow converts domain entity to database row.
 func (d *SyncExecutionDAO) toRow(entity *sync.SyncExecution) (*SyncExecutionRow, error) {
 	executeParams, err := entity.MarshalExecuteParamsJSON()

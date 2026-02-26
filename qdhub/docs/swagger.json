@@ -2874,6 +2874,131 @@
                 }
             }
         },
+        "/datastores/{id}/tables": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns table names in the data store's database (e.g. main schema)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "List tables in a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: []string",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/tables/{tableName}/data": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Get paginated table data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Table name",
+                        "name": "tableName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size (max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search term (ILIKE)",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Column to search in (omit for all)",
+                        "name": "search_column",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: rows, total: count",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/datastores/{id}/validate": {
             "post": {
                 "security": [
@@ -3761,6 +3886,68 @@
                 }
             }
         },
+        "/sync-plans/{id}/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns paginated execution history for the plan. Query: limit (default 20), offset (default 0).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Get sync plan execution history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/sync-plans/{id}/progress": {
             "get": {
                 "security": [
@@ -3877,6 +4064,55 @@
                     "SyncPlans"
                 ],
                 "summary": "Resolve sync plan dependencies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-plans/{id}/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the latest execution summary for the plan (status, record_count, synced_apis, skipped_apis). Null when the plan has never been executed.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Get sync plan execution summary",
                 "parameters": [
                     {
                         "type": "string",
@@ -4117,7 +4353,6 @@
                     "type": "string"
                 },
                 "incremental_mode": {
-                    "description": "when true, scheduled runs use last successful EndDate as StartDate and today as EndDate",
                     "type": "boolean"
                 },
                 "name": {
@@ -4306,7 +4541,6 @@
                     "type": "string"
                 },
                 "incremental_mode": {
-                    "description": "when true, scheduled runs use incremental date range",
                     "type": "boolean"
                 },
                 "name": {
