@@ -35,6 +35,14 @@ func (m *MockIntegrationQuantDBAdapter) TableExists(ctx context.Context, ds *dat
 	return false, nil
 }
 
+func (m *MockIntegrationQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return []string{}, nil
+}
+
+func (m *MockIntegrationQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+
 // MockIntegrationWorkflowExecutor is a mock workflow executor for integration testing.
 type MockIntegrationWorkflowExecutor struct{}
 

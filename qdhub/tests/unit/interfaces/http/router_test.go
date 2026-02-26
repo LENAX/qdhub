@@ -103,6 +103,12 @@ func (m *FullMockDataStoreService) ValidateDataStore(ctx context.Context, id sha
 func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
 	return "", nil
 }
+func (m *FullMockDataStoreService) ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error) {
+	return nil, nil
+}
+func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int) ([]map[string]any, int64, error) {
+	return nil, 0, nil
+}
 
 // FullMockSyncService implements SyncApplicationService.
 type FullMockSyncService struct{}

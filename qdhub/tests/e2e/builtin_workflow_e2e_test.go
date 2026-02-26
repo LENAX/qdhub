@@ -365,6 +365,18 @@ func (a *mockQuantDBAdapter) SetCheckpoint(ctx context.Context, ds *datastore.Qu
 	return nil
 }
 
+func (a *mockQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	names := make([]string, 0, len(a.tables))
+	for name := range a.tables {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func (a *mockQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+
 // ==================== 测试辅助函数 ====================
 
 func getMockStockBasicHTML() string {

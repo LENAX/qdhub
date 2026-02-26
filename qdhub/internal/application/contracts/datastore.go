@@ -39,6 +39,15 @@ type DataStoreApplicationService interface {
 	// This is an asynchronous operation that uses the built-in create_tables workflow.
 	// Returns the workflow instance ID for tracking the execution status.
 	CreateTablesForDatasource(ctx context.Context, req CreateTablesForDatasourceRequest) (shared.ID, error)
+
+	// ==================== Data Browser ====================
+
+	// ListDatastoreTables lists table names in the given data store's database.
+	ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error)
+
+	// GetDatastoreTableData returns a page of rows from a table and the total row count.
+	// tableName must be one of the names returned by ListDatastoreTables (whitelist).
+	GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int) (rows []map[string]any, total int64, err error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -72,4 +81,10 @@ type CreateTablesForDatasourceRequest struct {
 	DataSourceID shared.ID // 数据源 ID
 	DataStoreID  shared.ID // 数据存储 ID
 	MaxTables    *int      // 最大建表数量（可选，nil 或 0 表示不限制）
+}
+
+// TableDataPage holds a page of table rows and total count for data browser.
+type TableDataPage struct {
+	Rows  []map[string]any `json:"data"`
+	Total int64             `json:"total"`
 }

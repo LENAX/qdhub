@@ -1,6 +1,8 @@
 package http
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 
 	"qdhub/internal/application/contracts"
@@ -30,6 +32,10 @@ func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/datastores/:id/validate", h.ValidateDataStore)
 
 	rg.POST("/datastores/:id/create-tables", h.CreateTablesForDatasource)
+
+	// Data browser: list tables and paginated table data
+	rg.GET("/datastores/:id/tables", h.ListDatastoreTables)
+	rg.GET("/datastores/:id/tables/:tableName/data", h.GetDatastoreTableData)
 }
 
 // ==================== Data Store Endpoints ====================
@@ -234,6 +240,58 @@ func (h *DataStoreHandler) CreateTablesForDatasource(c *gin.Context) {
 		return
 	}
 	Created(c, gin.H{"instance_id": instanceID})
+}
+
+// ListDatastoreTables handles GET /api/v1/datastores/:id/tables
+// @Summary      List tables in a data store
+// @Description  Returns table names in the data store's database (e.g. main schema)
+// @Tags         DataStores
+// @Produce      json
+// @Param        id   path      string  true  "Data store ID"
+// @Success      200  {object}  Response  "data: []string"
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datastores/{id}/tables [get]
+func (h *DataStoreHandler) ListDatastoreTables(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+	tables, err := h.dataStoreSvc.ListDatastoreTables(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"data": tables})
+}
+
+// GetDatastoreTableData handles GET /api/v1/datastores/:id/tables/:tableName/data
+// @Summary      Get paginated table data
+// @Description  Returns a page of rows from a table and total count. Query: page (default 1), page_size (default 20, max 100)
+// @Tags         DataStores
+// @Produce      json
+// @Param        id         path      string  true   "Data store ID"
+// @Param        tableName  path      string  true   "Table name"
+// @Param        page       query     int     false  "Page number"       default(1)
+// @Param        page_size  query     int     false  "Page size (max 100)" default(20)
+// @Success      200        {object}  Response  "data: rows, total: count"
+// @Failure      404        {object}  Response
+// @Failure      500        {object}  Response
+// @Security     BearerAuth
+// @Router       /datastores/{id}/tables/{tableName}/data [get]
+func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+	tableName := c.Param("tableName")
+	if tableName == "" {
+		BadRequest(c, "table name is required")
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	rows, total, err := h.dataStoreSvc.GetDatastoreTableData(c.Request.Context(), id, tableName, page, pageSize)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, &contracts.TableDataPage{Rows: rows, Total: total})
 }
 
 // ==================== Request DTOs ====================

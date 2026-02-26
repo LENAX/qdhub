@@ -188,3 +188,11 @@ func (m *mockQuantDBAdapter) ExecuteDDL(ctx context.Context, ds *datastore.Quant
 func (m *mockQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.QuantDataStore, tableName string) (bool, error) {
 	return false, nil
 }
+
+func (m *mockQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}

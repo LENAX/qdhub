@@ -129,6 +129,29 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 	return count > 0, nil
 }
 
+// ListTables returns table names in the main schema.
+func (a *Adapter) ListTables(ctx context.Context) ([]string, error) {
+	query := `SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name`
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+	return names, nil
+}
+
 // GetTableStats returns statistics for a table.
 func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datastore.TableStats, error) {
 	// Get row count

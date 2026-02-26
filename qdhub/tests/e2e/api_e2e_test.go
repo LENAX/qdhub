@@ -53,6 +53,14 @@ func (m *e2eQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.Quant
 	return false, nil
 }
 
+func (m *e2eQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return nil, nil
+}
+
+func (m *e2eQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+
 type e2eDocumentParserFactory struct {
 	parsers map[metadata.DocumentType]metadata.DocumentParser
 }

@@ -43,6 +43,9 @@ type QuantDB interface {
 	// TableExists checks if a table exists.
 	TableExists(ctx context.Context, tableName string) (bool, error)
 
+	// ListTables returns table names in the database (e.g. main schema).
+	ListTables(ctx context.Context) ([]string, error)
+
 	// GetTableStats returns statistics for a table.
 	GetTableStats(ctx context.Context, tableName string) (*TableStats, error)
 

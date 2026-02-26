@@ -40,6 +40,12 @@ type QuantDBAdapter interface {
 
 	// InvalidateConnection drops the cached connection for the given data store ID (e.g. after connection info update).
 	InvalidateConnection(id shared.ID)
+
+	// ListTables returns table names in the data store's database (e.g. main schema).
+	ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error)
+
+	// Query executes a read-only SQL query and returns rows. Caller must ensure SQL is safe (e.g. table name whitelist).
+	Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error)
 }
 
 // NewDataStoreApplicationService creates a new DataStoreApplicationService implementation.
@@ -272,4 +278,99 @@ func (s *DataStoreApplicationServiceImpl) CreateTablesForDatasource(ctx context.
 	}
 
 	return instanceID, nil
+}
+
+// ==================== Data Browser ====================
+
+// ListDatastoreTables lists table names in the given data store's database.
+func (s *DataStoreApplicationServiceImpl) ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error) {
+	ds, err := s.dataStoreRepo.Get(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data store: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+	if s.quantDBAdapter == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeValidation, "data browser not available", nil)
+	}
+	tables, err := s.quantDBAdapter.ListTables(ctx, ds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+	return tables, nil
+}
+
+// GetDatastoreTableData returns a page of rows from a table and the total row count.
+// tableName must be in the whitelist from ListDatastoreTables.
+func (s *DataStoreApplicationServiceImpl) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int) ([]map[string]any, int64, error) {
+	ds, err := s.dataStoreRepo.Get(id)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get data store: %w", err)
+	}
+	if ds == nil {
+		return nil, 0, shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+	if s.quantDBAdapter == nil {
+		return nil, 0, shared.NewDomainError(shared.ErrCodeValidation, "data browser not available", nil)
+	}
+	// Whitelist: only allow table names returned by ListTables
+	tables, err := s.quantDBAdapter.ListTables(ctx, ds)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list tables: %w", err)
+	}
+	allowed := make(map[string]bool)
+	for _, t := range tables {
+		allowed[t] = true
+	}
+	if !allowed[tableName] {
+		return nil, 0, shared.NewDomainError(shared.ErrCodeNotFound, "table not found", nil)
+	}
+	// Clamp page size (e.g. 1–100)
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * pageSize
+	quoted := quoteTableName(tableName)
+
+	// Total count
+	countSQL := "SELECT COUNT(*) AS n FROM " + quoted
+	countRows, err := s.quantDBAdapter.Query(ctx, ds, countSQL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count rows: %w", err)
+	}
+	var total int64
+	if len(countRows) > 0 {
+		if n, ok := countRows[0]["n"]; ok {
+			switch v := n.(type) {
+			case int64:
+				total = v
+			case int:
+				total = int64(v)
+			case int32:
+				total = int64(v)
+			}
+		}
+	}
+
+	// Page of rows
+	dataSQL := "SELECT * FROM " + quoted + " LIMIT ? OFFSET ?"
+	rows, err := s.quantDBAdapter.Query(ctx, ds, dataSQL, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query table data: %w", err)
+	}
+	return rows, total, nil
+}
+
+// quoteTableName quotes a table name for SQL (DuckDB: double-quote and escape).
+// Only use for names that have passed whitelist.
+func quoteTableName(name string) string {
+	escaped := strings.ReplaceAll(name, `"`, `""`)
+	return `"` + escaped + `"`
 }

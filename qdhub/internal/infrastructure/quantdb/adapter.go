@@ -126,6 +126,24 @@ func (a *QuantDBAdapterImpl) TableExists(ctx context.Context, ds *datastore.Quan
 	return conn.TableExists(ctx, tableName)
 }
 
+// ListTables returns table names in the data store's database.
+func (a *QuantDBAdapterImpl) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+	return conn.ListTables(ctx)
+}
+
+// Query executes a SQL query on the data store and returns the results.
+func (a *QuantDBAdapterImpl) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+	return conn.Query(ctx, sql, args...)
+}
+
 // InvalidateConnection drops the cached connection for the given data store ID.
 func (a *QuantDBAdapterImpl) InvalidateConnection(id shared.ID) {
 	a.mu.Lock()

@@ -503,6 +503,14 @@ func (m *MockQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.Quan
 	return m.tableExists, nil
 }
 
+func (m *MockQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return nil, nil
+}
+
+func (m *MockQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+
 // MockWorkflowExecutor is a simple mock implementation of workflow.WorkflowExecutor.
 // Only used for testing DataStoreApplicationService, so most methods return mock values.
 type MockWorkflowExecutor struct{}
