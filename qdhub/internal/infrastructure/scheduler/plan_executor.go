@@ -4,6 +4,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -58,13 +59,27 @@ func (e *ScheduledPlanExecutor) ExecuteScheduledJob(ctx context.Context, jobID s
 	return nil
 }
 
-// buildExecuteRequest builds ExecuteSyncPlanRequest from plan.DefaultExecuteParams.
-// Returns nil if DefaultExecuteParams is missing or incomplete (no StartDate/EndDate).
+// buildExecuteRequest builds ExecuteSyncPlanRequest for scheduled run.
+// If incremental mode is on and LastSuccessfulEndDate is set, uses [LastSuccessfulEndDate, today];
+// otherwise uses DefaultExecuteParams. Returns nil if no valid date range can be built.
 func (e *ScheduledPlanExecutor) buildExecuteRequest(plan *sync.SyncPlan) *contracts.ExecuteSyncPlanRequest {
 	if plan.DefaultExecuteParams == nil {
 		return nil
 	}
 	p := plan.DefaultExecuteParams
+
+	// 增量模式：上次成功 EndDate -> 当前日期
+	if plan.IncrementalMode && plan.LastSuccessfulEndDate != nil && *plan.LastSuccessfulEndDate != "" {
+		today := time.Now().Format("20060102")
+		return &contracts.ExecuteSyncPlanRequest{
+			StartDate: *plan.LastSuccessfulEndDate,
+			EndDate:   today,
+			StartTime: p.StartTime,
+			EndTime:   p.EndTime,
+		}
+	}
+
+	// 非增量或首次：使用默认日期范围
 	if p.StartDate == "" || p.EndDate == "" {
 		return nil
 	}

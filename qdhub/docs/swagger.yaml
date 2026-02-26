@@ -102,6 +102,9 @@ definitions:
         $ref: '#/definitions/sync.ExecuteParams'
       description:
         type: string
+      incremental_mode:
+        description: when true, scheduled runs use last successful EndDate as StartDate and today as EndDate
+        type: boolean
       name:
         type: string
       selected_apis:
@@ -229,6 +232,9 @@ definitions:
         $ref: '#/definitions/sync.ExecuteParams'
       description:
         type: string
+      incremental_mode:
+        description: when true, scheduled runs use incremental date range
+        type: boolean
       name:
         type: string
       selected_apis:

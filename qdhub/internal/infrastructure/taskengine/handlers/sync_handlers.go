@@ -65,10 +65,21 @@ type syncCallbackInvoker interface {
 // DataSyncCompleteHandler handles completion of the entire data sync workflow.
 // 若注入了 SyncCallbackInvoker，则调用 HandleExecutionCallbackByWorkflowInstance，从而更新 execution/plan 状态、触发 Plan.MarkCompleted。
 // 若 GetDependency 因 nil registry（如单元测试 mock）panic，则 recover 后跳过回调。
+// 支持成功和失败两种场景：通过 _status 参数判断工作流最终状态。
 func DataSyncCompleteHandler(tc *task.TaskContext) {
-	status := tc.GetParamString("_status")
+	statusStr := tc.GetParamString("_status")
 	logrus.Printf("[DataSync] 🏁 Workflow completed - WorkflowInstanceID: %s, Status: %s",
-		tc.WorkflowInstanceID, status)
+		tc.WorkflowInstanceID, statusStr)
+
+	success := statusStr == "" || statusStr == "success" || statusStr == "Success"
+	var errMsg *string
+	if !success {
+		msg := tc.GetParamString("_error_message")
+		if msg == "" {
+			msg = "workflow failed with status: " + statusStr
+		}
+		errMsg = &msg
+	}
 
 	invokeCallback := func() {
 		invoker, ok := tc.GetDependency("SyncCallbackInvoker")
@@ -80,7 +91,7 @@ func DataSyncCompleteHandler(tc *task.TaskContext) {
 			return
 		}
 		ctx := context.Background()
-		if err := svc.HandleExecutionCallbackByWorkflowInstance(ctx, tc.WorkflowInstanceID, true, 0, nil); err != nil {
+		if err := svc.HandleExecutionCallbackByWorkflowInstance(ctx, tc.WorkflowInstanceID, success, 0, errMsg); err != nil {
 			logrus.Warnf("[DataSync] execution callback failed: %v", err)
 		}
 	}

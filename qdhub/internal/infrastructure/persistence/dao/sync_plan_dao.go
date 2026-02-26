@@ -28,9 +28,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
 		selected_apis, resolved_apis, execution_graph, cron_expression, default_execute_params,
+		incremental_mode, last_successful_end_date,
 		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
 		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :default_execute_params,
+		:incremental_mode, :last_successful_end_date,
 		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
@@ -69,6 +71,7 @@ func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 		selected_apis = :selected_apis, resolved_apis = :resolved_apis,
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
 		default_execute_params = :default_execute_params,
+		incremental_mode = :incremental_mode, last_successful_end_date = :last_successful_end_date,
 		status = :status, last_executed_at = :last_executed_at,
 		next_execute_at = :next_execute_at, updated_at = :updated_at
 		WHERE id = :id`
@@ -190,17 +193,21 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	}
 
 	row := &SyncPlanRow{
-		ID:                   entity.ID.String(),
-		Name:                 entity.Name,
-		Description:          entity.Description,
-		DataSourceID:         entity.DataSourceID.String(),
-		SelectedAPIs:         selectedAPIs,
-		ResolvedAPIs:         resolvedAPIs,
-		ExecutionGraph:       executionGraph,
-		DefaultExecuteParams: defaultExecuteParams,
-		Status:               entity.Status.String(),
-		CreatedAt:            entity.CreatedAt.ToTime(),
-		UpdatedAt:            entity.UpdatedAt.ToTime(),
+		ID:                     entity.ID.String(),
+		Name:                   entity.Name,
+		Description:            entity.Description,
+		DataSourceID:           entity.DataSourceID.String(),
+		SelectedAPIs:           selectedAPIs,
+		ResolvedAPIs:           resolvedAPIs,
+		ExecutionGraph:         executionGraph,
+		DefaultExecuteParams:   defaultExecuteParams,
+		IncrementalMode:        entity.IncrementalMode,
+		Status:                 entity.Status.String(),
+		CreatedAt:              entity.CreatedAt.ToTime(),
+		UpdatedAt:              entity.UpdatedAt.ToTime(),
+	}
+	if entity.LastSuccessfulEndDate != nil {
+		row.LastSuccessfulEndDate = sql.NullString{String: *entity.LastSuccessfulEndDate, Valid: true}
 	}
 
 	if entity.DataStoreID != "" {
@@ -270,6 +277,11 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal default execute params: %w", err)
 		}
+	}
+
+	entity.IncrementalMode = row.IncrementalMode
+	if row.LastSuccessfulEndDate.Valid {
+		entity.LastSuccessfulEndDate = &row.LastSuccessfulEndDate.String
 	}
 
 	return entity, nil

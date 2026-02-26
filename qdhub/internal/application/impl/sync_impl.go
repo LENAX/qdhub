@@ -98,6 +98,7 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 	if req.DefaultExecuteParams != nil {
 		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
 	}
+	plan.SetIncrementalMode(req.IncrementalMode)
 
 	// Persist
 	if err := s.syncPlanRepo.Create(plan); err != nil {
@@ -157,6 +158,9 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 	if req.DefaultExecuteParams != nil {
 		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
 	}
+	if req.IncrementalMode != nil {
+		plan.SetIncrementalMode(*req.IncrementalMode)
+	}
 
 	plan.UpdatedAt = shared.Now()
 
@@ -196,7 +200,107 @@ func (s *SyncApplicationServiceImpl) ListSyncPlans(ctx context.Context) ([]*sync
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sync plans: %w", err)
 	}
+
+	for _, plan := range plans {
+		if plan.Status == sync.PlanStatusRunning {
+			s.tryRecoverStalePlan(ctx, plan)
+		}
+	}
+
+	// 填充最近一次执行状态，供前端展示（启用/就绪/成功/失败等）
+	for _, plan := range plans {
+		execs, err := s.syncPlanRepo.GetExecutionsByPlan(plan.ID)
+		if err != nil || len(execs) == 0 {
+			continue
+		}
+		plan.LastExecutionStatus = &execs[0].Status
+	}
+
 	return plans, nil
+}
+
+// tryRecoverStalePlan checks whether a running plan's latest execution has actually
+// completed in the workflow engine, and if so, marks both execution and plan as completed.
+func (s *SyncApplicationServiceImpl) tryRecoverStalePlan(ctx context.Context, plan *sync.SyncPlan) {
+	execs, err := s.syncPlanRepo.GetExecutionsByPlan(plan.ID)
+	if err != nil || len(execs) == 0 {
+		return
+	}
+	latest := execs[0]
+	if latest.Status != sync.ExecStatusRunning && latest.Status != sync.ExecStatusPending {
+		// Execution already terminal but plan stuck — just mark plan completed
+		var nextRunAt *time.Time
+		if plan.CronExpression != nil && *plan.CronExpression != "" {
+			if s.planScheduler != nil {
+				nextRunAt = s.planScheduler.GetNextRunTime(plan.ID.String())
+			}
+			if nextRunAt == nil {
+				nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+			}
+		}
+		plan.MarkCompleted(nextRunAt)
+		if updateErr := s.syncPlanRepo.Update(plan); updateErr != nil {
+			logrus.Warnf("[ListSyncPlans] Failed to recover plan %s: %v", plan.ID, updateErr)
+		} else {
+			logrus.Infof("[ListSyncPlans] Recovered stale plan %s (execution already terminal)", plan.ID)
+		}
+		return
+	}
+
+	if s.taskEngineAdapter == nil || latest.WorkflowInstID.IsEmpty() {
+		return
+	}
+
+	wfStatus, err := s.taskEngineAdapter.GetInstanceStatus(ctx, latest.WorkflowInstID.String())
+	if err != nil || wfStatus == nil {
+		return
+	}
+
+	statusUpper := strings.ToUpper(wfStatus.Status)
+	var newExecStatus sync.ExecStatus
+	switch statusUpper {
+	case "SUCCESS", "COMPLETED":
+		newExecStatus = sync.ExecStatusSuccess
+	case "FAILED", "ERROR":
+		newExecStatus = sync.ExecStatusFailed
+	case "TERMINATED", "CANCELLED":
+		newExecStatus = sync.ExecStatusCancelled
+	default:
+		return
+	}
+
+	switch newExecStatus {
+	case sync.ExecStatusSuccess:
+		latest.MarkSuccess(latest.RecordCount)
+	case sync.ExecStatusFailed:
+		errMsg := ""
+		if wfStatus.ErrorMessage != nil {
+			errMsg = *wfStatus.ErrorMessage
+		}
+		latest.MarkFailed(errMsg)
+	case sync.ExecStatusCancelled:
+		latest.MarkCancelled()
+	}
+	if updateErr := s.syncPlanRepo.UpdatePlanExecution(latest); updateErr != nil {
+		logrus.Warnf("[ListSyncPlans] Failed to update execution %s: %v", latest.ID, updateErr)
+		return
+	}
+
+	var nextRunAt *time.Time
+	if plan.CronExpression != nil && *plan.CronExpression != "" {
+		if s.planScheduler != nil {
+			nextRunAt = s.planScheduler.GetNextRunTime(plan.ID.String())
+		}
+		if nextRunAt == nil {
+			nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+		}
+	}
+	plan.MarkCompleted(nextRunAt)
+	if updateErr := s.syncPlanRepo.Update(plan); updateErr != nil {
+		logrus.Warnf("[ListSyncPlans] Failed to recover plan %s: %v", plan.ID, updateErr)
+	} else {
+		logrus.Infof("[ListSyncPlans] Recovered stale plan %s from workflow status %s", plan.ID, wfStatus.Status)
+	}
 }
 
 // ResolveSyncPlan resolves dependencies for a sync plan.
@@ -752,6 +856,9 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 
 		// Update plan status
 		if plan != nil {
+			if req.Success && plan.IncrementalMode && exec.ExecuteParams != nil && exec.ExecuteParams.EndDate != "" {
+				plan.SetLastSuccessfulEndDate(exec.ExecuteParams.EndDate)
+			}
 			// Get next run time from scheduler or calculate it
 			var nextRunAt *time.Time
 			if plan.CronExpression != nil && *plan.CronExpression != "" {
@@ -898,6 +1005,26 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 					progress.FinishedAt = exec.FinishedAt
 					if newStatus == sync.ExecStatusFailed && exec.ErrorMessage != nil {
 						progress.ErrorMessage = exec.ErrorMessage
+					}
+					// When execution is synced to terminal from workflow, also mark plan completed
+					// so plan status does not stay "running" if DataSyncCompleteHandler was never invoked
+					plan, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
+					if planErr == nil && plan != nil && plan.Status == sync.PlanStatusRunning {
+						var nextRunAt *time.Time
+						if plan.CronExpression != nil && *plan.CronExpression != "" {
+							if s.planScheduler != nil {
+								nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+							}
+							if nextRunAt == nil {
+								nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+							}
+						}
+						plan.MarkCompleted(nextRunAt)
+						if updatePlanErr := s.syncPlanRepo.Update(plan); updatePlanErr != nil {
+							logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-sync: %v", updatePlanErr)
+						} else {
+							logrus.Infof("[SyncExecution] Plan %s marked completed after auto-sync from workflow", exec.SyncPlanID)
+						}
 					}
 				}
 			}

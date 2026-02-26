@@ -4122,6 +4122,10 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "incremental_mode": {
+                    "description": "when true, scheduled runs use last successful EndDate as StartDate and today as EndDate",
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -4306,6 +4310,10 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "incremental_mode": {
+                    "description": "when true, scheduled runs use incremental date range",
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"

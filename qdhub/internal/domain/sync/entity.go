@@ -216,10 +216,17 @@ type SyncPlan struct {
 	// 默认执行参数（用于定时触发）
 	DefaultExecuteParams *ExecuteParams `json:"default_execute_params,omitempty"`
 
+	// 增量模式：定时触发时用上次成功执行的 EndDate 作为本次 StartDate，EndDate 为当前日期；首次无记录时用 DefaultExecuteParams
+	IncrementalMode       bool    `json:"incremental_mode"`
+	LastSuccessfulEndDate *string `json:"last_successful_end_date,omitempty"`
+
 	// 状态
 	Status         PlanStatus  `json:"status"`
 	LastExecutedAt *time.Time  `json:"last_run_at,omitempty"`
 	NextExecuteAt  *time.Time  `json:"next_run_at,omitempty"`
+
+	// LastExecutionStatus 最近一次执行状态，仅用于列表等接口展示，不持久化
+	LastExecutionStatus *ExecStatus `json:"last_execution_status,omitempty"`
 
 	// 时间戳
 	CreatedAt shared.Timestamp `json:"created_at"`
@@ -268,6 +275,22 @@ func (sp *SyncPlan) SetCronExpression(cronExpr string) {
 // SetDefaultExecuteParams sets the default execute params for scheduled runs.
 func (sp *SyncPlan) SetDefaultExecuteParams(p *ExecuteParams) {
 	sp.DefaultExecuteParams = p
+	sp.UpdatedAt = shared.Now()
+}
+
+// SetIncrementalMode sets whether scheduled runs use incremental date range (last successful EndDate -> today).
+func (sp *SyncPlan) SetIncrementalMode(enabled bool) {
+	sp.IncrementalMode = enabled
+	sp.UpdatedAt = shared.Now()
+}
+
+// SetLastSuccessfulEndDate sets the EndDate of the last successful execution (used for next incremental run).
+func (sp *SyncPlan) SetLastSuccessfulEndDate(endDate string) {
+	if endDate == "" {
+		sp.LastSuccessfulEndDate = nil
+	} else {
+		sp.LastSuccessfulEndDate = &endDate
+	}
 	sp.UpdatedAt = shared.Now()
 }
 

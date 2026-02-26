@@ -81,6 +81,7 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 		SelectedAPIs:         req.SelectedAPIs,
 		CronExpression:       req.CronExpression,
 		DefaultExecuteParams: req.DefaultExecuteParams,
+		IncrementalMode:      req.IncrementalMode,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -167,6 +168,7 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		SelectedAPIs:         req.SelectedAPIs,
 		CronExpression:       req.CronExpression,
 		DefaultExecuteParams: req.DefaultExecuteParams,
+		IncrementalMode:      req.IncrementalMode,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -442,6 +444,7 @@ type CreateSyncPlanReq struct {
 	SelectedAPIs         []string            `json:"selected_apis" binding:"required"`
 	CronExpression       *string             `json:"cron_expression"`
 	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode     bool                `json:"incremental_mode"`
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
@@ -452,6 +455,7 @@ type UpdateSyncPlanReq struct {
 	SelectedAPIs         *[]string           `json:"selected_apis"`
 	CronExpression       *string             `json:"cron_expression"`
 	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode      *bool               `json:"incremental_mode"`
 }
 
 // ExecuteSyncPlanReq represents the request body for triggering a sync plan.

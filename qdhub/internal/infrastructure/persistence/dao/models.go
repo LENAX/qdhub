@@ -148,12 +148,14 @@ type SyncPlanRow struct {
 	ResolvedAPIs         string         `db:"resolved_apis"`
 	ExecutionGraph       string         `db:"execution_graph"`
 	CronExpression       sql.NullString `db:"cron_expression"`
-	DefaultExecuteParams string         `db:"default_execute_params"` // JSON: ExecuteParams
-	Status               string         `db:"status"`
-	LastExecutedAt       sql.NullTime   `db:"last_executed_at"`
-	NextExecuteAt        sql.NullTime   `db:"next_execute_at"`
-	CreatedAt            time.Time      `db:"created_at"`
-	UpdatedAt            time.Time      `db:"updated_at"`
+	DefaultExecuteParams       string         `db:"default_execute_params"` // JSON: ExecuteParams
+	IncrementalMode            bool           `db:"incremental_mode"`
+	LastSuccessfulEndDate      sql.NullString `db:"last_successful_end_date"`
+	Status                     string         `db:"status"`
+	LastExecutedAt             sql.NullTime   `db:"last_executed_at"`
+	NextExecuteAt              sql.NullTime   `db:"next_execute_at"`
+	CreatedAt                  time.Time      `db:"created_at"`
+	UpdatedAt                  time.Time      `db:"updated_at"`
 }
 
 // SyncTaskRow represents sync_task table row.

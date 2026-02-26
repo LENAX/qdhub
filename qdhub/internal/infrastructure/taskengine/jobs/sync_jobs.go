@@ -242,9 +242,21 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	// 如果是 trade_date，根据日期范围过滤交易日
+	// start_date/end_date 可能来自任务顶层（APINames 模式）或 extra_params（SyncPlan APIConfigs 模式）
 	if paramKey == "trade_date" {
 		startDate := tc.GetParamString("start_date")
 		endDate := tc.GetParamString("end_date")
+		if (startDate == "" || endDate == "") && extraParams != nil {
+			if s, _ := extraParams["start_date"].(string); s != "" {
+				startDate = s
+			}
+			if e, _ := extraParams["end_date"].(string); e != "" {
+				endDate = e
+			}
+		}
+		// 归一化为 YYYYMMDD（extra_params 可能带时间如 "20250101 09:30:00"），便于与 trade_cal 的日期比较
+		startDate = normalizeDateForFilter(startDate)
+		endDate = normalizeDateForFilter(endDate)
 		if startDate != "" || endDate != "" {
 			filtered := filterDatesByRange(paramValues, startDate, endDate)
 			logrus.Printf("📅 [GenerateDataSyncSubTasks] 日期范围过滤: 原始 %d 个交易日 -> 过滤后 %d 个 (范围: %s ~ %s)",
@@ -1093,6 +1105,19 @@ func parseGoMapString(s string) map[string]interface{} {
 	}
 
 	return result
+}
+
+// normalizeDateForFilter 将日期串归一化为 YYYYMMDD，用于与 trade_cal 的日期比较。
+// 若带时间（如 "20250101 09:30:00"）则只取前 8 位。
+func normalizeDateForFilter(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) >= 8 {
+		return s[:8]
+	}
+	return s
 }
 
 // filterDatesByRange 根据日期范围过滤日期列表

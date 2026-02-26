@@ -703,11 +703,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		}
 	}
 
-	// BatchSyncComplete：依赖所有同步任务，成功时触发 DataSyncCompleteHandler → execution 回调 → Plan.MarkCompleted
+	// BatchSyncComplete：依赖所有同步任务，成功/失败均触发 DataSyncCompleteHandler → execution 回调 → Plan.MarkCompleted
 	completeTaskBuilder := builder.NewTaskBuilder("BatchSyncComplete", "批量同步完成（触发 execution 回调）", b.registry).
 		WithJobFunction("NotifySyncComplete", map[string]interface{}{}).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncComplete").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure")
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncComplete")
 	for _, dep := range depNames {
 		completeTaskBuilder = completeTaskBuilder.WithDependency(dep)
 	}
@@ -918,11 +918,11 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 		}
 	}
 
-	// BatchSyncComplete：依赖所有同步任务，成功时触发 DataSyncCompleteHandler → execution 回调
+	// BatchSyncComplete：依赖所有同步任务，成功/失败均触发 DataSyncCompleteHandler → execution 回调
 	completeTaskBuilder := builder.NewTaskBuilder("BatchSyncComplete", "批量同步完成（触发 execution 回调）", b.registry).
 		WithJobFunction("NotifySyncComplete", map[string]interface{}{}).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncComplete").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure")
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncComplete")
 	for _, dep := range depNames {
 		completeTaskBuilder = completeTaskBuilder.WithDependency(dep)
 	}

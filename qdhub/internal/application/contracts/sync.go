@@ -99,6 +99,7 @@ type CreateSyncPlanRequest struct {
 	SelectedAPIs         []string
 	CronExpression       *string
 	DefaultExecuteParams *sync.ExecuteParams
+	IncrementalMode      bool
 }
 
 // UpdateSyncPlanRequest represents a request to update a sync plan.
@@ -109,6 +110,7 @@ type UpdateSyncPlanRequest struct {
 	SelectedAPIs         *[]string
 	CronExpression       *string
 	DefaultExecuteParams *sync.ExecuteParams
+	IncrementalMode      *bool
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.
