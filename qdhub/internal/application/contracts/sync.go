@@ -112,12 +112,12 @@ type UpdateSyncPlanRequest struct {
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.
+// TargetDBPath is resolved from the plan's associated data store; only date/time may be passed.
 type ExecuteSyncPlanRequest struct {
-	TargetDBPath string // 目标数据库路径（必填）
-	StartDate    string // 开始日期（必填，格式: "20251201"）
-	EndDate      string // 结束日期（必填，格式: "20251231"）
-	StartTime    string // 开始时间（可选，格式: "09:30:00"）
-	EndTime      string // 结束时间（可选，格式: "15:00:00"）
+	StartDate string // 开始日期（可选，格式: "20251201"，未传时用计划 default_execute_params）
+	EndDate   string // 结束日期（可选，格式: "20251231"）
+	StartTime string // 开始时间（可选，格式: "09:30:00"）
+	EndTime   string // 结束时间（可选，格式: "15:00:00"）
 }
 
 // ExecutionCallbackRequest represents a callback request from workflow engine.

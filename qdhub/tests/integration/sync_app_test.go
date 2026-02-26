@@ -9,6 +9,7 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
@@ -133,12 +134,13 @@ func TestSyncApplicationService_Integration_CreateAndGetSyncPlan(t *testing.T) {
 	// Create repositories
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -183,12 +185,13 @@ func TestSyncApplicationService_Integration_ListSyncPlans(t *testing.T) {
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -224,12 +227,13 @@ func TestSyncApplicationService_Integration_UpdateSyncPlan(t *testing.T) {
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -274,12 +278,13 @@ func TestSyncApplicationService_Integration_DeleteSyncPlan(t *testing.T) {
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -316,12 +321,13 @@ func TestSyncApplicationService_Integration_EnableDisablePlan(t *testing.T) {
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -371,12 +377,13 @@ func TestSyncApplicationService_Integration_CreateSyncPlan_DataSourceNotFound(t 
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
 
 	// Try to create sync plan with non-existent data source
 	_, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
@@ -405,7 +412,8 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs(t *
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, capturingExecutor, dependencyResolver, nil, uowImpl)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, dependencyResolver, nil, uowImpl)
 
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
 	if err := dataSourceRepo.Create(dataSource); err != nil {
@@ -419,10 +427,15 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs(t *
 	if err := dataSourceRepo.AddAPIMetadata(apiMeta); err != nil {
 		t.Fatalf("add api metadata: %v", err)
 	}
+	store := datastore.NewQuantDataStore("Test Store", "Test", datastore.DataStoreTypeDuckDB, "", "/tmp/test.db")
+	if err := dataStoreRepo.Create(store); err != nil {
+		t.Fatalf("create data store: %v", err)
+	}
 
 	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
 		Name:         "Plan",
 		DataSourceID: dataSource.ID,
+		DataStoreID:  store.ID,
 		SelectedAPIs: []string{"api1"},
 	})
 	if err != nil {
@@ -439,9 +452,8 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs(t *
 	_, _ = db.Exec(`INSERT INTO workflow_instance (id, workflow_id, status) VALUES (?, ?, ?)`, string(fixedWfInstID), "wf-def-apiconfigs", "Running")
 
 	_, err = svc.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: "/tmp/test.db",
-		StartDate:    "20250101",
-		EndDate:      "20250131",
+		StartDate: "20250101",
+		EndDate:   "20250131",
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSyncPlan: %v", err)
@@ -474,7 +486,8 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamK
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, capturingExecutor, resolverWithMappings, nil, uowImpl)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, resolverWithMappings, nil, uowImpl)
 
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
 	if err := dataSourceRepo.Create(dataSource); err != nil {
@@ -490,10 +503,15 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamK
 			t.Fatalf("add api metadata %s: %v", name, err)
 		}
 	}
+	store := datastore.NewQuantDataStore("Test Store", "Test", datastore.DataStoreTypeDuckDB, "", "/tmp/test.db")
+	if err := dataStoreRepo.Create(store); err != nil {
+		t.Fatalf("create data store: %v", err)
+	}
 
 	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
 		Name:         "Plan",
 		DataSourceID: dataSource.ID,
+		DataStoreID:  store.ID,
 		SelectedAPIs: []string{"daily"},
 	})
 	if err != nil {
@@ -510,9 +528,8 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamK
 	_, _ = db.Exec(`INSERT INTO workflow_instance (id, workflow_id, status) VALUES (?, ?, ?)`, string(fixedWfInstID), "wf-def-paramkey", "Running")
 
 	_, err = svc.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: "/tmp/test.db",
-		StartDate:    "20250101",
-		EndDate:      "20250131",
+		StartDate: "20250101",
+		EndDate:   "20250131",
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSyncPlan: %v", err)

@@ -3660,6 +3660,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/sync-plans/{id}/execute": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Manually trigger execution of a sync plan. Target DB path is resolved from the sync plan's associated data store. Request body may be empty; start_dt/end_dt are optional.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Execute a sync plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Execution parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ExecuteSyncPlanReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/sync-plans/{id}/executions": {
             "get": {
                 "security": [
@@ -3832,64 +3890,6 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/sync-plans/{id}/trigger": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Manually trigger execution of a sync plan",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "SyncPlans"
-                ],
-                "summary": "Trigger a sync plan",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Sync plan ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Execution parameters",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/http.TriggerSyncPlanReq"
-                        }
                     }
                 ],
                 "responses": {
@@ -4147,6 +4147,19 @@ const docTemplate = `{
                 }
             }
         },
+        "http.ExecuteSyncPlanReq": {
+            "type": "object",
+            "properties": {
+                "end_dt": {
+                    "description": "optional, datetime",
+                    "type": "string"
+                },
+                "start_dt": {
+                    "description": "optional, datetime (RFC3339 or 2006-01-02)",
+                    "type": "string"
+                }
+            }
+        },
         "http.ExecutionCallbackReq": {
             "type": "object",
             "required": [
@@ -4228,31 +4241,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "token": {
-                    "type": "string"
-                }
-            }
-        },
-        "http.TriggerSyncPlanReq": {
-            "type": "object",
-            "required": [
-                "end_date",
-                "start_date",
-                "target_db_path"
-            ],
-            "properties": {
-                "end_date": {
-                    "type": "string"
-                },
-                "end_time": {
-                    "type": "string"
-                },
-                "start_date": {
-                    "type": "string"
-                },
-                "start_time": {
-                    "type": "string"
-                },
-                "target_db_path": {
                     "type": "string"
                 }
             }

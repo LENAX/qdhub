@@ -59,17 +59,16 @@ func (e *ScheduledPlanExecutor) ExecuteScheduledJob(ctx context.Context, jobID s
 }
 
 // buildExecuteRequest builds ExecuteSyncPlanRequest from plan.DefaultExecuteParams.
-// Returns nil if DefaultExecuteParams is missing or incomplete (no TargetDBPath/StartDate/EndDate).
+// Returns nil if DefaultExecuteParams is missing or incomplete (no StartDate/EndDate).
 func (e *ScheduledPlanExecutor) buildExecuteRequest(plan *sync.SyncPlan) *contracts.ExecuteSyncPlanRequest {
 	if plan.DefaultExecuteParams == nil {
 		return nil
 	}
 	p := plan.DefaultExecuteParams
-	if p.TargetDBPath == "" || p.StartDate == "" || p.EndDate == "" {
+	if p.StartDate == "" || p.EndDate == "" {
 		return nil
 	}
 	return &contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: p.TargetDBPath,
 		StartDate:    p.StartDate,
 		EndDate:      p.EndDate,
 		StartTime:    p.StartTime,

@@ -284,7 +284,7 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 	metadataRepo := repository.NewMetadataRepository(db)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, dsRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create auth components

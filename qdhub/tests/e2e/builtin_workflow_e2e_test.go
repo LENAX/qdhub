@@ -690,6 +690,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		cronCalculator,
 		nil, // planScheduler - not needed for tests
 		dataSourceRepo,
+		datastoreRepo,
 		workflowExecutor,
 		dependencyResolver,
 		taskEngineAdapter,
@@ -1106,7 +1107,6 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		}
 
 		execReq := contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: targetDBPath,
 			StartDate:    startDate,
 			EndDate:      endDate,
 		}
@@ -1281,9 +1281,24 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 
 	t.Log("========== SyncPlan 生命周期 E2E 测试开始 ==========")
 
+	// 创建 DataStore（用于解析 target_db_path）
+	tmpDBFile, err := os.CreateTemp("", "e2e_lifecycle_*.duckdb")
+	require.NoError(t, err)
+	tmpDBFile.Close()
+	defer os.Remove(tmpDBFile.Name())
+
+	dsStore, err := testCtx.datastoreAppService.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
+		Name:        "E2E Lifecycle DuckDB",
+		Description: "E2E 生命周期测试用 DuckDB 数据存储",
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: tmpDBFile.Name(),
+	})
+	require.NoError(t, err)
+	dataStoreID := dsStore.ID
+
 	// 创建数据源
 	ds := metadata.NewDataSource("Tushare", "Test Data Source", "http://api.tushare.pro", "https://tushare.pro/document/2")
-	err := testCtx.dataSourceRepo.Create(ds)
+	err = testCtx.dataSourceRepo.Create(ds)
 	require.NoError(t, err)
 	token := metadata.NewToken(ds.ID, "test-token", nil)
 	err = testCtx.dataSourceRepo.SetToken(token)
@@ -1302,6 +1317,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 			Name:         "Test Sync Plan (20 APIs)",
 			Description:  "测试同步计划 - 20 个 API",
 			DataSourceID: ds.ID,
+			DataStoreID:  dataStoreID,
 			SelectedAPIs: selectedAPIs,
 		}
 
@@ -1368,13 +1384,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 	// 6. 执行 SyncPlan
 	var executionID shared.ID
 	t.Run("Step6_ExecuteSyncPlan", func(t *testing.T) {
-		tmpDBFile, err := os.CreateTemp("", "e2e_lifecycle_*.duckdb")
-		require.NoError(t, err)
-		tmpDBFile.Close()
-		defer os.Remove(tmpDBFile.Name())
-
 		execReq := contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: tmpDBFile.Name(),
 			StartDate:    "20251201",
 			EndDate:      "20251215",
 		}
@@ -1865,7 +1875,6 @@ func TestE2E_DataSyncOnly(t *testing.T) {
 	t.Logf("  日期范围: %s ~ %s", startDate, endDate)
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: config.DuckDBPath,
 		StartDate:    startDate,
 		EndDate:      endDate,
 	})
@@ -2031,6 +2040,7 @@ func TestE2E_GGT_Top10(t *testing.T) {
 		Name:         "E2E Test - ggt_top10 Only",
 		Description:  "E2E 测试 - 专门测试 ggt_top10 API",
 		DataSourceID: dataSourceID,
+		DataStoreID:  dataStoreID,
 		SelectedAPIs: []string{"ggt_top10"},
 	}
 
@@ -2056,7 +2066,6 @@ func TestE2E_GGT_Top10(t *testing.T) {
 	endDate := time.Now().Format("20060102")                     // 今天
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: config.DuckDBPath,
 		StartDate:    startDate,
 		EndDate:      endDate,
 	})

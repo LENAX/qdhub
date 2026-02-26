@@ -122,6 +122,15 @@ definitions:
     required:
     - data_source_id
     type: object
+  http.ExecuteSyncPlanReq:
+    properties:
+      end_dt:
+        description: optional, datetime
+        type: string
+      start_dt:
+        description: optional, datetime (RFC3339 or 2006-01-02)
+        type: string
+    type: object
   http.ExecutionCallbackReq:
     properties:
       error_message:
@@ -178,23 +187,6 @@ definitions:
         type: string
     required:
     - token
-    type: object
-  http.TriggerSyncPlanReq:
-    properties:
-      end_date:
-        type: string
-      end_time:
-        type: string
-      start_date:
-        type: string
-      start_time:
-        type: string
-      target_db_path:
-        type: string
-    required:
-    - end_date
-    - start_date
-    - target_db_path
     type: object
   http.UpdateAPISyncStrategyReq:
     properties:
@@ -2611,6 +2603,45 @@ paths:
       summary: Enable a sync plan
       tags:
       - SyncPlans
+  /sync-plans/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      description: Manually trigger execution of a sync plan. Target DB path is resolved
+        from the sync plan's associated data store. Request body may be empty; start_dt/end_dt
+        are optional.
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Execution parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.ExecuteSyncPlanReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Execute a sync plan
+      tags:
+      - SyncPlans
   /sync-plans/{id}/executions:
     get:
       consumes:
@@ -2734,43 +2765,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Resolve sync plan dependencies
-      tags:
-      - SyncPlans
-  /sync-plans/{id}/trigger:
-    post:
-      consumes:
-      - application/json
-      description: Manually trigger execution of a sync plan
-      parameters:
-      - description: Sync plan ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Execution parameters
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/http.TriggerSyncPlanReq'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/http.Response'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/http.Response'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/http.Response'
-      security:
-      - BearerAuth: []
-      summary: Trigger a sync plan
       tags:
       - SyncPlans
   /sync/callback:

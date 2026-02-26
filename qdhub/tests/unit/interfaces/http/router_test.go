@@ -45,6 +45,12 @@ func (m *FullMockMetadataService) SaveToken(ctx context.Context, req contracts.S
 func (m *FullMockMetadataService) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) {
 	return nil, nil
 }
+func (m *FullMockMetadataService) ValidateDataSourceToken(ctx context.Context, dataSourceID shared.ID) (hasToken bool, valid bool, message string, err error) {
+	return false, false, "not implemented", nil
+}
+func (m *FullMockMetadataService) GetDataSourceConfig(ctx context.Context, dataSourceID shared.ID) (apiURL string, token string, err error) {
+	return "", "", nil
+}
 func (m *FullMockMetadataService) CreateAPISyncStrategy(ctx context.Context, req contracts.CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
 	return nil, nil
 }
@@ -62,6 +68,9 @@ func (m *FullMockMetadataService) ListAPISyncStrategies(ctx context.Context, dat
 }
 func (m *FullMockMetadataService) ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req contracts.ListAPIMetadataRequest) (*contracts.ListAPIMetadataResponse, error) {
 	return &contracts.ListAPIMetadataResponse{Items: nil, Total: 0}, nil
+}
+func (m *FullMockMetadataService) ListAPICategories(ctx context.Context, dataSourceID shared.ID, hasAPIsOnly bool) ([]metadata.APICategory, error) {
+	return []metadata.APICategory{}, nil
 }
 func (m *FullMockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {
 	return nil

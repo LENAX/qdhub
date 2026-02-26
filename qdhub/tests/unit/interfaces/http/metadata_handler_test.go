@@ -121,6 +121,24 @@ func (m *MockMetadataService) GetToken(ctx context.Context, dataSourceID shared.
 	return args.Get(0).(*metadata.Token), args.Error(1)
 }
 
+func (m *MockMetadataService) ValidateDataSourceToken(ctx context.Context, dataSourceID shared.ID) (hasToken bool, valid bool, message string, err error) {
+	args := m.Called(ctx, dataSourceID)
+	return args.Bool(0), args.Bool(1), args.String(2), args.Error(3)
+}
+
+func (m *MockMetadataService) GetDataSourceConfig(ctx context.Context, dataSourceID shared.ID) (apiURL string, token string, err error) {
+	args := m.Called(ctx, dataSourceID)
+	return args.String(0), args.String(1), args.Error(2)
+}
+
+func (m *MockMetadataService) ListAPICategories(ctx context.Context, dataSourceID shared.ID, hasAPIsOnly bool) ([]metadata.APICategory, error) {
+	args := m.Called(ctx, dataSourceID, hasAPIsOnly)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]metadata.APICategory), args.Error(1)
+}
+
 func setupMetadataRouter(mockSvc *MockMetadataService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

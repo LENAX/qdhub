@@ -35,7 +35,7 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 	// Plan control
 	rg.POST("/sync-plans/:id/resolve", h.ResolveSyncPlan)
-	rg.POST("/sync-plans/:id/trigger", h.TriggerSyncPlan)
+	rg.POST("/sync-plans/:id/execute", h.ExecuteSyncPlan)
 	rg.POST("/sync-plans/:id/enable", h.EnablePlan)
 	rg.POST("/sync-plans/:id/disable", h.DisablePlan)
 
@@ -223,34 +223,29 @@ func (h *SyncHandler) ResolveSyncPlan(c *gin.Context) {
 	Success(c, gin.H{"status": "resolved"})
 }
 
-// TriggerSyncPlan handles POST /api/v1/sync-plans/:id/trigger
-// @Summary      Trigger a sync plan
-// @Description  Manually trigger execution of a sync plan
+// ExecuteSyncPlan handles POST /api/v1/sync-plans/:id/execute
+// @Summary      Execute a sync plan
+// @Description  Manually trigger execution of a sync plan. Target DB path is resolved from the sync plan's associated data store. Request body may be empty; start_dt/end_dt are optional.
 // @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string            true  "Sync plan ID"
-// @Param        request  body      TriggerSyncPlanReq  true  "Execution parameters"
+// @Param        request  body      ExecuteSyncPlanReq  true  "Execution parameters"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
 // @Security     BearerAuth
-// @Router       /sync-plans/{id}/trigger [post]
-func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
+// @Router       /sync-plans/{id}/execute [post]
+func (h *SyncHandler) ExecuteSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	var req TriggerSyncPlanReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
+	var req ExecuteSyncPlanReq
+	_ = c.ShouldBindJSON(&req) // 允许空 body，未传则使用计划默认参数
 
+	startDate, endDate := parseOptionalDatetimeToDate(req.StartDt, req.EndDt)
 	executionID, err := h.syncSvc.ExecuteSyncPlan(c.Request.Context(), id, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: req.TargetDBPath,
-		StartDate:    req.StartDate,
-		EndDate:      req.EndDate,
-		StartTime:    req.StartTime,
-		EndTime:      req.EndTime,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -260,6 +255,29 @@ func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
 		"execution_id": executionID,
 		"status":       "triggered",
 	})
+}
+
+// parseOptionalDatetimeToDate parses optional start_dt/end_dt (RFC3339 or 2006-01-02) to "20060102".
+// Returns empty strings if input is empty.
+func parseOptionalDatetimeToDate(startDt, endDt string) (startDate, endDate string) {
+	const dateOnly = "20060102"
+	for _, s := range []struct{ in *string; out *string }{
+		{&startDt, &startDate},
+		{&endDt, &endDate},
+	} {
+		if *s.in == "" {
+			continue
+		}
+		var t time.Time
+		var err error
+		if t, err = time.Parse(time.RFC3339, *s.in); err != nil {
+			t, err = time.Parse("2006-01-02", *s.in)
+		}
+		if err == nil {
+			*s.out = t.Format(dateOnly)
+		}
+	}
+	return startDate, endDate
 }
 
 // EnablePlan handles POST /api/v1/sync-plans/:id/enable
@@ -436,13 +454,12 @@ type UpdateSyncPlanReq struct {
 	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
 }
 
-// TriggerSyncPlanReq represents the request body for triggering a sync plan.
-type TriggerSyncPlanReq struct {
-	TargetDBPath string `json:"target_db_path" binding:"required"`
-	StartDate    string `json:"start_date" binding:"required"`
-	EndDate      string `json:"end_date" binding:"required"`
-	StartTime    string `json:"start_time"`
-	EndTime      string `json:"end_time"`
+// ExecuteSyncPlanReq represents the request body for triggering a sync plan.
+// Only start_dt and end_dt are accepted (datetime, e.g. RFC3339 or YYYY-MM-DD).
+// Target DB path is resolved from the plan's associated data store.
+type ExecuteSyncPlanReq struct {
+	StartDt string `json:"start_dt"` // optional, datetime (RFC3339 or 2006-01-02)
+	EndDt   string `json:"end_dt"`   // optional, datetime
 }
 
 // ExecutionCallbackReq represents the request body for execution callback.
@@ -464,8 +481,8 @@ type SyncPlanProgressResponse struct {
 	TaskCount          int        `json:"task_count"`
 	CompletedTask      int        `json:"completed_task"`
 	FailedTask         int        `json:"failed_task"`
-	RunningCount       int        `json:"running_count"`   // 正在运行的任务数（0 时也返回，与内部一致）
-	PendingCount       int        `json:"pending_count"`   // 挂起的任务数（0 时也返回）
+	RunningCount       int        `json:"running_count"`              // 正在运行的任务数（0 时也返回，与内部一致）
+	PendingCount       int        `json:"pending_count"`              // 挂起的任务数（0 时也返回）
 	RunningTaskIDs     []string   `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
 	PendingTaskIDs     []string   `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
 	RecordCount        int64      `json:"record_count"`

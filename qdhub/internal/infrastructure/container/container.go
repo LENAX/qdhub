@@ -792,6 +792,7 @@ func (c *Container) initApplicationServices() error {
 		c.CronCalculator,
 		c.PlanScheduler,
 		c.DataSourceRepo,
+		c.DataStoreRepo,
 		c.WorkflowExecutor,
 		c.DependencyResolver,
 		c.TaskEngineAdapter,

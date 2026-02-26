@@ -9,6 +9,7 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
@@ -36,6 +37,7 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	planExec := scheduler.NewScheduledPlanExecutor()
 	planScheduler := scheduler.NewCronScheduler(planExec)
@@ -50,6 +52,7 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 		cronCalculator,
 		planScheduler,
 		dataSourceRepo,
+		dataStoreRepo,
 		workflowExecutor,
 		dependencyResolver,
 		nil,
@@ -73,10 +76,15 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 		t.Fatalf("Failed to create API metadata: %v", err)
 	}
 
+	// Data store (target path is resolved from plan's data store)
+	store := datastore.NewQuantDataStore("Sched Test Store", "Test", datastore.DataStoreTypeDuckDB, "", "/tmp/sched-test.db")
+	if err := dataStoreRepo.Create(store); err != nil {
+		t.Fatalf("Failed to create data store: %v", err)
+	}
+
 	defaultParams := &sync.ExecuteParams{
-		TargetDBPath: "/tmp/sched-test.db",
-		StartDate:    "20250101",
-		EndDate:      "20250131",
+		StartDate: "20250101",
+		EndDate:   "20250131",
 	}
 	cronExpr := "0 0 9 * * *"
 
@@ -84,6 +92,7 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 		Name:                 "Scheduled Plan",
 		Description:          "Test",
 		DataSourceID:         dataSource.ID,
+		DataStoreID:          store.ID,
 		SelectedAPIs:         []string{"api1"},
 		CronExpression:       &cronExpr,
 		DefaultExecuteParams: defaultParams,

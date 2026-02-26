@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
@@ -24,6 +25,9 @@ type SyncApplicationServiceImpl struct {
 
 	// 依赖：用于校验数据源和获取 token
 	dataSourceRepo metadata.DataSourceRepository
+
+	// 依赖：用于从 plan 关联的 data store 解析 target_db_path
+	dataStoreRepo datastore.QuantDataStoreRepository
 
 	// 依赖：用于执行内建 workflow
 	workflowExecutor workflow.WorkflowExecutor
@@ -44,6 +48,7 @@ func NewSyncApplicationService(
 	cronCalculator sync.CronScheduleCalculator,
 	planScheduler sync.PlanScheduler,
 	dataSourceRepo metadata.DataSourceRepository,
+	dataStoreRepo datastore.QuantDataStoreRepository,
 	workflowExecutor workflow.WorkflowExecutor,
 	dependencyResolver sync.DependencyResolver,
 	taskEngineAdapter workflow.TaskEngineAdapter,
@@ -54,6 +59,7 @@ func NewSyncApplicationService(
 		cronCalculator:     cronCalculator,
 		planScheduler:      planScheduler,
 		dataSourceRepo:     dataSourceRepo,
+		dataStoreRepo:      dataStoreRepo,
 		workflowExecutor:   workflowExecutor,
 		dependencyResolver: dependencyResolver,
 		taskEngineAdapter:  taskEngineAdapter,
@@ -294,6 +300,49 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		return "", shared.NewDomainError(shared.ErrCodeInvalidState, "plan is disabled", nil)
 	}
 
+	if plan.DataStoreID == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "sync plan has no data store configured", nil)
+	}
+	dataStore, err := s.dataStoreRepo.Get(plan.DataStoreID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get data store: %w", err)
+	}
+	if dataStore == nil {
+		return "", shared.NewDomainError(shared.ErrCodeNotFound, "data store not found", nil)
+	}
+	if strings.TrimSpace(dataStore.StoragePath) == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation, "data store has no storage path", nil)
+	}
+	targetDBPath := dataStore.StoragePath
+
+	// 合并请求与计划默认参数：仅传计划 id 时使用 default_execute_params；target 始终来自 data store
+	eff := struct {
+		TargetDBPath string
+		StartDate    string
+		EndDate      string
+		StartTime    string
+		EndTime      string
+	}{TargetDBPath: targetDBPath, StartDate: req.StartDate, EndDate: req.EndDate, StartTime: req.StartTime, EndTime: req.EndTime}
+	if plan.DefaultExecuteParams != nil {
+		p := plan.DefaultExecuteParams
+		if eff.StartDate == "" {
+			eff.StartDate = p.StartDate
+		}
+		if eff.EndDate == "" {
+			eff.EndDate = p.EndDate
+		}
+		if eff.StartTime == "" {
+			eff.StartTime = p.StartTime
+		}
+		if eff.EndTime == "" {
+			eff.EndTime = p.EndTime
+		}
+	}
+	if eff.StartDate == "" || eff.EndDate == "" {
+		return "", shared.NewDomainError(shared.ErrCodeValidation,
+			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
+	}
+
 	// Get tasks
 	tasks, err := s.syncPlanRepo.GetTasksByPlan(planID)
 	if err != nil {
@@ -335,11 +384,11 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		DataSourceID:   plan.DataSourceID,
 		DataSourceName: ds.Name,
 		Token:          token.TokenValue,
-		TargetDBPath:   req.TargetDBPath,
-		StartDate:      req.StartDate,
-		EndDate:        req.EndDate,
-		StartTime:      req.StartTime,
-		EndTime:        req.EndTime,
+		TargetDBPath:   eff.TargetDBPath,
+		StartDate:      eff.StartDate,
+		EndDate:        eff.EndDate,
+		StartTime:      eff.StartTime,
+		EndTime:        eff.EndTime,
 		APIConfigs:     apiConfigs,
 		MaxStocks:      0,
 	})
@@ -359,14 +408,14 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			return fmt.Errorf("plan not found in transaction: %s", planID)
 		}
 
-		// Create sync execution record
+		// Create sync execution record (use effective params including target from data store)
 		execution := sync.NewSyncExecution(planID, instanceID)
 		execution.ExecuteParams = &sync.ExecuteParams{
-			TargetDBPath: req.TargetDBPath,
-			StartDate:    req.StartDate,
-			EndDate:      req.EndDate,
-			StartTime:    req.StartTime,
-			EndTime:      req.EndTime,
+			TargetDBPath: eff.TargetDBPath,
+			StartDate:    eff.StartDate,
+			EndDate:      eff.EndDate,
+			StartTime:    eff.StartTime,
+			EndTime:      eff.EndTime,
 		}
 		execution.SyncedAPIs = s.extractAPINames(needSyncTasks)
 		execution.SkippedAPIs = skipAPIs

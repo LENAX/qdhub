@@ -9,6 +9,7 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
@@ -32,11 +33,13 @@ func TestSyncService_Integration_ResolveSyncPlan_Transactional(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	svc := impl.NewSyncApplicationService(
 		syncPlanRepo,
 		cronCalculator,
 		nil,
 		dataSourceRepo,
+		dataStoreRepo,
 		workflowExecutor,
 		dependencyResolver,
 		nil,
@@ -106,6 +109,7 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 	// Setup
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
@@ -115,6 +119,7 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 		cronCalculator,
 		nil,
 		dataSourceRepo,
+		dataStoreRepo,
 		workflowExecutor,
 		dependencyResolver,
 		nil,
@@ -138,12 +143,19 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 		t.Fatalf("Failed to create API metadata: %v", err)
 	}
 
+	// Data store (target path resolved from plan's data store)
+	store := datastore.NewQuantDataStore("Test Store", "Test", datastore.DataStoreTypeDuckDB, "", "/tmp/test.db")
+	if err := dataStoreRepo.Create(store); err != nil {
+		t.Fatalf("Failed to create data store: %v", err)
+	}
+
 	// Create and resolve sync plan
 	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
 		Name:         "Test Plan",
 		Description:  "Test",
 		DataSourceID: dataSource.ID,
-		SelectedAPIs:  []string{"api1"},
+		DataStoreID:  store.ID,
+		SelectedAPIs: []string{"api1"},
 	})
 	if err != nil {
 		t.Fatalf("Failed to create sync plan: %v", err)
@@ -189,9 +201,8 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 
 	// Execute sync plan (should create execution and update plan in transaction)
 	executionID, err := svc.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: "/tmp/test.db",
-		StartDate:    "20250101",
-		EndDate:      "20250131",
+		StartDate: "20250101",
+		EndDate:   "20250131",
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSyncPlan failed: %v", err)
