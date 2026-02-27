@@ -246,7 +246,7 @@ func TestDefaultServerConfig(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", config.Host)
 	assert.Equal(t, 8080, config.Port)
 	assert.Equal(t, 30*time.Second, config.ReadTimeout)
-	assert.Equal(t, 30*time.Second, config.WriteTimeout)
+	assert.Equal(t, time.Duration(0), config.WriteTimeout, "WriteTimeout 0 for SSE long-lived streams")
 }
 
 func TestAPIRoutes(t *testing.T) {

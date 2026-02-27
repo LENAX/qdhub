@@ -10,14 +10,15 @@ import (
 
 // DataSourceRow represents data_sources table row.
 type DataSourceRow struct {
-	ID          string    `db:"id"`
-	Name        string    `db:"name"`
-	Description string    `db:"description"`
-	BaseURL     string    `db:"base_url"`
-	DocURL      string    `db:"doc_url"`
-	Status      string    `db:"status"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID               string    `db:"id"`
+	Name             string    `db:"name"`
+	Description      string    `db:"description"`
+	BaseURL          string    `db:"base_url"`
+	DocURL           string    `db:"doc_url"`
+	Status           string         `db:"status"`
+	CommonDataAPIs   sql.NullString `db:"common_data_apis"` // JSON array of API names, NULL when empty
+	CreatedAt        time.Time      `db:"created_at"`
+	UpdatedAt        time.Time `db:"updated_at"`
 }
 
 // APICategoryRow represents api_categories table row.

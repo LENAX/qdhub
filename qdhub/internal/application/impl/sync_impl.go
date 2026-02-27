@@ -505,6 +505,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		EndTime:        eff.EndTime,
 		APIConfigs:     apiConfigs,
 		MaxStocks:      0,
+		CommonDataAPIs: ds.CommonDataAPIs,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to execute workflow: %w", err)
@@ -770,6 +771,13 @@ func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, execut
 		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution is not running", nil)
 	}
 
+	// Tell Task Engine to terminate the workflow first
+	if s.taskEngineAdapter != nil && !exec.WorkflowInstID.IsEmpty() {
+		if err := s.taskEngineAdapter.CancelInstance(ctx, exec.WorkflowInstID.String()); err != nil {
+			return fmt.Errorf("failed to cancel workflow: %w", err)
+		}
+	}
+
 	// Get plan for status check
 	plan, err := s.syncPlanRepo.Get(exec.SyncPlanID)
 	if err != nil {
@@ -794,6 +802,48 @@ func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, execut
 
 		return nil
 	})
+}
+
+// PauseExecution pauses a running sync execution by pausing the workflow instance in Task Engine.
+func (s *SyncApplicationServiceImpl) PauseExecution(ctx context.Context, executionID shared.ID) error {
+	exec, err := s.syncPlanRepo.GetPlanExecution(executionID)
+	if err != nil {
+		return fmt.Errorf("failed to get sync execution: %w", err)
+	}
+	if exec == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
+	}
+	if exec.Status != sync.ExecStatusRunning && exec.Status != sync.ExecStatusPending {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution is not running", nil)
+	}
+	if exec.WorkflowInstID.IsEmpty() {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution has no workflow instance", nil)
+	}
+	if s.taskEngineAdapter == nil {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "task engine not available", nil)
+	}
+	return s.taskEngineAdapter.PauseInstance(ctx, exec.WorkflowInstID.String())
+}
+
+// ResumeExecution resumes a paused sync execution.
+func (s *SyncApplicationServiceImpl) ResumeExecution(ctx context.Context, executionID shared.ID) error {
+	exec, err := s.syncPlanRepo.GetPlanExecution(executionID)
+	if err != nil {
+		return fmt.Errorf("failed to get sync execution: %w", err)
+	}
+	if exec == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
+	}
+	if exec.Status != sync.ExecStatusRunning && exec.Status != sync.ExecStatusPending {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution is not running or paused", nil)
+	}
+	if exec.WorkflowInstID.IsEmpty() {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "execution has no workflow instance", nil)
+	}
+	if s.taskEngineAdapter == nil {
+		return shared.NewDomainError(shared.ErrCodeInvalidState, "task engine not available", nil)
+	}
+	return s.taskEngineAdapter.ResumeInstance(ctx, exec.WorkflowInstID.String())
 }
 
 // ==================== Scheduling ====================
@@ -1061,6 +1111,10 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		// When task engine returns 0 task count (e.g. dynamic workflow), use execution's SyncedAPIs as expected count
 		if progress.TaskCount == 0 && len(exec.SyncedAPIs) > 0 {
 			progress.TaskCount = len(exec.SyncedAPIs)
+		}
+		// 引擎暂停时在进度中体现，便于前端显示「暂停」和「恢复」按钮
+		if strings.ToUpper(wfStatus.Status) == "PAUSED" {
+			progress.Status = sync.ExecStatusPaused
 		}
 
 		// Prefer workflow FinishedAt if execution.FinishedAt is nil

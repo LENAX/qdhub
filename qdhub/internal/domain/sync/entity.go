@@ -616,6 +616,7 @@ type ExecStatus string
 const (
 	ExecStatusPending   ExecStatus = "pending"
 	ExecStatusRunning   ExecStatus = "running"
+	ExecStatusPaused    ExecStatus = "paused" // 仅由进度接口从引擎合并，不持久化
 	ExecStatusSuccess   ExecStatus = "success"
 	ExecStatusFailed    ExecStatus = "failed"
 	ExecStatusCancelled ExecStatus = "cancelled"

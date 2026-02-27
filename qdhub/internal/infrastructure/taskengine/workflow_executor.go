@@ -169,6 +169,10 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 		wfBuilder.WithTimeRange(req.StartTime, req.EndTime)
 	}
 
+	if len(req.CommonDataAPIs) > 0 {
+		wfBuilder.WithCommonDataAPIs(req.CommonDataAPIs)
+	}
+
 	if !req.DataSourceID.IsEmpty() {
 		provider := workflows.NewRepositoryStrategyProvider(e.metadataRepo)
 		wfBuilder.WithStrategyProvider(provider, req.DataSourceID)

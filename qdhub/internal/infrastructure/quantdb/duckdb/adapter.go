@@ -413,17 +413,23 @@ func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data
 }
 
 // BulkInsertWithBatchID inserts multiple rows with a sync batch ID for rollback support.
+// Copies data internally so the caller's slice is not mutated.
 func (a *Adapter) BulkInsertWithBatchID(ctx context.Context, tableName string, data []map[string]any, syncBatchID string) (int64, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
 
-	// Add sync_batch_id to each row
-	for i := range data {
-		data[i]["sync_batch_id"] = syncBatchID
+	// Copy rows and add sync_batch_id to avoid mutating caller's data (e.g. result.Data used later for cache/extractKeyFields).
+	dataCopy := make([]map[string]any, len(data))
+	for i, row := range data {
+		rowCopy := make(map[string]any, len(row)+1)
+		for k, v := range row {
+			rowCopy[k] = v
+		}
+		rowCopy["sync_batch_id"] = syncBatchID
+		dataCopy[i] = rowCopy
 	}
-
-	return a.BulkInsert(ctx, tableName, data)
+	return a.BulkInsert(ctx, tableName, dataCopy)
 }
 
 // DeleteBySyncBatchID deletes all rows with the given sync batch ID.

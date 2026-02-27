@@ -52,6 +52,8 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/sync-plans/:id/executions", h.ListExecutions)
 	rg.GET("/executions/:id", h.GetExecution)
 	rg.POST("/executions/:id/cancel", h.CancelExecution)
+	rg.POST("/executions/:id/pause", h.PauseExecution)
+	rg.POST("/executions/:id/resume", h.ResumeExecution)
 
 	// Callback (for internal use by workflow engine)
 	rg.POST("/sync/callback", h.HandleCallback)
@@ -465,6 +467,52 @@ func (h *SyncHandler) CancelExecution(c *gin.Context) {
 	Success(c, gin.H{"status": "cancelled"})
 }
 
+// PauseExecution handles POST /api/v1/executions/:id/pause
+// @Summary      Pause sync execution
+// @Description  Pause a running sync execution (workflow instance)
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /executions/{id}/pause [post]
+func (h *SyncHandler) PauseExecution(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	err := h.syncSvc.PauseExecution(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"status": "paused"})
+}
+
+// ResumeExecution handles POST /api/v1/executions/:id/resume
+// @Summary      Resume sync execution
+// @Description  Resume a paused sync execution
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /executions/{id}/resume [post]
+func (h *SyncHandler) ResumeExecution(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	err := h.syncSvc.ResumeExecution(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"status": "resumed"})
+}
+
 // ==================== Callback Endpoint ====================
 
 // HandleCallback handles POST /api/v1/sync/callback
@@ -655,6 +703,10 @@ func (h *SyncHandler) StreamPlanProgress(c *gin.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			// 先发 keepalive 注释，避免代理/负载均衡因长时间无输出断开连接
+			c.Writer.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+
 			progress, err := h.syncSvc.GetPlanProgress(ctx, id)
 			if err != nil {
 				c.Writer.Write([]byte("event: error\n"))

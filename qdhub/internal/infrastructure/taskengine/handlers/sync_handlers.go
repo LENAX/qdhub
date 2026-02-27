@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -71,7 +72,8 @@ func DataSyncCompleteHandler(tc *task.TaskContext) {
 	logrus.Printf("[DataSync] 🏁 Workflow completed - WorkflowInstanceID: %s, Status: %s",
 		tc.WorkflowInstanceID, statusStr)
 
-	success := statusStr == "" || statusStr == "success" || statusStr == "Success"
+	// 引擎可能传 "SUCCESS" / "Success" / "success"，统一按忽略大小写判定
+	success := statusStr == "" || strings.EqualFold(statusStr, "success")
 	var errMsg *string
 	if !success {
 		msg := tc.GetParamString("_error_message")

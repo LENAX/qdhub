@@ -3,9 +3,13 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/types"
 
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
 )
 
@@ -36,7 +41,7 @@ import (
 //   - task_name: 上游任务名称
 //   - field: 上游结果中的字段名（直接字段）
 //   - extracted_field: 上游结果 extracted_data 中的字段名（用于获取 cal_dates, ts_codes 等列表）
-//   - select: 选择策略，"first" | "last" | "all"，默认 "last"（取最新值）
+//   - common_data_apis: []string - 可选，公共数据 API 名列表；当 api_name 在此列表中时走 Cache→DuckDB→API
 //
 // Output:
 //   - count: int - 保存的记录数
@@ -64,24 +69,6 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	logrus.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
 
-	// 获取 DataSourceRegistry
-	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
-	if !ok {
-		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
-	}
-	registry := registryInterface.(*datasource.Registry)
-
-	// 获取 API Client
-	client, err := registry.GetClient(dataSourceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get client: %w", err)
-	}
-
-	// 设置 Token
-	if token != "" {
-		client.SetToken(token)
-	}
-
 	// 获取查询参数（可以从上游任务注入，也可以直接传入）
 	var params map[string]interface{}
 	paramsRaw := tc.GetParam("params")
@@ -92,9 +79,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			params = p
 			log.Printf("🔍 [SyncAPIData] API=%s, parsed params (map)=%v", apiName, params)
 		case string:
-			// task-engine 可能将 map 序列化为字符串，尝试 JSON 解析
 			if err := json.Unmarshal([]byte(p), &params); err != nil {
-				// 如果不是 JSON 格式，可能是 Go 的 fmt.Sprintf 格式 "map[key:value]"
 				log.Printf("⚠️ [SyncAPIData] API=%s, params is string but not JSON: %s, trying to parse Go map format", apiName, p)
 				params = parseGoMapString(p)
 			}
@@ -107,11 +92,10 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		params = make(map[string]interface{})
 	}
 
-	// 处理上游参数映射：从上游任务结果中获取参数值
+	// 处理上游参数映射
 	upstreamParams := resolveUpstreamParams(tc)
 	const maxParamLogLen = 200
 	for paramName, paramValue := range upstreamParams {
-		// 上游参数优先级低于直接传入的 params（允许覆盖）
 		if _, exists := params[paramName]; !exists {
 			params[paramName] = paramValue
 			logVal := fmt.Sprintf("%v", paramValue)
@@ -122,7 +106,61 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	// 调用 API
+	commonDataAPIs := getCommonDataAPIsFromParams(tc)
+	isCommonData := false
+	for _, n := range commonDataAPIs {
+		if n == apiName {
+			isCommonData = true
+			break
+		}
+	}
+
+	// 公共数据：Cache → DuckDB → API
+	if isCommonData {
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				cacheKey := commonDataCacheKey(dataSourceName, apiName, params)
+				if cached, hit := cache.Get(ctx, cacheKey); hit {
+					logrus.Printf("📦 [SyncAPIData] 缓存命中: %s/%s", dataSourceName, apiName)
+					return buildSyncResultFromData(cached, apiName, syncBatchID), nil
+				}
+				// DuckDB 已有表则直接读并回填缓存
+				if targetDBPath != "" && isSafeTableName(apiName) {
+					quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+					if err == nil {
+						exists, _ := quantDB.TableExists(ctx, apiName)
+						if exists {
+							// 使用已存在的表名安全拼接 SQL（apiName 已校验为安全）
+							sqlSelect := fmt.Sprintf(`SELECT * FROM "%s"`, strings.ReplaceAll(apiName, `"`, `""`))
+							rows, err := quantDB.Query(ctx, sqlSelect)
+							if err == nil && len(rows) > 0 {
+								_ = cache.Set(ctx, cacheKey, rows, 24*time.Hour)
+								logrus.Printf("📦 [SyncAPIData] DuckDB 命中并回填缓存: %s/%s, 记录数=%d", dataSourceName, apiName, len(rows))
+								return buildSyncResultFromData(rows, apiName, syncBatchID), nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 获取 DataSourceRegistry 并调用 API
+	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
+	if !ok {
+		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
+	}
+	registry := registryInterface.(*datasource.Registry)
+
+	client, err := registry.GetClient(dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+
+	if token != "" {
+		client.SetToken(token)
+	}
+
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s: %w", apiName, err)
@@ -130,7 +168,6 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	logrus.Printf("✅ [SyncAPIData] 获取数据: %s, 记录数=%d", apiName, len(result.Data))
 
-	// 如果指定了目标数据库，保存数据（使用 QuantDBFactory 按 target_db_path 获取与数据存储一致的 DuckDB）
 	var savedCount int64
 	var fields []string
 	if targetDBPath != "" && len(result.Data) > 0 {
@@ -139,13 +176,19 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 		}
 
-		// 使用 QuantDB 的 BulkInsertWithBatchID 保存数据
+		exists, err := quantDB.TableExists(ctx, apiName)
+		if err != nil {
+			return nil, fmt.Errorf("check table existence for %s: %w", apiName, err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
+		}
+
 		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
 
-		// 提取字段列表
 		if len(result.Data) > 0 {
 			for key := range result.Data[0] {
 				fields = append(fields, key)
@@ -157,7 +200,24 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	// 提取特定字段用于下游任务（如 ts_codes）
+	// 公共数据回填缓存
+	if isCommonData {
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				cacheKey := commonDataCacheKey(dataSourceName, apiName, params)
+				dataAny := make([]map[string]any, len(result.Data))
+				for i, m := range result.Data {
+					row := make(map[string]any)
+					for k, v := range m {
+						row[k] = v
+					}
+					dataAny[i] = row
+				}
+				_ = cache.Set(ctx, cacheKey, dataAny, 24*time.Hour)
+			}
+		}
+	}
+
 	extractedData := extractKeyFields(result.Data, []string{"ts_code", "trade_date", "cal_date"})
 
 	return map[string]interface{}{
@@ -169,6 +229,66 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		"extracted_data": extractedData,
 		"sync_batch_id":  syncBatchID,
 	}, nil
+}
+
+// getCommonDataAPIsFromParams 从任务参数中解析 common_data_apis（公共数据 API 名列表）。
+func getCommonDataAPIsFromParams(tc *task.TaskContext) []string {
+	raw := tc.GetParam("common_data_apis")
+	if raw == nil {
+		return nil
+	}
+	return convertToStringSlice(raw)
+}
+
+// commonDataCacheKey 生成公共数据缓存 key：数据源:API:paramsHash。
+func commonDataCacheKey(dataSourceName, apiName string, params map[string]interface{}) string {
+	h := sha256.New()
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte(fmt.Sprint(params[k])))
+	}
+	return fmt.Sprintf("%s:%s:%s", dataSourceName, apiName, hex.EncodeToString(h.Sum(nil)))
+}
+
+var safeTableNameRe = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+// isSafeTableName 校验表名仅含字母、数字、下划线，防止 SQL 注入。
+func isSafeTableName(name string) bool {
+	return safeTableNameRe.MatchString(name)
+}
+
+// buildSyncResultFromData 用已有数据构造与 SyncAPIDataJob 一致的返回结构（cache/DuckDB 命中时使用）。
+func buildSyncResultFromData(data []map[string]any, apiName, syncBatchID string) map[string]interface{} {
+	var fields []string
+	if len(data) > 0 {
+		for k := range data[0] {
+			fields = append(fields, k)
+		}
+	}
+	// extractKeyFields 需要 []map[string]interface{}
+	dataIf := make([]map[string]interface{}, len(data))
+	for i, m := range data {
+		row := make(map[string]interface{})
+		for k, v := range m {
+			row[k] = v
+		}
+		dataIf[i] = row
+	}
+	extracted := extractKeyFields(dataIf, []string{"ts_code", "trade_date", "cal_date"})
+	return map[string]interface{}{
+		"count":          int64(len(data)),
+		"total":          len(data),
+		"api_name":       apiName,
+		"fields":         fields,
+		"has_more":       false,
+		"extracted_data": extracted,
+		"sync_batch_id":  syncBatchID,
+	}
 }
 
 // GenerateDataSyncSubTasksJob 生成数据同步子任务（模板任务 Job Function）
@@ -283,12 +403,16 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			},
 		}
 
-		// 将顶层的 start_date/end_date 作为 API 调用参数传给子任务（用于限定日期范围）
-		if sd := tc.GetParamString("start_date"); sd != "" {
-			paramsMap := subTaskParams["params"].(map[string]interface{})
-			paramsMap["start_date"] = sd
-			if ed := tc.GetParamString("end_date"); ed != "" {
-				paramsMap["end_date"] = ed
+		// 仅当按 ts_code 等非日期拆分子任务时，将 start_date/end_date 传给 API（用于日期范围查询）。
+		// 按 trade_date 拆分的 API（如 adj_factor、daily）每个子任务只查单日，传 start_date/end_date 会导致
+		// Tushare 同时收到 trade_date 与日期范围，可能返回 0 条或行为异常，故不传。
+		if paramKey != "trade_date" {
+			if sd := tc.GetParamString("start_date"); sd != "" {
+				paramsMap := subTaskParams["params"].(map[string]interface{})
+				paramsMap["start_date"] = sd
+				if ed := tc.GetParamString("end_date"); ed != "" {
+					paramsMap["end_date"] = ed
+				}
 			}
 		}
 

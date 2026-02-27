@@ -62,6 +62,12 @@ type SyncApplicationService interface {
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
 
+	// PauseExecution pauses a running sync execution (workflow instance).
+	PauseExecution(ctx context.Context, executionID shared.ID) error
+
+	// ResumeExecution resumes a paused sync execution.
+	ResumeExecution(ctx context.Context, executionID shared.ID) error
+
 	// ==================== Scheduling ====================
 
 	// EnablePlan enables a sync plan and schedules it if it has a cron expression.

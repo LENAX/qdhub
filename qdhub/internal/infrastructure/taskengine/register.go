@@ -10,6 +10,7 @@ import (
 
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/taskengine/handlers"
 	"qdhub/internal/infrastructure/taskengine/jobs"
@@ -31,6 +32,8 @@ type Dependencies struct {
 	// SyncCallbackInvoker 可选；DataSyncCompleteHandler 用于触发 execution 回调（Plan.MarkCompleted）。
 	// 需实现 HandleExecutionCallbackByWorkflowInstance(ctx, workflowInstID, success, recordCount, errMsg).
 	SyncCallbackInvoker interface{}
+	// CommonDataCache 可选；SyncAPIDataJob 用于公共数据 Cache→DuckDB→API 复用，未设置则不走缓存。
+	CommonDataCache sync.CommonDataCache
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -180,6 +183,11 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 	// Register SyncCallbackInvoker (optional; for DataSyncCompleteHandler → execution callback)
 	if deps.SyncCallbackInvoker != nil {
 		registry.RegisterDependencyWithKey("SyncCallbackInvoker", deps.SyncCallbackInvoker)
+	}
+
+	// Register CommonDataCache (optional; SyncAPIDataJob uses for cache-first reuse)
+	if deps.CommonDataCache != nil {
+		registry.RegisterDependencyWithKey("CommonDataCache", deps.CommonDataCache)
 	}
 
 	// Register engine itself as dependency (for template tasks)

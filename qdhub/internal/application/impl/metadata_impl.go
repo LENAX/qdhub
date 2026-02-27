@@ -108,6 +108,22 @@ func (s *MetadataApplicationServiceImpl) DeleteDataSource(ctx context.Context, i
 	return nil
 }
 
+// UpdateDataSourceCommonDataAPIs updates the common data APIs list for a data source.
+func (s *MetadataApplicationServiceImpl) UpdateDataSourceCommonDataAPIs(ctx context.Context, id shared.ID, req contracts.UpdateDataSourceCommonDataAPIsRequest) error {
+	ds, err := s.dataSourceRepo.Get(id)
+	if err != nil {
+		return fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	ds.SetCommonDataAPIs(req.CommonDataAPIs)
+	if err := s.dataSourceRepo.Update(ds); err != nil {
+		return fmt.Errorf("failed to update data source common_data_apis: %w", err)
+	}
+	return nil
+}
+
 // ==================== API Metadata Management ====================
 
 // ListAPIMetadata returns a paginated list of API metadata for a data source.
@@ -139,6 +155,26 @@ func (s *MetadataApplicationServiceImpl) ListAPIMetadata(ctx context.Context, da
 		ptrItems[i] = &items[i]
 	}
 	return &contracts.ListAPIMetadataResponse{Items: ptrItems, Total: total}, nil
+}
+
+// ListAPINames returns all API names for a data source (for common-data-apis form).
+func (s *MetadataApplicationServiceImpl) ListAPINames(ctx context.Context, dataSourceID shared.ID) ([]string, error) {
+	ds, err := s.dataSourceRepo.Get(dataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data source: %w", err)
+	}
+	if ds == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
+	}
+	items, err := s.metadataRepo.ListAPIMetadataByDataSource(ctx, dataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list api metadata: %w", err)
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	return names, nil
 }
 
 // ListAPICategories returns API categories for a data source. When hasAPIsOnly is true, only categories with at least one api_metadata are returned.

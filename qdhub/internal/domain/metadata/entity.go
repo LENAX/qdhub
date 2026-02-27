@@ -24,6 +24,10 @@ type DataSource struct {
 	CreatedAt   shared.Timestamp `json:"created_at"`
 	UpdatedAt   shared.Timestamp `json:"updated_at"`
 
+	// CommonDataAPIs: API names treated as common data (e.g. trade_cal, stock_basic for tushare).
+	// Used for cache-first / DataStore-first reuse across workflows; persisted in data_sources.common_data_apis.
+	CommonDataAPIs []string `json:"common_data_apis,omitempty"`
+
 	// Aggregated entities (lazy loaded)
 	Categories []APICategory  `json:"categories,omitempty"`
 	APIs       []APIMetadata  `json:"apis,omitempty"`
@@ -64,6 +68,33 @@ func (ds *DataSource) UpdateInfo(name, description, baseURL, docURL string) {
 	ds.BaseURL = baseURL
 	ds.DocURL = docURL
 	ds.UpdatedAt = shared.Now()
+}
+
+// SetCommonDataAPIs sets the list of API names treated as common data (reused across workflows).
+func (ds *DataSource) SetCommonDataAPIs(apis []string) {
+	ds.CommonDataAPIs = apis
+	ds.UpdatedAt = shared.Now()
+}
+
+// MarshalCommonDataAPIsJSON marshals CommonDataAPIs to JSON string.
+func (ds *DataSource) MarshalCommonDataAPIsJSON() (string, error) {
+	if len(ds.CommonDataAPIs) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(ds.CommonDataAPIs)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// UnmarshalCommonDataAPIsJSON unmarshals CommonDataAPIs from JSON string.
+func (ds *DataSource) UnmarshalCommonDataAPIsJSON(jsonStr string) error {
+	if jsonStr == "" {
+		ds.CommonDataAPIs = nil
+		return nil
+	}
+	return json.Unmarshal([]byte(jsonStr), &ds.CommonDataAPIs)
 }
 
 // ==================== 聚合内实体 ====================

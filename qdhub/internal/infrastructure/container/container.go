@@ -32,6 +32,7 @@ import (
 	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
+	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 	httpserver "qdhub/internal/interfaces/http"
@@ -480,6 +481,16 @@ func (c *Container) runMigrations() error {
 		return fmt.Errorf("failed to run 009_add_api_metadata_param_dependencies: %w", err)
 	}
 
+	// 010_sync_plan_incremental_mode (idempotent)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/010_sync_plan_incremental_mode.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 010_sync_plan_incremental_mode: %w", err)
+	}
+
+	// 011_data_source_common_data_apis (idempotent)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/011_data_source_common_data_apis.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 011_data_source_common_data_apis: %w", err)
+	}
+
 	// 008_seed_guest_user (driver-specific)
 	if err := c.runGuestSeed(); err != nil {
 		return fmt.Errorf("failed to seed guest user: %w", err)
@@ -671,6 +682,10 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	taskEngineDeps.QuantDBFactory = duckdb.NewFactory()
 	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
 
+	// CommonDataCache：公共数据内存缓存（TTL 24h），SyncAPIDataJob 按 common_data_apis 走 Cache→DuckDB→API
+	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
+	log.Printf("[Container] ✅ CommonDataCache (memory, TTL 24h) registered")
+
 	// 可选：若配置了默认 DuckDB 路径，仍注入单例 QuantDB 以兼容旧逻辑（优先使用 QuantDBFactory）
 	if c.config.DefaultDuckDBPath != "" {
 		log.Printf("[Container] DefaultDuckDBPath from config: '%s' (optional)", c.config.DefaultDuckDBPath)
@@ -859,11 +874,12 @@ func (c *Container) initBuiltInWorkflows(ctx context.Context) error {
 
 // initHTTPServer initializes the HTTP server (infrastructure module).
 func (c *Container) initHTTPServer() error {
+	// WriteTimeout 设为 0 以支持长连接（如 progress-stream SSE），否则约 30s 后连接会被断开
 	serverConfig := httpserver.ServerConfig{
 		Host:         c.config.ServerHost,
 		Port:         c.config.ServerPort,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0,
 		Mode:         c.config.ServerMode,
 	}
 

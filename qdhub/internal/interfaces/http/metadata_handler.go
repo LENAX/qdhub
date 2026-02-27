@@ -29,6 +29,7 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/datasources", h.CreateDataSource)
 	rg.GET("/datasources/:id", h.GetDataSource)
 	rg.DELETE("/datasources/:id", h.DeleteDataSource)
+	rg.PUT("/datasources/:id/common-data-apis", h.UpdateDataSourceCommonDataAPIs)
 
 	// Metadata refresh
 	rg.POST("/datasources/:id/refresh", h.RefreshMetadata)
@@ -41,6 +42,7 @@ func (h *MetadataHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 	// API Metadata (paginated list + delete)
 	rg.GET("/datasources/:id/api-metadata", h.ListAPIMetadata)
+	rg.GET("/datasources/:id/api-names", h.ListAPINames)
 	rg.GET("/datasources/:id/api-categories", h.ListAPICategories)
 	rg.DELETE("/datasources/:id/api-metadata/:meta_id", h.DeleteAPIMetadata)
 
@@ -151,6 +153,36 @@ func (h *MetadataHandler) DeleteDataSource(c *gin.Context) {
 		return
 	}
 	NoContent(c)
+}
+
+// UpdateDataSourceCommonDataAPIs handles PUT /api/v1/datasources/:id/common-data-apis
+// @Summary      Update common data APIs for a data source
+// @Description  Set the list of API names treated as common data (e.g. trade_cal, stock_basic for tushare). Used for cache/DataStore reuse across workflows.
+// @Tags         DataSources
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Data source ID"
+// @Param        request  body  UpdateDataSourceCommonDataAPIsReq  true  "common_data_apis array"
+// @Success      200  {object}  Response
+// @Failure      400  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/common-data-apis [put]
+func (h *MetadataHandler) UpdateDataSourceCommonDataAPIs(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+	var req UpdateDataSourceCommonDataAPIsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+	if err := h.metadataSvc.UpdateDataSourceCommonDataAPIs(c.Request.Context(), id, contracts.UpdateDataSourceCommonDataAPIsRequest{
+		CommonDataAPIs: req.CommonDataAPIs,
+	}); err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, nil)
 }
 
 // ==================== Metadata Refresh ====================
@@ -373,6 +405,33 @@ func (h *MetadataHandler) ListAPIMetadata(c *gin.Context) {
 	Paged(c, resp.Items, resp.Total, page, pageSize)
 }
 
+// ListAPINames handles GET /api/v1/datasources/:id/api-names
+// 返回该数据源下所有 API 名称，用于「公共数据 API」表单勾选项。
+// @Summary      List API names for a data source
+// @Description  Get all API names for the data source (e.g. for common-data-apis checkbox form).
+// @Tags         DataSources
+// @Produce      json
+// @Param        id   path      string  true  "Data source ID"
+// @Success      200  {object}  ListAPINamesResp
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /datasources/{id}/api-names [get]
+func (h *MetadataHandler) ListAPINames(c *gin.Context) {
+	dataSourceID := shared.ID(c.Param("id"))
+	names, err := h.metadataSvc.ListAPINames(c.Request.Context(), dataSourceID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, ListAPINamesResp{APINames: names})
+}
+
+// ListAPINamesResp 数据源 API 名称列表（用于公共数据 API 勾选表单）
+type ListAPINamesResp struct {
+	APINames []string `json:"api_names"`
+}
+
 // ListAPICategories handles GET /api/v1/datasources/:id/api-categories
 // @Summary      List API categories for a data source
 // @Description  Get API categories. When has_apis_only=true, only categories that have at least one api_metadata are returned (for catalog dropdown).
@@ -587,6 +646,11 @@ type CreateDataSourceReq struct {
 	Description string `json:"description"`
 	BaseURL     string `json:"base_url"`
 	DocURL      string `json:"doc_url"`
+}
+
+// UpdateDataSourceCommonDataAPIsReq represents the request body for PUT /datasources/:id/common-data-apis.
+type UpdateDataSourceCommonDataAPIsReq struct {
+	CommonDataAPIs []string `json:"common_data_apis"`
 }
 
 // RefreshMetadataReq represents the request body for refreshing metadata.

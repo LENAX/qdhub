@@ -151,12 +151,14 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		} else {
 			finalStatus = statusStr
 		}
-		// 若引擎已标记实例为终态，以引擎为准，避免 snapshot 未及时更新导致一直显示 99.x% / Running
+		// 若引擎已标记实例为终态或暂停，以引擎为准
 		statusUpper := strings.ToUpper(statusStr)
 		switch statusUpper {
 		case "SUCCESS", "COMPLETED", "FAILED", "ERROR", "TERMINATED", "CANCELLED":
 			finalStatus = statusStr
 			progress = 100.0
+		case "PAUSED":
+			finalStatus = statusStr
 		}
 	} else {
 		// Fallback: compute from storage task instances or instance status

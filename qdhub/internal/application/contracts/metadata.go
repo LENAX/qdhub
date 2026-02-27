@@ -29,10 +29,16 @@ type MetadataApplicationService interface {
 	// DeleteDataSource deletes a data source and cascades to api_metadata, api_sync_strategies, api_categories, token. Admin only.
 	DeleteDataSource(ctx context.Context, id shared.ID) error
 
+	// UpdateDataSourceCommonDataAPIs updates the list of API names treated as common data for a data source (e.g. trade_cal, stock_basic for tushare).
+	UpdateDataSourceCommonDataAPIs(ctx context.Context, id shared.ID, req UpdateDataSourceCommonDataAPIsRequest) error
+
 	// ==================== API Metadata Management ====================
 
 	// ListAPIMetadata returns a paginated list of API metadata for a data source, with optional filter by id, name and category.
 	ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req ListAPIMetadataRequest) (*ListAPIMetadataResponse, error)
+
+	// ListAPINames returns all API names for a data source (e.g. for common-data-apis checkbox form).
+	ListAPINames(ctx context.Context, dataSourceID shared.ID) ([]string, error)
 
 	// ListAPICategories returns all API categories for a data source (for filter dropdown).
 	// When hasAPIsOnly is true, returns only categories that have at least one api_metadata.
@@ -95,6 +101,11 @@ type CreateDataSourceRequest struct {
 	Description string
 	BaseURL     string
 	DocURL      string
+}
+
+// UpdateDataSourceCommonDataAPIsRequest represents a request to update common data APIs for a data source.
+type UpdateDataSourceCommonDataAPIsRequest struct {
+	CommonDataAPIs []string // e.g. ["trade_cal", "stock_basic"] for tushare
 }
 
 // ParseMetadataRequest represents a request to parse and import metadata.

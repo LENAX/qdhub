@@ -229,6 +229,7 @@ type BatchDataSyncParams struct {
 	APINames       []string        // 需要同步的 API 列表（简单模式，兼容旧用法）
 	APIConfigs     []APISyncConfig // API 同步配置（高级模式，优先使用）
 	MaxStocks      int             // 最大股票数量（用于限制子任务，0=不限制）
+	CommonDataAPIs []string        // 公共数据 API 名列表（SyncAPIDataJob 走 Cache→DuckDB→API）
 }
 
 // Validate 验证参数
@@ -388,6 +389,12 @@ func (b *BatchDataSyncWorkflowBuilder) WithAPIConfigs(configs ...APISyncConfig) 
 	return b
 }
 
+// WithCommonDataAPIs 设置公共数据 API 名列表（SyncAPIDataJob 将对这些 API 走 Cache→DuckDB→API）
+func (b *BatchDataSyncWorkflowBuilder) WithCommonDataAPIs(apis []string) *BatchDataSyncWorkflowBuilder {
+	b.params.CommonDataAPIs = apis
+	return b
+}
+
 // AddAPIConfig 添加单个 API 同步配置
 func (b *BatchDataSyncWorkflowBuilder) AddAPIConfig(config APISyncConfig) *BatchDataSyncWorkflowBuilder {
 	b.params.APIConfigs = append(b.params.APIConfigs, config)
@@ -476,11 +483,12 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		endDate = "${end_date}"
 	}
 
-	// 基础参数
+	// 基础参数（含 common_data_apis 供 SyncAPIDataJob 走缓存）
 	baseParams := map[string]interface{}{
-		"data_source_name": dataSourceName,
-		"token":            token,
-		"target_db_path":   targetDBPath,
+		"data_source_name":  dataSourceName,
+		"token":             token,
+		"target_db_path":    targetDBPath,
+		"common_data_apis":  params.CommonDataAPIs,
 	}
 
 	// 日期时间参数（支持可选时间）
@@ -874,11 +882,12 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 	var tasks []*task.Task
 	var depNames []string
 
-	// 基础参数
+	// 基础参数（含 common_data_apis，来自 builder）
 	baseParams := map[string]interface{}{
-		"data_source_name": dataSourceName,
-		"token":            token,
-		"target_db_path":   targetDBPath,
+		"data_source_name":  dataSourceName,
+		"token":             token,
+		"target_db_path":    targetDBPath,
+		"common_data_apis":  b.params.CommonDataAPIs,
 	}
 
 	// 日期时间参数
