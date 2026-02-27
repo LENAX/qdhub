@@ -19,6 +19,7 @@ import (
 	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	authinfra "qdhub/internal/infrastructure/auth"
@@ -775,6 +776,10 @@ func (c *Container) initAuth() error {
 			return fmt.Errorf("failed to initialize default policies: %w", err)
 		}
 		logrus.Info("Default RBAC policies initialized")
+	} else {
+		if err := authinfra.EnsureAnalysisPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure analysis policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -883,15 +888,42 @@ func (c *Container) initHTTPServer() error {
 		Mode:         c.config.ServerMode,
 	}
 
-	// 当已初始化 QuantDB 时，创建分析应用服务并注册 /analysis 路由
-	if c.QuantDBAdapter != nil {
+	// 分析服务数据源：优先用默认 QuantDB；否则从 DataStore 中取第一个有效的 DuckDB 并连接
+	analysisQuantDB := c.QuantDBAdapter
+	if analysisQuantDB == nil && c.DataStoreRepo != nil {
+		stores, err := c.DataStoreRepo.List()
+		if err != nil {
+			logrus.Warnf("[Container] Analysis: cannot list data stores: %v", err)
+		} else if len(stores) == 0 {
+			logrus.Info("[Container] Analysis: no data stores in DB, /analysis routes will not be registered. Add a DuckDB data store and sync stock_basic/daily for stock charts.")
+		} else {
+			for _, ds := range stores {
+				if ds.Type != datastore.DataStoreTypeDuckDB || strings.TrimSpace(ds.StoragePath) == "" || ds.Status != shared.StatusActive {
+					continue
+				}
+				adapter := duckdb.NewAdapter(ds.StoragePath)
+				if err := adapter.Connect(context.Background()); err != nil {
+					logrus.Warnf("[Container] Analysis: skip data store %s (%s): %v", ds.Name, ds.StoragePath, err)
+					continue
+				}
+				c.QuantDBAdapter = adapter
+				analysisQuantDB = adapter
+				logrus.Infof("[Container] Analysis using data store: %s (%s). Ensure tables stock_basic and daily exist (sync via Data Sync).", ds.Name, ds.StoragePath)
+				break
+			}
+			if analysisQuantDB == nil {
+				logrus.Info("[Container] Analysis: no connectable DuckDB data store found (wrong type, empty path, inactive, or connect failed). /analysis routes will not be registered.")
+			}
+		}
+	}
+	if analysisQuantDB != nil {
 		var readers *analysisinfra.Readers
 		if c.DataSourceRegistry != nil && c.MetadataRepo != nil {
 			tokenResolver := &analysisinfra.TokenResolverImpl{Repo: c.MetadataRepo}
 			fallback := analysisinfra.NewFallbackProvider("tushare", c.DataSourceRegistry, tokenResolver)
-			readers = analysisinfra.NewReadersWithFallback(c.QuantDBAdapter, fallback)
+			readers = analysisinfra.NewReadersWithFallback(analysisQuantDB, fallback)
 		} else {
-			readers = analysisinfra.NewReaders(c.QuantDBAdapter)
+			readers = analysisinfra.NewReaders(analysisQuantDB)
 		}
 		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
 	}

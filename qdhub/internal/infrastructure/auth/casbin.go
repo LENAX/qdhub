@@ -72,6 +72,8 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"datastores", "read"},
 		{"datastores", "write"},
 		{"datastores", "delete"},
+		{"analysis", "read"},
+		{"analysis", "write"},
 		{"workflows", "read"},
 		{"workflows", "write"},
 		{"workflows", "delete"},
@@ -92,6 +94,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"sync-plans", "write"},
 		{"sync-plans", "execute"},
 		{"datastores", "read"},
+		{"analysis", "read"},
 		{"workflows", "read"},
 		{"workflows", "execute"},
 		{"instances", "read"},
@@ -105,6 +108,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"datasources", "read"},
 		{"sync-plans", "read"},
 		{"datastores", "read"},
+		{"analysis", "read"},
 		{"workflows", "read"},
 		{"instances", "read"},
 	}
@@ -143,4 +147,30 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 	}
 
 	return nil
+}
+
+// EnsureAnalysisPolicies adds analysis resource policies if missing (for existing DBs that were created before analysis was added).
+func EnsureAnalysisPolicies(enforcer *casbin.Enforcer) error {
+	analysisPolicies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "analysis", "read"},
+		{"admin", "analysis", "write"},
+		{"operator", "analysis", "read"},
+		{"viewer", "analysis", "read"},
+	}
+	for _, p := range analysisPolicies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add analysis policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
 }
