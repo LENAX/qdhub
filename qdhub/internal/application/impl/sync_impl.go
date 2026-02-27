@@ -40,6 +40,9 @@ type SyncApplicationServiceImpl struct {
 
 	// 依赖：Unit of Work 用于事务控制
 	uow contracts.UnitOfWork
+
+	// 依赖：用于查询 api_sync_strategies 补充 param_dependencies
+	metadataRepo metadata.Repository
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -53,6 +56,7 @@ func NewSyncApplicationService(
 	dependencyResolver sync.DependencyResolver,
 	taskEngineAdapter workflow.TaskEngineAdapter,
 	uow contracts.UnitOfWork,
+	metadataRepo metadata.Repository,
 ) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncPlanRepo:       syncPlanRepo,
@@ -64,6 +68,7 @@ func NewSyncApplicationService(
 		dependencyResolver: dependencyResolver,
 		taskEngineAdapter:  taskEngineAdapter,
 		uow:                uow,
+		metadataRepo:       metadataRepo,
 	}
 }
 
@@ -337,6 +342,11 @@ func (s *SyncApplicationServiceImpl) ResolveSyncPlan(ctx context.Context, planID
 		allAPIDependencies[api.Name] = deps
 	}
 
+	// Fix A: Supplement missing param_dependencies from api_sync_strategies.
+	// api_metadata.param_dependencies may be empty (e.g. metadata crawl doesn't populate it),
+	// but api_sync_strategies has the correct preferred_param / support_date_range info.
+	s.supplementDependenciesFromStrategies(ctx, plan.DataSourceID, allAPIs, allAPIDependencies)
+
 	// Resolve dependencies
 	graph, resolvedAPIs, err := s.dependencyResolver.Resolve(plan.SelectedAPIs, allAPIDependencies)
 	if err != nil {
@@ -544,6 +554,70 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	}
 
 	return executionID, nil
+}
+
+// supplementDependenciesFromStrategies supplements allAPIDependencies with data from api_sync_strategies.
+// When api_metadata.param_dependencies is empty, we infer ParamDependency from the strategy's
+// preferred_param and support_date_range to ensure the DependencyResolver assigns the correct SyncMode.
+func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
+	ctx context.Context,
+	dataSourceID shared.ID,
+	allAPIs []*metadata.APIMetadata,
+	allAPIDependencies map[string][]sync.ParamDependency,
+) {
+	if s.metadataRepo == nil {
+		return
+	}
+
+	apiNames := make([]string, 0, len(allAPIs))
+	for _, api := range allAPIs {
+		apiNames = append(apiNames, api.Name)
+	}
+
+	strategies, err := s.metadataRepo.ListAPISyncStrategiesByAPINames(ctx, dataSourceID, apiNames)
+	if err != nil {
+		logrus.Warnf("[ResolveSyncPlan] Failed to query api_sync_strategies: %v", err)
+		return
+	}
+
+	for _, strategy := range strategies {
+		if len(allAPIDependencies[strategy.APIName]) > 0 {
+			continue
+		}
+		deps := strategyToParamDependencies(strategy)
+		if len(deps) > 0 {
+			allAPIDependencies[strategy.APIName] = deps
+			logrus.Infof("[ResolveSyncPlan] Supplemented param_dependencies for %s from api_sync_strategies (preferred_param=%s, support_date_range=%v)",
+				strategy.APIName, strategy.PreferredParam, strategy.SupportDateRange)
+		}
+	}
+}
+
+// strategyToParamDependencies converts an APISyncStrategy to ParamDependency entries.
+// Mapping rules:
+//   - preferred_param=trade_date, !support_date_range → template mode (IsList=true), iterate over trade dates
+//   - preferred_param=trade_date, support_date_range  → direct mode (IsList=false), pass date range
+//   - preferred_param=ts_code                         → template mode (IsList=true), iterate over stock codes
+//   - preferred_param=none                            → no dependencies needed
+func strategyToParamDependencies(strategy *metadata.APISyncStrategy) []sync.ParamDependency {
+	switch strategy.PreferredParam {
+	case metadata.SyncParamTradeDate:
+		return []sync.ParamDependency{{
+			ParamName:   "trade_date",
+			SourceAPI:   "trade_cal",
+			SourceField: "cal_date",
+			IsList:      !strategy.SupportDateRange,
+		}}
+	case metadata.SyncParamTsCode:
+		return []sync.ParamDependency{{
+			ParamName:   "ts_code",
+			SourceAPI:   "stock_basic",
+			SourceField: "ts_code",
+			IsList:      true,
+		}}
+	default:
+		return nil
+	}
 }
 
 // filterTasksByFrequency filters tasks based on sync frequency.

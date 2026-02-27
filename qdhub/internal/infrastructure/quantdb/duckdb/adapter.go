@@ -219,6 +219,18 @@ func (a *Adapter) tableHasPrimaryKeyFallback(ctx context.Context, tableName stri
 
 // ==================== Data Operations ====================
 
+// isConflictError 判断是否为唯一约束冲突/更新冲突（可重试为 update 或跳过）
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "Conflict") ||
+		strings.Contains(s, "UNIQUE constraint") ||
+		strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "Duplicate")
+}
+
 // getTableColumns returns the column names of a table.
 // This is used to filter out unknown columns when inserting data.
 func (a *Adapter) getTableColumns(ctx context.Context, tableName string) (map[string]bool, error) {
@@ -334,9 +346,19 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 			args[i] = row[col]
 		}
 
-		result, err := stmt.ExecContext(ctx, args...)
-		if err != nil {
-			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
+		result, execErr := stmt.ExecContext(ctx, args...)
+		if execErr != nil {
+			if isConflictError(execErr) {
+				_ = tx.Rollback()
+				// 冲突时改为逐行 INSERT OR REPLACE / INSERT，失败则跳过
+				n, fallbackErr := a.bulkInsertRowByRow(ctx, tableName, data, columns, hasPK)
+				if fallbackErr != nil {
+					return n, fallbackErr
+				}
+				return n, nil
+			}
+			err = execErr
+			return totalInserted, fmt.Errorf("failed to insert row: %w", execErr)
 		}
 
 		affected, _ := result.RowsAffected()
@@ -348,6 +370,45 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 		return 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	return totalInserted, nil
+}
+
+// bulkInsertRowByRow 无事务逐行插入，冲突时用 INSERT OR REPLACE 尝试更新，仍失败则跳过该行。
+func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data []map[string]any, columns []string, useReplace bool) (int64, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(columns))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	verb := "INSERT"
+	if useReplace {
+		verb = "INSERT OR REPLACE"
+	}
+	insertSQL := fmt.Sprintf("%s INTO %s (%s) VALUES (%s)",
+		verb,
+		quoteIdentifier(tableName),
+		quoteIdentifiers(columns),
+		strings.Join(placeholders, ", "))
+
+	var totalInserted int64
+	for _, row := range data {
+		args := make([]any, len(columns))
+		for i, col := range columns {
+			args[i] = row[col]
+		}
+		result, err := a.db.ExecContext(ctx, insertSQL, args...)
+		if err != nil {
+			if isConflictError(err) {
+				// 已用 OR REPLACE 仍冲突则跳过
+				continue
+			}
+			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
+		}
+		affected, _ := result.RowsAffected()
+		totalInserted += affected
+	}
 	return totalInserted, nil
 }
 
@@ -552,6 +613,10 @@ func (t *duckDBTx) BulkInsert(ctx context.Context, tableName string, data []map[
 
 		result, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
+			if isConflictError(err) {
+				// 冲突时跳过该行
+				continue
+			}
 			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
 		}
 

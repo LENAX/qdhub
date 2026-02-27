@@ -797,6 +797,7 @@ func (c *Container) initApplicationServices() error {
 		c.DependencyResolver,
 		c.TaskEngineAdapter,
 		c.UoW,
+		c.MetadataRepo,
 	)
 
 	// Auth service

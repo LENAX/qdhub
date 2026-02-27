@@ -109,11 +109,16 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 处理上游参数映射：从上游任务结果中获取参数值
 	upstreamParams := resolveUpstreamParams(tc)
+	const maxParamLogLen = 200
 	for paramName, paramValue := range upstreamParams {
 		// 上游参数优先级低于直接传入的 params（允许覆盖）
 		if _, exists := params[paramName]; !exists {
 			params[paramName] = paramValue
-			logrus.Printf("📥 [SyncAPIData] 从上游任务获取参数: %s=%v", paramName, paramValue)
+			logVal := fmt.Sprintf("%v", paramValue)
+			if len(logVal) > maxParamLogLen {
+				logVal = logVal[:maxParamLogLen] + "..."
+			}
+			logrus.Printf("📥 [SyncAPIData] 从上游任务获取参数: %s=%s", paramName, logVal)
 		}
 	}
 
@@ -147,7 +152,9 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			}
 		}
 
-		logrus.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
+		if apiName != "trade_cal" {
+			logrus.Printf("💾 [SyncAPIData] 保存数据: %s, 保存记录数=%d", apiName, savedCount)
+		}
 	}
 
 	// 提取特定字段用于下游任务（如 ts_codes）
@@ -175,7 +182,8 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - max_sub_tasks: int - 最大子任务数量（0=不限制）
-//   - extra_params: map[string]interface{} - 额外的固定参数
+//   - start_date: string - 日期范围开始（YYYYMMDD），用于过滤交易日
+//   - end_date: string - 日期范围结束（YYYYMMDD），用于过滤交易日
 //
 // Output:
 //   - status: string - 操作状态
@@ -191,14 +199,6 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
-
-	// 获取额外参数
-	var extraParams map[string]interface{}
-	if ep := tc.GetParam("extra_params"); ep != nil {
-		if epm, ok := ep.(map[string]interface{}); ok {
-			extraParams = epm
-		}
-	}
 
 	// 获取 Engine（仅用于 taskRegistry）
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -242,21 +242,10 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	// 如果是 trade_date，根据日期范围过滤交易日
-	// start_date/end_date 可能来自任务顶层（APINames 模式）或 extra_params（SyncPlan APIConfigs 模式）
+	// start_date/end_date 作为顶层参数传入
 	if paramKey == "trade_date" {
-		startDate := tc.GetParamString("start_date")
-		endDate := tc.GetParamString("end_date")
-		if (startDate == "" || endDate == "") && extraParams != nil {
-			if s, _ := extraParams["start_date"].(string); s != "" {
-				startDate = s
-			}
-			if e, _ := extraParams["end_date"].(string); e != "" {
-				endDate = e
-			}
-		}
-		// 归一化为 YYYYMMDD（extra_params 可能带时间如 "20250101 09:30:00"），便于与 trade_cal 的日期比较
-		startDate = normalizeDateForFilter(startDate)
-		endDate = normalizeDateForFilter(endDate)
+		startDate := normalizeDateForFilter(tc.GetParamString("start_date"))
+		endDate := normalizeDateForFilter(tc.GetParamString("end_date"))
 		if startDate != "" || endDate != "" {
 			filtered := filterDatesByRange(paramValues, startDate, endDate)
 			logrus.Printf("📅 [GenerateDataSyncSubTasks] 日期范围过滤: 原始 %d 个交易日 -> 过滤后 %d 个 (范围: %s ~ %s)",
@@ -294,11 +283,12 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 			},
 		}
 
-		// 合并额外参数
-		if extraParams != nil {
+		// 将顶层的 start_date/end_date 作为 API 调用参数传给子任务（用于限定日期范围）
+		if sd := tc.GetParamString("start_date"); sd != "" {
 			paramsMap := subTaskParams["params"].(map[string]interface{})
-			for k, v := range extraParams {
-				paramsMap[k] = v
+			paramsMap["start_date"] = sd
+			if ed := tc.GetParamString("end_date"); ed != "" {
+				paramsMap["end_date"] = ed
 			}
 		}
 
@@ -1107,17 +1097,29 @@ func parseGoMapString(s string) map[string]interface{} {
 	return result
 }
 
-// normalizeDateForFilter 将日期串归一化为 YYYYMMDD，用于与 trade_cal 的日期比较。
-// 若带时间（如 "20250101 09:30:00"）则只取前 8 位。
+// dateLayoutsForFilter 支持的日期格式，用于 normalizeDateForFilter 解析（按长度从长到短，避免短格式误匹配）
+var dateLayoutsForFilter = []string{
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+	"2006/01/02",
+	"20060102",
+	"2006-01", // 仅年月，视为当月第一天
+}
+
+// normalizeDateForFilter 将日期串解析为 date 再格式化为 YYYYMMDD，用于与 trade_cal 的日期比较。
+// 不假设输入格式，按 dateLayoutsForFilter 依次尝试解析，解析失败返回空字符串。
 func normalizeDateForFilter(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	if len(s) >= 8 {
-		return s[:8]
+	for _, layout := range dateLayoutsForFilter {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Format("20060102")
+		}
 	}
-	return s
+	return ""
 }
 
 // filterDatesByRange 根据日期范围过滤日期列表

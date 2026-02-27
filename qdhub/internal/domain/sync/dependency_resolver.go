@@ -250,6 +250,13 @@ func (r *DependencyResolverImpl) generateTaskConfigs(
 	for _, api := range apis {
 		deps := allAPIDependencies[api]
 
+		// Fix B: when an API has dependency edges but no ParamDependency entries,
+		// infer dependencies from the upstream API names as a last-resort defense.
+		if len(deps) == 0 && len(depGraph[api]) > 0 {
+			deps = r.inferDependenciesFromGraph(api, depGraph[api])
+			allAPIDependencies[api] = deps
+		}
+
 		config := &TaskConfig{
 			APIName:      api,
 			SyncMode:     r.determineSyncMode(deps),
@@ -265,6 +272,32 @@ func (r *DependencyResolverImpl) generateTaskConfigs(
 	}
 
 	return configs
+}
+
+// inferDependenciesFromGraph infers ParamDependency from dependency graph edges when
+// explicit ParamDependency configuration is missing. This is a last-resort defense
+// to prevent APIs from incorrectly using direct mode.
+func (r *DependencyResolverImpl) inferDependenciesFromGraph(api string, sourceAPIs []string) []ParamDependency {
+	var deps []ParamDependency
+	for _, src := range sourceAPIs {
+		switch src {
+		case "trade_cal":
+			deps = append(deps, ParamDependency{
+				ParamName:   "trade_date",
+				SourceAPI:   "trade_cal",
+				SourceField: "cal_date",
+				IsList:      true,
+			})
+		case "stock_basic":
+			deps = append(deps, ParamDependency{
+				ParamName:   "ts_code",
+				SourceAPI:   "stock_basic",
+				SourceField: "ts_code",
+				IsList:      true,
+			})
+		}
+	}
+	return deps
 }
 
 // determineSyncMode 确定同步模式

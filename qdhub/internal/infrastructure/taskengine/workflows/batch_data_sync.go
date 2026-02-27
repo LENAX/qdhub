@@ -606,12 +606,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按交易日）", b.registry).
 						WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
 							"api_name":      apiName,
-							"param_key":     "trade_date",             // 使用 trade_date 作为参数键
-							"upstream_task": "FetchTradeCal",          // 从交易日历任务中提取交易日列表
-							"max_sub_tasks": params.MaxStocks,         // 可以限制子任务数量（0 表示不限制）
-							"start_date":    startDateOnly,            // 日期范围开始
-							"end_date":      endDateOnly,              // 日期范围结束
-							"extra_params":  map[string]interface{}{}, // 不需要额外参数
+							"param_key":     "trade_date",    // 使用 trade_date 作为参数键
+							"upstream_task": "FetchTradeCal", // 从交易日历任务中提取交易日列表
+							"max_sub_tasks": params.MaxStocks,
+							"start_date":    startDateOnly,
+							"end_date":      endDateOnly,
 						})).
 						WithDependency("FetchTradeCal"). // 依赖交易日历
 						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -663,12 +662,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					continue
 				}
 				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按股票）", b.registry).
-					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
 						"api_name":      apiName,
 						"param_key":     "ts_code",
 						"upstream_task": "FetchStockBasic",
 						"max_sub_tasks": params.MaxStocks,
-						"extra_params":  dateTimeParams,
 					})).
 					WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -679,12 +677,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			default:
 				// 其他未知策略：使用 template 模式，按股票代码生成子任务
 				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按股票）", b.registry).
-					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
 						"api_name":      apiName,
 						"param_key":     "ts_code",
 						"upstream_task": "FetchStockBasic",
 						"max_sub_tasks": params.MaxStocks,
-						"extra_params":  dateTimeParams,
 					})).
 					WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -766,19 +763,21 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 			upstreamTask = "FetchStockBasic"
 		}
 
-		extraParams := dateTimeParams
+		// 将 dateTimeParams（start_date/end_date）平铺为顶层参数，
+		// 因为 task-engine 的 Builder.Build() 会将嵌套 map 序列化为不可逆的字符串
+		templateParams := mergeParams(baseParams, dateTimeParams)
+		templateParams = mergeParams(templateParams, map[string]interface{}{
+			"api_name":      config.APIName,
+			"param_key":     config.ParamKey,
+			"upstream_task": upstreamTask,
+			"max_sub_tasks": b.params.MaxStocks,
+		})
 		if config.ExtraParams != nil {
-			extraParams = mergeParams(dateTimeParams, config.ExtraParams)
+			templateParams = mergeParams(templateParams, config.ExtraParams)
 		}
 
 		taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
-			WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
-				"api_name":      config.APIName,
-				"param_key":     config.ParamKey,
-				"upstream_task": upstreamTask,
-				"max_sub_tasks": b.params.MaxStocks,
-				"extra_params":  extraParams,
-			})).
+			WithJobFunction("GenerateDataSyncSubTasks", templateParams).
 			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 			WithTemplate(true)
@@ -992,12 +991,11 @@ func (b *BatchDataSyncWorkflowBuilder) buildTemplateTask(
 	}
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
-		WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
+		WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
 			"api_name":      config.APIName,
 			"param_key":     paramKey,
 			"upstream_task": upstreamTask,
 			"max_sub_tasks": maxStocks,
-			"extra_params":  dateTimeParams,
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
