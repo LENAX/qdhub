@@ -103,13 +103,14 @@ func (h *AnalysisHandler) GetKLine(c *gin.Context) {
 
 // ListStocks handles GET /api/v1/analysis/stocks
 // @Summary      List stocks
-// @Description  List stocks with optional market/industry/list_status filter
+// @Description  List stocks with optional market/industry/list_status/query filter. query searches by name, ts_code, symbol.
 // @Tags         Analysis
 // @Accept       json
 // @Produce      json
 // @Param        market      query     string  false  "Market filter"
 // @Param        industry    query     string  false  "Industry filter"
 // @Param        list_status query     string  false  "List status filter"
+// @Param        query       query     string  false  "Search by name or code (fuzzy)"
 // @Param        limit       query     int     false  "Limit" default(100)
 // @Param        offset      query     int     false  "Offset" default(0)
 // @Success      200        {object}  Response
@@ -117,7 +118,7 @@ func (h *AnalysisHandler) GetKLine(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /analysis/stocks [get]
 func (h *AnalysisHandler) ListStocks(c *gin.Context) {
-	var market, industry, listStatus *string
+	var market, industry, listStatus, query *string
 	if v := c.Query("market"); v != "" {
 		market = &v
 	}
@@ -127,8 +128,11 @@ func (h *AnalysisHandler) ListStocks(c *gin.Context) {
 	if v := c.Query("list_status"); v != "" {
 		listStatus = &v
 	}
+	if v := c.Query("query"); v != "" {
+		query = &v
+	}
 	req := analysis.StockListRequest{
-		Market: market, Industry: industry, ListStatus: listStatus,
+		Market: market, Industry: industry, ListStatus: listStatus, Query: query,
 		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.ListStocks(c.Request.Context(), req)
@@ -292,15 +296,18 @@ func (h *AnalysisHandler) GetFinancialReports(c *gin.Context) {
 		BadRequest(c, "ts_code required")
 		return
 	}
-	var startDate, endDate *string
+	var startDate, endDate, reportType *string
 	if v := c.Query("start_date"); v != "" {
 		startDate = &v
 	}
 	if v := c.Query("end_date"); v != "" {
 		endDate = &v
 	}
+	if v := c.Query("report_type"); v != "" {
+		reportType = &v
+	}
 	req := analysis.FinancialReportRequest{
-		TsCode: tsCode, StartDate: startDate, EndDate: endDate,
+		TsCode: tsCode, StartDate: startDate, EndDate: endDate, ReportType: reportType,
 		Limit: defaultInt(c.Query("limit"), 50), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.GetFinancialReports(c.Request.Context(), req)

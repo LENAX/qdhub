@@ -678,6 +678,11 @@ func (r *Readers) ListStocks(ctx context.Context, req analysis.StockListRequest)
 		sql += " AND list_status = ?"
 		args = append(args, *req.ListStatus)
 	}
+	if req.Query != nil && strings.TrimSpace(*req.Query) != "" {
+		q := "%" + strings.TrimSpace(*req.Query) + "%"
+		sql += " AND (name LIKE ? OR ts_code LIKE ? OR symbol LIKE ?)"
+		args = append(args, q, q, q)
+	}
 	sql += " ORDER BY ts_code LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
 	if limit <= 0 {
@@ -1112,6 +1117,10 @@ FROM fina_mainbz WHERE ts_code = ?`
 		sql += " AND end_date >= ?"
 		args = append(args, *req.StartDate)
 	}
+	if req.ReportType != nil && *req.ReportType != "" {
+		sql += " AND report_type = ?"
+		args = append(args, *req.ReportType)
+	}
 	sql += " ORDER BY end_date DESC LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
 	if limit <= 0 {
@@ -1195,8 +1204,17 @@ func rowToFinancialReport(m map[string]any) analysis.FinancialReport {
 	setFloatPtr(&f.TotalAssets, m, "total_assets")
 	setFloatPtr(&f.TotalLiab, m, "total_liab")
 	setFloatPtr(&f.TotalEquity, m, "total_equity")
+	setFloatPtr(&f.FixedAssets, m, "fixed_assets")
+	setFloatPtr(&f.CurrentAssets, m, "current_assets")
+	setFloatPtr(&f.CurrentLiab, m, "current_liab")
 	setFloatPtr(&f.Revenue, m, "revenue")
+	setFloatPtr(&f.OperatingProfit, m, "operating_profit")
+	setFloatPtr(&f.TotalProfit, m, "total_profit")
 	setFloatPtr(&f.NetProfit, m, "net_profit")
+	setFloatPtr(&f.NetProfitAfter, m, "net_profit_after")
 	setFloatPtr(&f.OperatingCashFlow, m, "operating_cash_flow")
+	setFloatPtr(&f.InvestingCashFlow, m, "investing_cash_flow")
+	setFloatPtr(&f.FinancingCashFlow, m, "financing_cash_flow")
+	setFloatPtr(&f.NetCashFlow, m, "net_cash_flow")
 	return f
 }

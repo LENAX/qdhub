@@ -109,6 +109,7 @@ type StockListRequest struct {
 	Area       *string // 地域
 	IsHS       *string // 是否沪深港通
 	ListStatus *string // 上市状态：L上市/D退市/P暂停
+	Query      *string // 关键词：按名称、ts_code、symbol 模糊查询
 	Limit      int     // 返回数量限制
 	Offset     int     // 偏移量
 }

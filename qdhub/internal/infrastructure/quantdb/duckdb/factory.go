@@ -3,6 +3,8 @@ package duckdb
 
 import (
 	"context"
+	"log"
+	"path/filepath"
 	"sync"
 
 	"qdhub/internal/domain/datastore"
@@ -32,6 +34,14 @@ func (f *Factory) Create(config datastore.QuantDBConfig) (datastore.QuantDB, err
 	}
 	if path == "" {
 		return nil, datastore.ErrQuantDBPathRequired
+	}
+	// 将相对路径解析为绝对路径，避免因进程 CWD 不同导致建表写入到错误文件
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		path = abs
 	}
 
 	f.mu.RLock()
@@ -65,6 +75,7 @@ func (f *Factory) Create(config datastore.QuantDBConfig) (datastore.QuantDB, err
 	if err := adapter.Connect(context.Background()); err != nil {
 		return nil, err
 	}
+	log.Printf("[DuckDB Factory] open path (resolved): %s", path)
 	f.cache[path] = adapter
 	return adapter, nil
 }

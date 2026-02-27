@@ -284,7 +284,7 @@ func (r *DataTypeMappingRuleRepositoryImpl) InitDefaultRules() error {
 	defaultRules := []*datastore.DataTypeMappingRule{
 		datastore.NewDataTypeMappingRule("tushare", "str", "duckdb", "VARCHAR", 100, true),
 		datastore.NewDataTypeMappingRule("tushare", "float", "duckdb", "DOUBLE", 100, true),
-		datastore.NewDataTypeMappingRule("tushare", "int", "duckdb", "INTEGER", 100, true),
+		datastore.NewDataTypeMappingRule("tushare", "int", "duckdb", "BIGINT", 100, true),
 		datastore.NewDataTypeMappingRule("tushare", "datetime", "duckdb", "TIMESTAMP", 100, true),
 		datastore.NewDataTypeMappingRule("tushare", "date", "duckdb", "DATE", 100, true),
 	}

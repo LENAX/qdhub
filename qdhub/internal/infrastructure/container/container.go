@@ -164,7 +164,8 @@ type Container struct {
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
 
 	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
-	QuantDBAdapter datastore.QuantDB
+	QuantDBAdapter  datastore.QuantDB
+	QuantDBFactory  datastore.QuantDBFactory
 
 	// Unit of Work for transaction management
 	UoW contracts.UnitOfWork
@@ -680,18 +681,23 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	}
 
 	// QuantDBFactory：按 target_db_path（来自数据库 Quant Data Store）按需创建 DuckDB 连接，与 config 默认路径解耦
-	taskEngineDeps.QuantDBFactory = duckdb.NewFactory()
+	// 同一个 Factory 实例同时注入 Task Engine 和 Application Service，确保共享同一连接
+	c.QuantDBFactory = duckdb.NewFactory()
+	taskEngineDeps.QuantDBFactory = c.QuantDBFactory
 	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
 
 	// CommonDataCache：公共数据内存缓存（TTL 24h），SyncAPIDataJob 按 common_data_apis 走 Cache→DuckDB→API
 	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
 	log.Printf("[Container] ✅ CommonDataCache (memory, TTL 24h) registered")
 
-	// 可选：若配置了默认 DuckDB 路径，仍注入单例 QuantDB 以兼容旧逻辑（优先使用 QuantDBFactory）
+	// 可选：若配置了默认 DuckDB 路径，通过共享 Factory 获取连接（避免独立 DuckDB 引擎实例）
 	if c.config.DefaultDuckDBPath != "" {
 		log.Printf("[Container] DefaultDuckDBPath from config: '%s' (optional)", c.config.DefaultDuckDBPath)
-		quantDBAdapter := duckdb.NewAdapter(c.config.DefaultDuckDBPath)
-		if err := quantDBAdapter.Connect(ctx); err != nil {
+		quantDBAdapter, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+			Type:        datastore.DataStoreTypeDuckDB,
+			StoragePath: c.config.DefaultDuckDBPath,
+		})
+		if err != nil {
 			log.Printf("[Container] WARNING: Failed to connect to default DuckDB at %s: %v", c.config.DefaultDuckDBPath, err)
 		} else {
 			taskEngineDeps.QuantDB = quantDBAdapter
@@ -796,13 +802,13 @@ func (c *Container) initApplicationServices() error {
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
 	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor, datasourcevalidator.NewTokenValidator())
 
-	// DataStore service（注入 QuantDBAdapter：新建 DuckDB 时生成文件，非 DuckDB 时尝试连接；校验/更新/删除依赖此 adapter）
+	// DataStore service（注入 QuantDBAdapter：共享 QuantDBFactory 确保与 Task Engine 使用同一连接）
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
 		c.DataSourceRepo,
 		c.SyncPlanRepo,
 		c.WorkflowExecutor,
-		quantdb.NewQuantDBAdapter(),
+		quantdb.NewQuantDBAdapter(c.QuantDBFactory),
 	)
 
 	// Sync service
@@ -889,8 +895,9 @@ func (c *Container) initHTTPServer() error {
 	}
 
 	// 分析服务数据源：优先用默认 QuantDB；否则从 DataStore 中取第一个有效的 DuckDB 并连接
+	// 注意：使用共享 QuantDBFactory 获取连接，避免创建独立的 DuckDB 引擎实例
 	analysisQuantDB := c.QuantDBAdapter
-	if analysisQuantDB == nil && c.DataStoreRepo != nil {
+	if analysisQuantDB == nil && c.DataStoreRepo != nil && c.QuantDBFactory != nil {
 		stores, err := c.DataStoreRepo.List()
 		if err != nil {
 			logrus.Warnf("[Container] Analysis: cannot list data stores: %v", err)
@@ -901,8 +908,11 @@ func (c *Container) initHTTPServer() error {
 				if ds.Type != datastore.DataStoreTypeDuckDB || strings.TrimSpace(ds.StoragePath) == "" || ds.Status != shared.StatusActive {
 					continue
 				}
-				adapter := duckdb.NewAdapter(ds.StoragePath)
-				if err := adapter.Connect(context.Background()); err != nil {
+				adapter, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+					Type:        datastore.DataStoreTypeDuckDB,
+					StoragePath: ds.StoragePath,
+				})
+				if err != nil {
 					logrus.Warnf("[Container] Analysis: skip data store %s (%s): %v", ds.Name, ds.StoragePath, err)
 					continue
 				}
