@@ -64,7 +64,9 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	if dataSourceName == "" || apiName == "" {
-		return nil, fmt.Errorf("data_source_name and api_name are required")
+		err := fmt.Errorf("data_source_name and api_name are required")
+		logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
+		return nil, err
 	}
 
 	logrus.Printf("📡 [SyncAPIData] 开始同步: %s/%s, BatchID=%s", dataSourceName, apiName, syncBatchID)
@@ -148,12 +150,15 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	// 获取 DataSourceRegistry 并调用 API
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
 	if !ok {
-		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
+		err := fmt.Errorf("DataSourceRegistry dependency not found")
+		logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
+		return nil, err
 	}
 	registry := registryInterface.(*datasource.Registry)
 
 	client, err := registry.GetClient(dataSourceName)
 	if err != nil {
+		logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 		return nil, fmt.Errorf("failed to get client: %w", err)
 	}
 
@@ -163,6 +168,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
+		logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 		return nil, fmt.Errorf("failed to query %s: %w", apiName, err)
 	}
 
@@ -173,19 +179,24 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	if targetDBPath != "" && len(result.Data) > 0 {
 		quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 		if err != nil {
+			logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 		}
 
 		exists, err := quantDB.TableExists(ctx, apiName)
 		if err != nil {
+			logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 			return nil, fmt.Errorf("check table existence for %s: %w", apiName, err)
 		}
 		if !exists {
-			return nil, fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
+			err := fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
+			logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
+			return nil, err
 		}
 
 		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
 		if err != nil {
+			logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
 

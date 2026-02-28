@@ -27,6 +27,21 @@ func DataSyncSuccessHandler(tc *task.TaskContext) {
 	result := tc.GetParam("_result_data")
 	if result != nil {
 		if resultMap, ok := result.(map[string]interface{}); ok {
+			apiName, _ := resultMap["api_name"].(string)
+			var count64 int64
+			if v, ok := resultMap["count"]; ok {
+				switch n := v.(type) {
+				case int:
+					count64 = int64(n)
+				case int32:
+					count64 = int64(n)
+				case int64:
+					count64 = n
+				case float64:
+					count64 = int64(n)
+				}
+			}
+
 			// Log sync metrics
 			if count, ok := resultMap["count"]; ok {
 				logrus.Printf("[DataSync] 💾 Saved %v records", count)
@@ -44,6 +59,22 @@ func DataSyncSuccessHandler(tc *task.TaskContext) {
 			if generated, ok := resultMap["generated"]; ok {
 				logrus.Printf("[DataSync] 🔄 Generated %v sub-tasks", generated)
 			}
+
+			// Persist per-task detail for stats/debugging (best-effort; must not break workflow)
+			func() {
+				defer func() { _ = recover() }()
+				invoker, ok := tc.GetDependency("SyncCallbackInvoker")
+				if ok && invoker != nil {
+					type recorder interface {
+						RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
+					}
+					if svc, ok := invoker.(recorder); ok && apiName != "" {
+						if err := svc.RecordTaskResult(context.Background(), tc.WorkflowInstanceID, apiName, tc.TaskID, count64, true, ""); err != nil {
+							logrus.Warnf("[DataSync] record task result failed: %v", err)
+						}
+					}
+				}
+			}()
 		}
 	}
 }
@@ -51,11 +82,32 @@ func DataSyncSuccessHandler(tc *task.TaskContext) {
 // DataSyncFailureHandler handles failed data sync tasks.
 func DataSyncFailureHandler(tc *task.TaskContext) {
 	errMsg := tc.GetParamString("_error_message")
-	logrus.Printf("[DataSync] ❌ Task failed - Task: %s, TaskID: %s, Error: %s",
-		tc.TaskName, tc.TaskID, errMsg)
+	if errMsg == "" {
+		errMsg = "unknown error"
+	}
+	logrus.Errorf("[DataSync] task failed: taskName=%s, taskID=%s, workflowInstID=%s, err=%s",
+		tc.TaskName, tc.TaskID, tc.WorkflowInstanceID, errMsg)
 
-	// Check for specific error types
-	// Could implement retry logic or fallback strategies here
+	// Persist per-task failure detail for stats/debugging (best-effort; must not break workflow)
+	apiName := tc.GetParamString("api_name")
+	if apiName == "" {
+		// fallback: some tasks use name like "SyncAPIData_daily"
+		apiName = tc.TaskName
+	}
+	func() {
+		defer func() { _ = recover() }()
+		invoker, ok := tc.GetDependency("SyncCallbackInvoker")
+		if ok && invoker != nil && apiName != "" {
+			type recorder interface {
+				RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
+			}
+			if svc, ok := invoker.(recorder); ok {
+				if err := svc.RecordTaskResult(context.Background(), tc.WorkflowInstanceID, apiName, tc.TaskID, 0, false, errMsg); err != nil {
+					logrus.Warnf("[DataSync] record task result failed: %v", err)
+				}
+			}
+		}
+	}()
 }
 
 // syncCallbackInvoker 由 SyncApplicationService 实现，用于 DataSyncComplete 时触发 execution 回调（Plan.MarkCompleted）。

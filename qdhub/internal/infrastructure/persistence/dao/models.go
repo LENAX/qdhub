@@ -131,9 +131,10 @@ type SyncExecutionRow struct {
 	Status         string         `db:"status"`
 	StartedAt      time.Time      `db:"started_at"`
 	FinishedAt     sql.NullTime   `db:"finished_at"`
-	RecordCount    int64          `db:"record_count"`
-	ErrorMessage   sql.NullString `db:"error_message"`
-	ExecuteParams  string         `db:"execute_params"`
+	RecordCount           int64          `db:"record_count"`
+	ErrorMessage          sql.NullString `db:"error_message"`
+	WorkflowErrorMessage  sql.NullString `db:"workflow_error_message"`
+	ExecuteParams         string         `db:"execute_params"`
 	SyncedAPIs     string         `db:"synced_apis"`
 	SkippedAPIs    string         `db:"skipped_apis"`
 }
@@ -157,6 +158,20 @@ type SyncPlanRow struct {
 	NextExecuteAt              sql.NullTime   `db:"next_execute_at"`
 	CreatedAt                  time.Time      `db:"created_at"`
 	UpdatedAt                  time.Time      `db:"updated_at"`
+}
+
+// SyncExecutionDetailRow represents sync_execution_detail table row.
+type SyncExecutionDetailRow struct {
+	ID           string         `db:"id"`
+	ExecutionID  string         `db:"execution_id"`
+	TaskID       string         `db:"task_id"`
+	APIName      string         `db:"api_name"`
+	RecordCount  int64          `db:"record_count"`
+	Status       string         `db:"status"`
+	ErrorMessage sql.NullString `db:"error_message"`
+	StartedAt    sql.NullTime   `db:"started_at"`
+	FinishedAt   sql.NullTime   `db:"finished_at"`
+	CreatedAt    time.Time      `db:"created_at"`
 }
 
 // SyncTaskRow represents sync_task table row.

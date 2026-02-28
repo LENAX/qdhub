@@ -21,6 +21,8 @@ type SyncExecution struct {
 	FinishedAt     *shared.Timestamp `json:"finished_at,omitempty"`
 	RecordCount    int64             `json:"record_count"`
 	ErrorMessage   *string           `json:"error_message,omitempty"`
+	// WorkflowErrorMessage 当「工作流报失败但明细全成功」被纠正为成功时，保留工作流原始错误信息，便于前端展示警告、排查引擎问题
+	WorkflowErrorMessage *string `json:"workflow_error_message,omitempty"`
 
 	// New fields for SyncPlan
 	ExecuteParams *ExecuteParams `json:"execute_params,omitempty"`
@@ -133,6 +135,19 @@ func (se *SyncExecution) UnmarshalSkippedAPIsJSON(jsonStr string) error {
 		return nil
 	}
 	return json.Unmarshal([]byte(jsonStr), &se.SkippedAPIs)
+}
+
+// SyncExecutionDetail 单次同步任务明细（按 API/任务记录行数、状态、错误信息）
+type SyncExecutionDetail struct {
+	ID           shared.ID         `json:"id"`
+	ExecutionID  shared.ID         `json:"execution_id"`
+	TaskID       string            `json:"task_id"`
+	APIName      string            `json:"api_name"`
+	RecordCount  int64             `json:"record_count"`
+	Status       string            `json:"status"` // success / failed
+	ErrorMessage *string           `json:"error_message,omitempty"`
+	StartedAt    *shared.Timestamp `json:"started_at,omitempty"`
+	FinishedAt   *shared.Timestamp `json:"finished_at,omitempty"`
 }
 
 // ==================== 值对象 ====================

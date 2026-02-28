@@ -194,10 +194,19 @@ func (m *MockSyncPlanRepository) GetPlanExecution(id shared.ID) (*sync.SyncExecu
 func (m *MockSyncPlanRepository) GetExecutionsByPlan(planID shared.ID) ([]*sync.SyncExecution, error) {
 	return nil, nil
 }
+func (m *MockSyncPlanRepository) GetExecutionsByPlanPaged(planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error) {
+	return nil, 0, nil
+}
 func (m *MockSyncPlanRepository) GetExecutionByWorkflowInstID(workflowInstID string) (*sync.SyncExecution, error) {
 	return nil, nil
 }
 func (m *MockSyncPlanRepository) UpdatePlanExecution(exec *sync.SyncExecution) error { return nil }
+func (m *MockSyncPlanRepository) AddExecutionDetail(detail *sync.SyncExecutionDetail) error {
+	return nil
+}
+func (m *MockSyncPlanRepository) GetExecutionDetailsByExecutionID(executionID shared.ID) ([]*sync.SyncExecutionDetail, error) {
+	return nil, nil
+}
 func (m *MockSyncPlanRepository) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }

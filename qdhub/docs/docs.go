@@ -1304,7 +1304,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "List stocks with optional market/industry/list_status filter",
+                "description": "List stocks with optional market/industry/list_status/query filter. query searches by name, ts_code, symbol.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1332,6 +1332,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "List status filter",
                         "name": "list_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search by name or code (fuzzy)",
+                        "name": "query",
                         "in": "query"
                     },
                     {
@@ -3228,6 +3234,55 @@ const docTemplate = `{
                     "SyncPlans"
                 ],
                 "summary": "Cancel sync execution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}/detail": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get per-API stats and task-level error details for a sync execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Get sync execution detail",
                 "parameters": [
                     {
                         "type": "string",

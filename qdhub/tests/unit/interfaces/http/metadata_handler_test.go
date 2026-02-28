@@ -56,6 +56,11 @@ func (m *MockMetadataService) ParseAndImportMetadata(ctx context.Context, req co
 	return args.Get(0).(*contracts.ParseMetadataResult), args.Error(1)
 }
 
+func (m *MockMetadataService) UpdateDataSourceCommonDataAPIs(ctx context.Context, dataSourceID shared.ID, req contracts.UpdateDataSourceCommonDataAPIsRequest) error {
+	args := m.Called(ctx, dataSourceID, req)
+	return args.Error(0)
+}
+
 func (m *MockMetadataService) CreateAPISyncStrategy(ctx context.Context, req contracts.CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -96,6 +101,14 @@ func (m *MockMetadataService) ListAPIMetadata(ctx context.Context, dataSourceID 
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*contracts.ListAPIMetadataResponse), args.Error(1)
+}
+
+func (m *MockMetadataService) ListAPINames(ctx context.Context, dataSourceID shared.ID) ([]string, error) {
+	args := m.Called(ctx, dataSourceID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
 func (m *MockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {

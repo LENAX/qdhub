@@ -14,21 +14,23 @@ import (
 
 // SyncPlanRepositoryImpl implements sync.SyncPlanRepository.
 type SyncPlanRepositoryImpl struct {
-	db               *persistence.DB
-	tx               *sqlx.Tx // External transaction (nil if not in transaction)
-	syncPlanDAO      *dao.SyncPlanDAO
-	syncTaskDAO      *dao.SyncTaskDAO
-	syncExecutionDAO *dao.SyncExecutionDAO
+	db                     *persistence.DB
+	tx                     *sqlx.Tx // External transaction (nil if not in transaction)
+	syncPlanDAO            *dao.SyncPlanDAO
+	syncTaskDAO            *dao.SyncTaskDAO
+	syncExecutionDAO       *dao.SyncExecutionDAO
+	syncExecutionDetailDAO *dao.SyncExecutionDetailDAO
 }
 
 // NewSyncPlanRepository creates a new SyncPlanRepositoryImpl.
 func NewSyncPlanRepository(db *persistence.DB) *SyncPlanRepositoryImpl {
 	return &SyncPlanRepositoryImpl{
-		db:               db,
-		tx:               nil,
-		syncPlanDAO:      dao.NewSyncPlanDAO(db.DB),
-		syncTaskDAO:      dao.NewSyncTaskDAO(db.DB),
-		syncExecutionDAO: dao.NewSyncExecutionDAO(db.DB),
+		db:                     db,
+		tx:                     nil,
+		syncPlanDAO:            dao.NewSyncPlanDAO(db.DB),
+		syncTaskDAO:            dao.NewSyncTaskDAO(db.DB),
+		syncExecutionDAO:       dao.NewSyncExecutionDAO(db.DB),
+		syncExecutionDetailDAO: dao.NewSyncExecutionDetailDAO(db.DB),
 	}
 }
 
@@ -36,11 +38,12 @@ func NewSyncPlanRepository(db *persistence.DB) *SyncPlanRepositoryImpl {
 // All operations will use the provided transaction instead of creating new ones.
 func NewSyncPlanRepositoryWithTx(db *persistence.DB, tx *sqlx.Tx) *SyncPlanRepositoryImpl {
 	return &SyncPlanRepositoryImpl{
-		db:               db,
-		tx:               tx,
-		syncPlanDAO:      dao.NewSyncPlanDAO(db.DB),
-		syncTaskDAO:      dao.NewSyncTaskDAO(db.DB),
-		syncExecutionDAO: dao.NewSyncExecutionDAO(db.DB),
+		db:                     db,
+		tx:                     tx,
+		syncPlanDAO:            dao.NewSyncPlanDAO(db.DB),
+		syncTaskDAO:            dao.NewSyncTaskDAO(db.DB),
+		syncExecutionDAO:       dao.NewSyncExecutionDAO(db.DB),
+		syncExecutionDetailDAO: dao.NewSyncExecutionDetailDAO(db.DB),
 	}
 }
 
@@ -223,12 +226,27 @@ func (r *SyncPlanRepositoryImpl) UpdatePlanExecution(exec *sync.SyncExecution) e
 	return r.syncExecutionDAO.Update(r.tx, exec)
 }
 
+// AddExecutionDetail adds one sync execution detail row (per-API task result).
+func (r *SyncPlanRepositoryImpl) AddExecutionDetail(detail *sync.SyncExecutionDetail) error {
+	return r.syncExecutionDetailDAO.Create(r.tx, detail)
+}
+
+// GetExecutionDetailsByExecutionID returns all detail rows for an execution.
+func (r *SyncPlanRepositoryImpl) GetExecutionDetailsByExecutionID(executionID shared.ID) ([]*sync.SyncExecutionDetail, error) {
+	return r.syncExecutionDetailDAO.GetByExecutionID(r.tx, executionID)
+}
+
 // ==================== Query Operations ====================
 
 // GetByDataSource retrieves sync plans by data source ID.
 func (r *SyncPlanRepositoryImpl) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
 	// Use external transaction if available for read consistency
 	return r.syncPlanDAO.GetByDataSource(r.tx, dataSourceID)
+}
+
+// GetByDataStore retrieves sync plans by data store ID (for data quality gap analysis).
+func (r *SyncPlanRepositoryImpl) GetByDataStore(dataStoreID shared.ID) ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.GetByDataStore(r.tx, dataStoreID)
 }
 
 // GetEnabledPlans retrieves all enabled sync plans.

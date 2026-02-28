@@ -46,10 +46,19 @@ type SyncPlanRepository interface {
 	// UpdateExecution 更新执行记录
 	UpdatePlanExecution(exec *SyncExecution) error
 
+	// AddExecutionDetail 添加一条执行明细（某 API 任务成功/失败及行数、错误信息）
+	AddExecutionDetail(detail *SyncExecutionDetail) error
+
+	// GetExecutionDetailsByExecutionID 按执行 ID 获取所有明细（用于统计与错误排查）
+	GetExecutionDetailsByExecutionID(executionID shared.ID) ([]*SyncExecutionDetail, error)
+
 	// ==================== 查询 ====================
 
 	// GetByDataSource 按数据源获取计划列表
 	GetByDataSource(dataSourceID shared.ID) ([]*SyncPlan, error)
+
+	// GetByDataStore 按数据存储获取计划列表（用于数据质量缺失分析：判断是否有计划曾同步该 store）
+	GetByDataStore(dataStoreID shared.ID) ([]*SyncPlan, error)
 
 	// GetEnabledPlans 获取所有启用的计划
 	GetEnabledPlans() ([]*SyncPlan, error)

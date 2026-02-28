@@ -98,6 +98,12 @@ type SyncApplicationService interface {
 	// GetPlanProgress retrieves aggregated progress for the latest execution of a sync plan.
 	// If the plan has never been executed, it returns a pending progress state.
 	GetPlanProgress(ctx context.Context, planID shared.ID) (*SyncExecutionProgress, error)
+
+	// RecordTaskResult 记录单次同步任务结果（由 DataSyncSuccess/DataSyncFailure Handler 调用），用于统计与明细。
+	RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
+
+	// GetExecutionDetail 返回某次执行的统计与明细：每 API 总行数、错误率、详细错误信息。
+	GetExecutionDetail(ctx context.Context, executionID shared.ID) (*ExecutionDetail, error)
 }
 
 // ==================== Request/Response DTOs ====================
@@ -183,4 +189,34 @@ type PlanSummary struct {
 	ErrorMessage *string           `json:"error_message,omitempty"`
 	SyncedAPIs   []string          `json:"synced_apis,omitempty"`
 	SkippedAPIs  []string          `json:"skipped_apis,omitempty"`
+}
+
+// ExecutionDetail 某次同步执行的统计与明细（每 API 行数、错误率、详细错误）。
+type ExecutionDetail struct {
+	ExecutionID   shared.ID         `json:"execution_id"`
+	PlanID        shared.ID         `json:"plan_id"`
+	Status        sync.ExecStatus    `json:"status"`
+	RecordCount   int64             `json:"record_count"`
+	ErrorMessage  *string           `json:"error_message,omitempty"`
+	StartedAt     shared.Timestamp  `json:"started_at"`
+	FinishedAt    *shared.Timestamp `json:"finished_at,omitempty"`
+	TotalTasks    int               `json:"total_tasks"`
+	SuccessCount  int               `json:"success_count"`
+	FailedCount   int               `json:"failed_count"`
+	ErrorRate     float64           `json:"error_rate"` // 0~1, FailedCount/TotalTasks
+	ApiStats      []ApiSyncStat     `json:"api_stats"`  // 按 API 聚合：总行数、任务数、成功/失败数、错误率、错误信息
+	DetailRows    []*sync.SyncExecutionDetail `json:"detail_rows,omitempty"` // 原始明细（含每条错误信息）
+	// WorkflowErrorMessage 当执行被纠正为成功（工作流报失败但明细全成功）时，保留工作流原始错误信息，供前端展示警告、排查引擎问题
+	WorkflowErrorMessage *string `json:"workflow_error_message,omitempty"`
+}
+
+// ApiSyncStat 单个 API 在本轮执行中的统计。
+type ApiSyncStat struct {
+	APIName       string    `json:"api_name"`
+	TotalRows     int64     `json:"total_rows"`
+	TaskCount     int       `json:"task_count"`
+	SuccessCount  int       `json:"success_count"`
+	FailedCount   int       `json:"failed_count"`
+	ErrorRate     float64   `json:"error_rate"`
+	ErrorMessages []string  `json:"error_messages,omitempty"` // 该 API 下所有失败任务的错误信息
 }

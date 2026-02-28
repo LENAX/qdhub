@@ -70,6 +70,7 @@ type DependencyContainer interface {
 	// Application Services
 	GetMetadataSvc() contracts.MetadataApplicationService
 	GetDataStoreSvc() contracts.DataStoreApplicationService
+	GetDataQualitySvc() contracts.DataQualityApplicationService
 	GetSyncSvc() contracts.SyncApplicationService
 	GetWorkflowSvc() contracts.WorkflowApplicationService
 
@@ -115,10 +116,11 @@ type schedulerModule struct {
 
 // applicationServiceModule holds application service dependencies.
 type applicationServiceModule struct {
-	MetadataSvc  contracts.MetadataApplicationService
-	DataStoreSvc contracts.DataStoreApplicationService
-	SyncSvc      contracts.SyncApplicationService
-	WorkflowSvc  contracts.WorkflowApplicationService
+	MetadataSvc    contracts.MetadataApplicationService
+	DataStoreSvc   contracts.DataStoreApplicationService
+	DataQualitySvc contracts.DataQualityApplicationService
+	SyncSvc        contracts.SyncApplicationService
+	WorkflowSvc    contracts.WorkflowApplicationService
 }
 
 // Container holds all application dependencies and implements DependencyContainer interface.
@@ -153,12 +155,13 @@ type Container struct {
 	DependencyResolver sync.DependencyResolver
 
 	// Application Services (backward compatibility: direct field access)
-	MetadataSvc  contracts.MetadataApplicationService
-	DataStoreSvc contracts.DataStoreApplicationService
-	SyncSvc      contracts.SyncApplicationService
-	WorkflowSvc  contracts.WorkflowApplicationService
-	AuthSvc      contracts.AuthApplicationService
-	AnalysisSvc contracts.AnalysisApplicationService
+	MetadataSvc    contracts.MetadataApplicationService
+	DataStoreSvc   contracts.DataStoreApplicationService
+	DataQualitySvc contracts.DataQualityApplicationService
+	SyncSvc        contracts.SyncApplicationService
+	WorkflowSvc    contracts.WorkflowApplicationService
+	AuthSvc        contracts.AuthApplicationService
+	AnalysisSvc    contracts.AnalysisApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
@@ -385,6 +388,11 @@ func (c *Container) GetDataStoreSvc() contracts.DataStoreApplicationService {
 	return c.DataStoreSvc
 }
 
+// GetDataQualitySvc returns the data quality application service.
+func (c *Container) GetDataQualitySvc() contracts.DataQualityApplicationService {
+	return c.DataQualitySvc
+}
+
 // GetSyncSvc returns the sync application service.
 func (c *Container) GetSyncSvc() contracts.SyncApplicationService {
 	return c.SyncSvc
@@ -491,6 +499,15 @@ func (c *Container) runMigrations() error {
 	// 011_data_source_common_data_apis (idempotent)
 	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/011_data_source_common_data_apis.up.sql"); err != nil {
 		return fmt.Errorf("failed to run 011_data_source_common_data_apis: %w", err)
+	}
+
+	// 012_sync_execution_detail
+	if err := c.runMigrationFile("./migrations/012_sync_execution_detail.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 012_sync_execution_detail: %w", err)
+	}
+	// 013_sync_execution_workflow_error_message
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/013_sync_execution_workflow_error_message.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 013_sync_execution_workflow_error_message: %w", err)
 	}
 
 	// 008_seed_guest_user (driver-specific)
@@ -802,14 +819,20 @@ func (c *Container) initApplicationServices() error {
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
 	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor, datasourcevalidator.NewTokenValidator())
 
+	// QuantDB adapter（共享实例供 DataStore 与 DataQuality 使用）
+	quantDBAdapter := quantdb.NewQuantDBAdapter(c.QuantDBFactory)
+
 	// DataStore service（注入 QuantDBAdapter：共享 QuantDBFactory 确保与 Task Engine 使用同一连接）
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
 		c.DataSourceRepo,
 		c.SyncPlanRepo,
 		c.WorkflowExecutor,
-		quantdb.NewQuantDBAdapter(c.QuantDBFactory),
+		quantDBAdapter,
 	)
+
+	// DataQuality service（独立应用服务，归属 datastore 领域）
+	c.DataQualitySvc = impl.NewDataQualityApplicationService(c.DataStoreRepo, quantDBAdapter)
 
 	// Sync service
 	// 使用 SyncPlan 模型
@@ -943,6 +966,7 @@ func (c *Container) initHTTPServer() error {
 		c.AuthSvc,
 		c.MetadataSvc,
 		c.DataStoreSvc,
+		c.DataQualitySvc,
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,

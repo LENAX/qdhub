@@ -87,7 +87,7 @@ func (m *MockDataStoreService) GetDatastoreTableData(ctx context.Context, id sha
 func setupDataStoreRouter(mockSvc *MockDataStoreService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := httpapi.NewDataStoreHandler(mockSvc)
+	handler := httpapi.NewDataStoreHandler(mockSvc, nil)
 	v1 := router.Group("/api/v1")
 	handler.RegisterRoutes(v1)
 	return router

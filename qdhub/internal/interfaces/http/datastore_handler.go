@@ -12,13 +12,15 @@ import (
 
 // DataStoreHandler handles data store-related HTTP requests.
 type DataStoreHandler struct {
-	dataStoreSvc contracts.DataStoreApplicationService
+	dataStoreSvc   contracts.DataStoreApplicationService
+	dataQualitySvc contracts.DataQualityApplicationService
 }
 
 // NewDataStoreHandler creates a new DataStoreHandler.
-func NewDataStoreHandler(dataStoreSvc contracts.DataStoreApplicationService) *DataStoreHandler {
+func NewDataStoreHandler(dataStoreSvc contracts.DataStoreApplicationService, dataQualitySvc contracts.DataQualityApplicationService) *DataStoreHandler {
 	return &DataStoreHandler{
-		dataStoreSvc: dataStoreSvc,
+		dataStoreSvc:   dataStoreSvc,
+		dataQualitySvc: dataQualitySvc,
 	}
 }
 
@@ -36,6 +38,9 @@ func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// Data browser: list tables and paginated table data
 	rg.GET("/datastores/:id/tables", h.ListDatastoreTables)
 	rg.GET("/datastores/:id/tables/:tableName/data", h.GetDatastoreTableData)
+
+	// Data quality: dimension distribution (multi-dim stats for heatmap/bar chart)
+	rg.POST("/datastores/:id/tables/:tableName/dimension-stats", h.GetDimensionDistribution)
 }
 
 // ==================== Data Store Endpoints ====================
@@ -298,7 +303,74 @@ func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
 	Success(c, &contracts.TableDataPage{Rows: rows, Total: total})
 }
 
+// GetDimensionDistribution handles POST /api/v1/datastores/:id/tables/:tableName/dimension-stats
+// 按选定维度统计表数据量分布，返回多维结果（维度数=请求维度数），供前端热力图/条形图展示
+func (h *DataStoreHandler) GetDimensionDistribution(c *gin.Context) {
+	if h.dataQualitySvc == nil {
+		BadRequest(c, "data quality service not available")
+		return
+	}
+	id := shared.ID(c.Param("id"))
+	tableName := c.Param("tableName")
+	if tableName == "" {
+		BadRequest(c, "table name is required")
+		return
+	}
+	var req DimensionStatsReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request body: "+err.Error())
+		return
+	}
+	domainReq := datastore.DimensionStatsRequest{
+		DataStoreID: id,
+		TableName:   tableName,
+		Dimensions:  make([]datastore.DimensionDef, len(req.Dimensions)),
+	}
+	for i, d := range req.Dimensions {
+		domainReq.Dimensions[i] = datastore.DimensionDef{
+			Type:        d.Type,
+			ColumnName:  d.ColumnName,
+			RangeStart:  d.RangeStart,
+			RangeEnd:    d.RangeEnd,
+		}
+	}
+	if req.Filter != nil {
+		domainReq.Filter = &datastore.DimensionFilter{
+			ColumnName: req.Filter.ColumnName,
+			Start:      req.Filter.Start,
+			End:        req.Filter.End,
+		}
+	}
+	result, err := h.dataQualitySvc.GetDimensionDistribution(c.Request.Context(), domainReq)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
+}
+
 // ==================== Request DTOs ====================
+
+// DimensionStatsReq request body for dimension-stats
+type DimensionStatsReq struct {
+	Dimensions []DimensionDefReq   `json:"dimensions" binding:"required"`
+	Filter     *DimensionFilterReq `json:"filter"`
+}
+
+// DimensionDefReq single dimension definition
+type DimensionDefReq struct {
+	Type       string `json:"type"`                  // "column"
+	ColumnName string `json:"column_name,omitempty"`
+	RangeStart string `json:"range_start,omitempty"`
+	RangeEnd   string `json:"range_end,omitempty"`
+}
+
+// DimensionFilterReq optional filter (e.g. date range)
+type DimensionFilterReq struct {
+	ColumnName string `json:"column_name"`
+	Start      string `json:"start"`
+	End        string `json:"end"`
+}
 
 // CreateDataStoreReq represents the request body for creating a data store.
 type CreateDataStoreReq struct {

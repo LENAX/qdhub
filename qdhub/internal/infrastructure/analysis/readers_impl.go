@@ -223,6 +223,7 @@ func (r *Readers) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQ
 }
 
 // GetLimitStats 涨跌停统计
+// 封板/打开数来自 limit_list_ths（open_num=0 为封板，>0 为打开），无该表时保持 0。
 func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
 	sql := `
 SELECT trade_date,
@@ -240,21 +241,50 @@ GROUP BY trade_date ORDER BY trade_date`
 	}
 	out := make([]analysis.LimitStats, 0, len(rows))
 	for _, m := range rows {
-		limitUp := int_(m, "limit_up_count")
 		out = append(out, analysis.LimitStats{
-			TradeDate:      str(m, "trade_date"),
-			LimitUpCount:   limitUp,
-			LimitDownCount: int_(m, "limit_down_count"),
-			UpCount:        int_(m, "up_count"),
-			DownCount:      int_(m, "down_count"),
-			FlatCount:      int_(m, "flat_count"),
-			LimitUpRatio:   float(m, "limit_up_ratio"),
+			TradeDate:       str(m, "trade_date"),
+			LimitUpCount:    int_(m, "limit_up_count"),
+			LimitDownCount:   int_(m, "limit_down_count"),
+			LimitUpSealed:    0,
+			LimitUpOpened:    0,
+			LimitDownSealed:  0,
+			LimitDownOpened:  0,
+			UpCount:         int_(m, "up_count"),
+			DownCount:       int_(m, "down_count"),
+			FlatCount:       int_(m, "flat_count"),
+			LimitUpRatio:    float(m, "limit_up_ratio"),
 		})
+	}
+	if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+		thsSQL := `
+SELECT trade_date,
+       SUM(CASE WHEN COALESCE(open_num, 0) = 0 THEN 1 ELSE 0 END) AS limit_up_sealed,
+       SUM(CASE WHEN COALESCE(open_num, 0) > 0 THEN 1 ELSE 0 END) AS limit_up_opened
+FROM limit_list_ths
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date`
+		thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
+		if thsErr == nil {
+			byDate := make(map[string]*struct{ sealed, opened int })
+			for _, m := range thsRows {
+				byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
+					sealed: int_(m, "limit_up_sealed"),
+					opened: int_(m, "limit_up_opened"),
+				}
+			}
+			for i := range out {
+				if v, ok := byDate[out[i].TradeDate]; ok {
+					out[i].LimitUpSealed = v.sealed
+					out[i].LimitUpOpened = v.opened
+				}
+			}
+		}
 	}
 	return out, nil
 }
 
 // GetByDateAndType 涨跌停个股列表（limitType: up/down）
+// 涨停时若有 limit_list_ths 表则以其为主表，直接使用 lu_desc 作为涨停原因；否则用 limit_list_d。
 func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType string) ([]analysis.LimitStock, error) {
 	threshold := 9.8
 	if limitType == "down" {
@@ -267,7 +297,25 @@ FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l.pct_chg >= ?
 ORDER BY l.first_time`
-	rows, err := r.db.Query(ctx, sql, tradeDate, threshold)
+	args := []interface{}{tradeDate, threshold}
+	if limitType == "up" {
+		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+			// 以 limit_list_ths 为主表，保证涨停原因来自 lu_desc；缺字段时用 limit_list_d 补
+			sql = `
+SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name, COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
+       COALESCE(NULLIF(TRIM(ths.lu_desc), ''), l.up_stat, l.limit, '') AS limit_reason,
+       COALESCE(ths.price, l.close, 0) AS close, COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
+       COALESCE(ths.turnover_rate, l.turnover_ratio, 0) AS turnover_rate, COALESCE(ths.turnover, l.amount, 0) AS amount,
+       COALESCE(s.industry, l.industry, '') AS industry
+FROM limit_list_ths ths
+LEFT JOIN limit_list_d l ON l.ts_code = ths.ts_code AND l.trade_date = ths.trade_date AND l.pct_chg >= 9.8
+LEFT JOIN stock_basic s ON s.ts_code = ths.ts_code
+WHERE ths.trade_date = ?
+ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
+			args = []interface{}{tradeDate}
+		}
+	}
+	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -987,7 +1035,7 @@ func (r *Readers) GetLimitUpBySectorByDate(ctx context.Context, tradeDate, secto
 		}
 		out = append(out, analysis.LimitUpBySector{
 			SectorCode: s.SectorCode, SectorName: s.SectorName, SectorType: s.SectorType,
-			StockCount: s.LimitUpCount, TotalStockCount: s.TotalStocks,
+			StockCount: s.LimitUpCount, LimitUpCount: s.LimitUpCount, TotalStockCount: s.TotalStocks,
 			LimitUpRatio: s.LimitUpRatio, AvgPctChg: s.AvgPctChg, Stocks: stkList,
 		})
 	}

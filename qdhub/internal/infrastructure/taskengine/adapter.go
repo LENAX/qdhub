@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
+	"github.com/LENAX/task-engine/pkg/storage"
 	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/domain/shared"
@@ -268,6 +269,12 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 	if instance.ErrorMessage != "" {
 		status.ErrorMessage = &instance.ErrorMessage
 	}
+	// 工作流失败但 instance 未记录错误时，从第一个失败任务补充错误信息，便于 UI 展示
+	if status.Status == "Failed" && (status.ErrorMessage == nil || *status.ErrorMessage == "") {
+		if msg := firstFailedTaskErrorMessage(taskInstances); msg != "" {
+			status.ErrorMessage = &msg
+		}
+	}
 
 	// 获取任务进度时打印正在运行/挂起的任务数量；若有内存快照则同时打印引擎侧计数，便于对比存储滞后
 	if status.Status == "Running" {
@@ -283,6 +290,16 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 	}
 
 	return status, nil
+}
+
+// firstFailedTaskErrorMessage 从任务列表中取第一个失败任务的错误信息，供 UI 展示。
+func firstFailedTaskErrorMessage(taskInstances []*storage.TaskInstance) string {
+	for _, t := range taskInstances {
+		if t != nil && strings.ToUpper(t.Status) == "FAILED" && t.ErrorMessage != "" {
+			return t.ErrorMessage
+		}
+	}
+	return ""
 }
 
 // RegisterWorkflow registers a workflow definition with Task Engine.

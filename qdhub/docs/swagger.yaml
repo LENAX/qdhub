@@ -1109,7 +1109,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: List stocks with optional market/industry/list_status filter
+      description: List stocks with optional market/industry/list_status/query filter.
+        query searches by name, ts_code, symbol.
       parameters:
       - description: Market filter
         in: query
@@ -1122,6 +1123,10 @@ paths:
       - description: List status filter
         in: query
         name: list_status
+        type: string
+      - description: Search by name or code (fuzzy)
+        in: query
+        name: query
         type: string
       - default: 100
         description: Limit
@@ -2369,6 +2374,37 @@ paths:
       security:
       - BearerAuth: []
       summary: Cancel sync execution
+      tags:
+      - SyncPlans
+  /executions/{id}/detail:
+    get:
+      consumes:
+      - application/json
+      description: Get per-API stats and task-level error details for a sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync execution detail
       tags:
       - SyncPlans
   /executions/{id}/pause:

@@ -23,6 +23,7 @@ func setupAPISyncStrategyTestDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to create database: %v", err)
 	}
 
+	_, _ = db.Exec(`DROP TABLE IF EXISTS api_sync_strategies; DROP TABLE IF EXISTS data_sources`)
 	// Create required tables
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS data_sources (
@@ -33,7 +34,8 @@ func setupAPISyncStrategyTestDB(t *testing.T) (*persistence.DB, func()) {
 			doc_url VARCHAR(512),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			common_data_apis TEXT
 		);
 		
 		CREATE TABLE IF NOT EXISTS api_sync_strategies (

@@ -26,13 +26,17 @@ const (
 
 // LimitStats 涨跌停统计（值对象）
 type LimitStats struct {
-	TradeDate      string  `json:"trade_date"`
-	LimitUpCount   int     `json:"limit_up_count"`   // 涨停家数
-	LimitDownCount int     `json:"limit_down_count"` // 跌停家数
-	UpCount        int     `json:"up_count"`         // 上涨家数
-	DownCount      int     `json:"down_count"`       // 下跌家数
-	FlatCount      int     `json:"flat_count"`       // 平盘家数
-	LimitUpRatio   float64 `json:"limit_up_ratio"`   // 涨停比例
+	TradeDate       string  `json:"trade_date"`
+	LimitUpCount    int     `json:"limit_up_count"`    // 涨停家数
+	LimitDownCount  int     `json:"limit_down_count"`  // 跌停家数
+	LimitUpSealed   int     `json:"limit_up_sealed"`   // 涨停封板数（未打开）
+	LimitUpOpened   int     `json:"limit_up_opened"`   // 涨停打开数（炸板）
+	LimitDownSealed int     `json:"limit_down_sealed"` // 跌停封板数
+	LimitDownOpened int     `json:"limit_down_opened"` // 跌停打开数
+	UpCount         int     `json:"up_count"`         // 上涨家数
+	DownCount       int     `json:"down_count"`       // 下跌家数
+	FlatCount       int     `json:"flat_count"`       // 平盘家数
+	LimitUpRatio    float64 `json:"limit_up_ratio"`   // 涨停比例
 }
 
 // LimitStock 涨停股票信息（值对象）
@@ -357,7 +361,8 @@ type LimitUpBySector struct {
 	SectorCode      string         `json:"sector_code"`
 	SectorName      string         `json:"sector_name"`
 	SectorType      string         `json:"sector_type"`
-	StockCount      int            `json:"stock_count"`
+	StockCount      int            `json:"stock_count"`       // 板块涨停家数
+	LimitUpCount    int            `json:"limit_up_count"`    // 与 StockCount 一致，供前端统一使用
 	TotalStockCount int            `json:"total_stock_count"`
 	LimitUpRatio    float64        `json:"limit_up_ratio"`
 	AvgPctChg       float64        `json:"avg_pct_chg"`

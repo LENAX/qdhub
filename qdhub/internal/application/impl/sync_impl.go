@@ -983,11 +983,38 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 		return fmt.Errorf("failed to get tasks: %w", err)
 	}
 
+	// 若工作流报告失败但明细表里所有任务都成功，以明细为准，避免「全部成功却显示失败」
+	effectiveSuccess := req.Success
+	effectiveRecordCount := req.RecordCount
+	if !req.Success {
+		details, derr := s.syncPlanRepo.GetExecutionDetailsByExecutionID(exec.ID)
+		if derr == nil && len(details) > 0 {
+			allSuccess := true
+			var sum int64
+			for _, d := range details {
+				if d.Status != "success" {
+					allSuccess = false
+					break
+				}
+				sum += d.RecordCount
+			}
+			if allSuccess {
+				effectiveSuccess = true
+				effectiveRecordCount = sum
+				logrus.Infof("[HandleExecutionCallback] workflow reported failed but all %d detail rows are success, overriding to success (record_count=%d)", len(details), sum)
+			}
+		}
+	}
+
 	// Write operations using UoW for transaction
 	return s.uow.Do(ctx, func(repos contracts.Repositories) error {
 		// Update execution status
-		if req.Success {
-			exec.MarkSuccess(req.RecordCount)
+		if effectiveSuccess {
+			// 纠正为成功时保留工作流原始错误信息，供前端展示警告、排查引擎问题
+			if !req.Success && req.ErrorMessage != nil {
+				exec.WorkflowErrorMessage = req.ErrorMessage
+			}
+			exec.MarkSuccess(effectiveRecordCount)
 
 			// Update LastSyncedAt for synced tasks
 			for _, task := range tasks {
@@ -1015,7 +1042,7 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 
 		// Update plan status
 		if plan != nil {
-			if req.Success && plan.IncrementalMode && exec.ExecuteParams != nil && exec.ExecuteParams.EndDate != "" {
+			if effectiveSuccess && plan.IncrementalMode && exec.ExecuteParams != nil && exec.ExecuteParams.EndDate != "" {
 				plan.SetLastSuccessfulEndDate(exec.ExecuteParams.EndDate)
 			}
 			// Get next run time from scheduler or calculate it
@@ -1048,6 +1075,19 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallbackByWorkflowInstance(c
 	}
 	if exec == nil {
 		return shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found for workflow "+workflowInstID, nil)
+	}
+
+	// 若回调未携带 recordCount（当前 task-engine handler 传 0），则从明细表汇总一份，确保概览不为 0。
+	if recordCount == 0 {
+		if rows, derr := s.syncPlanRepo.GetExecutionDetailsByExecutionID(exec.ID); derr == nil && len(rows) > 0 {
+			var sum int64
+			for _, r := range rows {
+				if r != nil && r.Status == "success" {
+					sum += r.RecordCount
+				}
+			}
+			recordCount = sum
+		}
 	}
 	return s.HandleExecutionCallback(ctx, contracts.ExecutionCallbackRequest{
 		ExecutionID:  exec.ID,
@@ -1141,6 +1181,29 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 				newStatus = sync.ExecStatusCancelled
 			}
 
+			// 若工作流报告 Failed 但明细表里全部任务成功，以明细为准，改为 Success
+			if newStatus == sync.ExecStatusFailed {
+				details, derr := s.syncPlanRepo.GetExecutionDetailsByExecutionID(executionID)
+				if derr == nil && len(details) > 0 {
+					allSuccess := true
+					var sum int64
+					for _, d := range details {
+						if d.Status != "success" {
+							allSuccess = false
+							break
+						}
+						sum += d.RecordCount
+					}
+					if allSuccess {
+						newStatus = sync.ExecStatusSuccess
+						if wfStatus.ErrorMessage != nil {
+							exec.WorkflowErrorMessage = wfStatus.ErrorMessage
+						}
+						logrus.Infof("[SyncExecution] workflow reported failed but all %d detail rows are success, overriding to success (executionID=%s)", len(details), executionID)
+					}
+				}
+			}
+
 			if newStatus != "" && newStatus != exec.Status {
 				logrus.Infof("[SyncExecution] Auto-syncing status from workflow: executionID=%s, oldStatus=%s, newStatus=%s, workflowStatus=%s",
 					executionID, exec.Status, newStatus, wfStatus.Status)
@@ -1148,7 +1211,14 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 				// Update execution entity
 				switch newStatus {
 				case sync.ExecStatusSuccess:
-					exec.MarkSuccess(exec.RecordCount)
+					recordCount := exec.RecordCount
+					if recordCount == 0 {
+						details, _ := s.syncPlanRepo.GetExecutionDetailsByExecutionID(executionID)
+						for _, d := range details {
+							recordCount += d.RecordCount
+						}
+					}
+					exec.MarkSuccess(recordCount)
 				case sync.ExecStatusFailed:
 					errMsg := ""
 					if wfStatus.ErrorMessage != nil {
@@ -1215,6 +1285,109 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 	// DAO 已按 started_at DESC 排序，第一条即为最新执行
 	latest := execs[0]
 	return s.GetExecutionProgress(ctx, latest.ID)
+}
+
+// RecordTaskResult 记录单次同步任务结果，供 DataSyncSuccess/DataSyncFailure Handler 调用。
+func (s *SyncApplicationServiceImpl) RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error {
+	exec, err := s.syncPlanRepo.GetExecutionByWorkflowInstID(workflowInstID)
+	if err != nil {
+		return fmt.Errorf("get execution by workflow inst id: %w", err)
+	}
+	if exec == nil {
+		return nil // 找不到执行记录时静默跳过，避免 handler 报错影响引擎
+	}
+	status := "success"
+	if !success {
+		status = "failed"
+	}
+	detail := &sync.SyncExecutionDetail{
+		ID:           shared.NewID(),
+		ExecutionID:  exec.ID,
+		TaskID:       taskID,
+		APIName:      apiName,
+		RecordCount:  recordCount,
+		Status:       status,
+		FinishedAt:   ptrTimestamp(shared.Now()),
+	}
+	if errorMessage != "" {
+		detail.ErrorMessage = &errorMessage
+	}
+	return s.syncPlanRepo.AddExecutionDetail(detail)
+}
+
+func ptrTimestamp(t shared.Timestamp) *shared.Timestamp { return &t }
+
+// GetExecutionDetail 返回某次执行的统计与明细。
+func (s *SyncApplicationServiceImpl) GetExecutionDetail(ctx context.Context, executionID shared.ID) (*contracts.ExecutionDetail, error) {
+	exec, err := s.syncPlanRepo.GetPlanExecution(executionID)
+	if err != nil {
+		return nil, fmt.Errorf("get sync execution: %w", err)
+	}
+	if exec == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
+	}
+	rows, err := s.syncPlanRepo.GetExecutionDetailsByExecutionID(executionID)
+	if err != nil {
+		return nil, fmt.Errorf("get execution details: %w", err)
+	}
+	totalTasks := len(rows)
+	var successCount, failedCount int
+	var totalRows int64
+	for _, r := range rows {
+		totalRows += r.RecordCount
+		if r.Status == "success" {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+	errorRate := 0.0
+	if totalTasks > 0 {
+		errorRate = float64(failedCount) / float64(totalTasks)
+	}
+	// 按 API 聚合
+	apiMap := make(map[string]*contracts.ApiSyncStat)
+	for _, r := range rows {
+		st, ok := apiMap[r.APIName]
+		if !ok {
+			st = &contracts.ApiSyncStat{APIName: r.APIName}
+			apiMap[r.APIName] = st
+		}
+		st.TaskCount++
+		st.TotalRows += r.RecordCount
+		if r.Status == "success" {
+			st.SuccessCount++
+		} else {
+			st.FailedCount++
+			if r.ErrorMessage != nil && *r.ErrorMessage != "" {
+				st.ErrorMessages = append(st.ErrorMessages, *r.ErrorMessage)
+			}
+		}
+	}
+	apiStats := make([]contracts.ApiSyncStat, 0, len(apiMap))
+	for _, st := range apiMap {
+		if st.TaskCount > 0 {
+			st.ErrorRate = float64(st.FailedCount) / float64(st.TaskCount)
+		}
+		apiStats = append(apiStats, *st)
+	}
+	out := &contracts.ExecutionDetail{
+		ExecutionID:          exec.ID,
+		PlanID:               exec.SyncPlanID,
+		Status:               exec.Status,
+		RecordCount:          totalRows,
+		ErrorMessage:         exec.ErrorMessage,
+		WorkflowErrorMessage: exec.WorkflowErrorMessage,
+		StartedAt:            exec.StartedAt,
+		FinishedAt:           exec.FinishedAt,
+		TotalTasks:           totalTasks,
+		SuccessCount:         successCount,
+		FailedCount:          failedCount,
+		ErrorRate:            errorRate,
+		ApiStats:             apiStats,
+		DetailRows:   rows,
+	}
+	return out, nil
 }
 
 // ==================== Built-in Workflow Execution (Legacy) ====================
