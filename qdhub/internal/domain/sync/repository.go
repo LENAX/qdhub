@@ -63,6 +63,9 @@ type SyncPlanRepository interface {
 	// GetEnabledPlans 获取所有启用的计划
 	GetEnabledPlans() ([]*SyncPlan, error)
 
+	// GetSchedulablePlans 获取需纳入 cron 触发的计划：有 cron 且状态非 disabled（含 draft/resolved/enabled/running）
+	GetSchedulablePlans() ([]*SyncPlan, error)
+
 	// GetByStatus 按状态获取计划列表
 	GetByStatus(status PlanStatus) ([]*SyncPlan, error)
 }

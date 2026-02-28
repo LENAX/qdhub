@@ -128,10 +128,11 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 
 	// ========== 支持 trade_date（按日期查询全市场）==========
 	// daily：传入单日 trade_date 只能获取一天数据，需将 date range 扩展为多个 trade_date，通过 trade_cal 在 [start_date,end_date] 内截取交易日逐日拉取
-	"daily":       {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"weekly":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"monthly":     {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"daily_basic": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"daily": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"weekly": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"monthly": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	// daily_basic：Tushare 单次最多返回 6000 条，用 start_date/end_date 大范围只拿到约一天数据，需按 trade_date 逐日拉取才能覆盖日期范围
+	"daily_basic": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	// adj_factor：同 daily，按 trade_date 从 trade_cal 截取日期范围逐日拉取
 	"adj_factor":    {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"top_list":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},

@@ -509,6 +509,10 @@ func (c *Container) runMigrations() error {
 	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/013_sync_execution_workflow_error_message.up.sql"); err != nil {
 		return fmt.Errorf("failed to run 013_sync_execution_workflow_error_message: %w", err)
 	}
+	// 014_daily_basic_sync_strategy_fix：daily_basic 按 trade_date 逐日拉取以覆盖日期范围
+	if err := c.runMigrationFile("./migrations/014_daily_basic_sync_strategy_fix.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 014_daily_basic_sync_strategy_fix: %w", err)
+	}
 
 	// 008_seed_guest_user (driver-specific)
 	if err := c.runGuestSeed(); err != nil {
@@ -868,9 +872,9 @@ func (c *Container) initApplicationServices() error {
 	return nil
 }
 
-// restoreScheduledPlans re-registers enabled plans with cron expression to the scheduler.
+// restoreScheduledPlans re-registers schedulable plans (non-disabled with cron) to the scheduler.
 func (c *Container) restoreScheduledPlans(ctx context.Context) error {
-	plans, err := c.SyncPlanRepo.GetEnabledPlans()
+	plans, err := c.SyncPlanRepo.GetSchedulablePlans()
 	if err != nil {
 		return fmt.Errorf("get enabled plans: %w", err)
 	}

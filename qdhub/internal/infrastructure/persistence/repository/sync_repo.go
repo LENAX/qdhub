@@ -251,8 +251,12 @@ func (r *SyncPlanRepositoryImpl) GetByDataStore(dataStoreID shared.ID) ([]*sync.
 
 // GetEnabledPlans retrieves all enabled sync plans.
 func (r *SyncPlanRepositoryImpl) GetEnabledPlans() ([]*sync.SyncPlan, error) {
-	// Use external transaction if available for read consistency
 	return r.syncPlanDAO.GetByStatus(r.tx, sync.PlanStatusEnabled)
+}
+
+// GetSchedulablePlans retrieves plans that should be scheduled (not disabled, with cron set).
+func (r *SyncPlanRepositoryImpl) GetSchedulablePlans() ([]*sync.SyncPlan, error) {
+	return r.syncPlanDAO.GetSchedulablePlans(r.tx)
 }
 
 // GetByStatus retrieves sync plans by status.

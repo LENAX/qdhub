@@ -194,6 +194,31 @@ func (d *SyncPlanDAO) GetByStatus(tx *sqlx.Tx, status sync.PlanStatus) ([]*sync.
 	return entities, nil
 }
 
+// GetSchedulablePlans returns plans that have a cron expression and are not disabled
+// (status in draft, resolved, enabled, running). Used to restore cron schedules on startup.
+func (d *SyncPlanDAO) GetSchedulablePlans(tx *sqlx.Tx) ([]*sync.SyncPlan, error) {
+	query := `SELECT * FROM sync_plan WHERE status != ? AND cron_expression IS NOT NULL AND cron_expression != ''`
+	var rows []SyncPlanRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, sync.PlanStatusDisabled.String())
+	} else {
+		err = d.DB().Select(&rows, query, sync.PlanStatusDisabled.String())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schedulable plans: %w", err)
+	}
+	entities := make([]*sync.SyncPlan, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(&row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
 // toRow converts domain entity to database row.
 func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	selectedAPIs, err := entity.MarshalSelectedAPIsJSON()

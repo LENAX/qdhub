@@ -18,6 +18,31 @@ func DataSyncStartHandler(tc *task.TaskContext) {
 		tc.TaskName, tc.TaskID, tc.WorkflowInstanceID)
 }
 
+// sumCountFromSubTaskResults 从模板任务的子任务结果中汇总 count，用于动态生成任务的执行历史数量统计。
+// 当模板任务（如 GenerateDataSyncSubTasks）的 _result_data 仅有 generated/api_name 无 count 时，
+// 若引擎已注入子任务结果，则汇总各子任务的 count 返回；否则返回 0。
+func sumCountFromSubTaskResults(tc *task.TaskContext) int64 {
+	results := tc.GetSubTaskResults()
+	var sum int64
+	for _, r := range results {
+		if !r.IsSuccess() || r.Result == nil {
+			continue
+		}
+		v := r.Result["count"]
+		switch n := v.(type) {
+		case int:
+			sum += int64(n)
+		case int32:
+			sum += int64(n)
+		case int64:
+			sum += n
+		case float64:
+			sum += int64(n)
+		}
+	}
+	return sum
+}
+
 // DataSyncSuccessHandler handles successful data sync tasks.
 func DataSyncSuccessHandler(tc *task.TaskContext) {
 	logrus.Printf("[DataSync] ✅ Task succeeded - Task: %s, TaskID: %s",
@@ -60,21 +85,35 @@ func DataSyncSuccessHandler(tc *task.TaskContext) {
 				logrus.Printf("[DataSync] 🔄 Generated %v sub-tasks", generated)
 			}
 
-			// Persist per-task detail for stats/debugging (best-effort; must not break workflow)
-			func() {
-				defer func() { _ = recover() }()
-				invoker, ok := tc.GetDependency("SyncCallbackInvoker")
-				if ok && invoker != nil {
-					type recorder interface {
-						RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
-					}
-					if svc, ok := invoker.(recorder); ok && apiName != "" {
-						if err := svc.RecordTaskResult(context.Background(), tc.WorkflowInstanceID, apiName, tc.TaskID, count64, true, ""); err != nil {
-							logrus.Warnf("[DataSync] record task result failed: %v", err)
+			// 动态生成的任务：模板任务返回 generated/api_name 无 count 时，尝试从子任务结果聚合（兼容引擎未在子任务完成时回调的场景）
+			if count64 == 0 && apiName != "" {
+				if agg := sumCountFromSubTaskResults(tc); agg > 0 {
+					count64 = agg
+					logrus.Printf("[DataSync] 📊 从 %s 子任务结果聚合 record_count=%d", apiName, count64)
+				}
+			}
+
+			// 模板任务仅有 generated、无 count 且未聚合到子任务 count 时，不写入明细，由各子任务完成时各自写入（避免一条 0 的冗余行）
+			_, isTemplateOnly := resultMap["generated"]
+			if isTemplateOnly && count64 == 0 {
+				// skip RecordTaskResult
+			} else {
+				// Persist per-task detail for stats/debugging (best-effort; must not break workflow)
+				func() {
+					defer func() { _ = recover() }()
+					invoker, ok := tc.GetDependency("SyncCallbackInvoker")
+					if ok && invoker != nil {
+						type recorder interface {
+							RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
+						}
+						if svc, ok := invoker.(recorder); ok && apiName != "" {
+							if err := svc.RecordTaskResult(context.Background(), tc.WorkflowInstanceID, apiName, tc.TaskID, count64, true, ""); err != nil {
+								logrus.Warnf("[DataSync] record task result failed: %v", err)
+							}
 						}
 					}
-				}
-			}()
+				}()
+			}
 		}
 	}
 }

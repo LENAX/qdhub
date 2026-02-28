@@ -210,7 +210,8 @@ func (m *MockSyncPlanRepository) GetExecutionDetailsByExecutionID(executionID sh
 func (m *MockSyncPlanRepository) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }
-func (m *MockSyncPlanRepository) GetEnabledPlans() ([]*sync.SyncPlan, error) { return nil, nil }
+func (m *MockSyncPlanRepository) GetEnabledPlans() ([]*sync.SyncPlan, error)      { return nil, nil }
+func (m *MockSyncPlanRepository) GetSchedulablePlans() ([]*sync.SyncPlan, error) { return nil, nil }
 func (m *MockSyncPlanRepository) GetByStatus(status sync.PlanStatus) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }

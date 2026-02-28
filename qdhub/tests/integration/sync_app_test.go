@@ -77,6 +77,14 @@ func (m *MockSyncPlanScheduler) UnschedulePlan(planID string) {
 	delete(m.scheduledPlans, planID)
 }
 
+func (m *MockSyncPlanScheduler) GetScheduledPlanIDs() []string {
+	ids := make([]string, 0, len(m.scheduledPlans))
+	for id := range m.scheduledPlans {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (m *MockSyncPlanScheduler) GetNextRunTime(planID string) *interface{} {
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/sirupsen/logrus"
 
 	domainSync "qdhub/internal/domain/sync"
 )
@@ -69,11 +70,11 @@ func (s *CronScheduler) SchedulePlan(planID string, cronExpr string) error {
 	// Add new schedule
 	entryID, err := s.cron.AddFunc(cronExpr, func() {
 		if s.jobHandler != nil {
+			logrus.Infof("[CronScheduler] Triggering scheduled run for plan %s", planID)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 			if err := s.jobHandler.ExecuteScheduledJob(ctx, planID); err != nil {
-				// Log error but don't panic - the job will run again on next schedule
-				fmt.Printf("[CronScheduler] Failed to execute plan %s: %v\n", planID, err)
+				logrus.Warnf("[CronScheduler] Failed to execute plan %s: %v", planID, err)
 			}
 		}
 	})
@@ -82,6 +83,7 @@ func (s *CronScheduler) SchedulePlan(planID string, cronExpr string) error {
 	}
 
 	s.entryIDs[planID] = entryID
+	logrus.Infof("[CronScheduler] Plan %s scheduled with cron %q", planID, cronExpr)
 	return nil
 }
 
@@ -94,6 +96,17 @@ func (s *CronScheduler) UnschedulePlan(planID string) {
 		s.cron.Remove(entryID)
 		delete(s.entryIDs, planID)
 	}
+}
+
+// GetScheduledPlanIDs returns IDs of plans currently registered in the scheduler.
+func (s *CronScheduler) GetScheduledPlanIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.entryIDs))
+	for id := range s.entryIDs {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // IsScheduled returns true if the plan is currently scheduled.

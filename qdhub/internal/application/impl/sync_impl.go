@@ -110,6 +110,7 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		return nil, fmt.Errorf("failed to create sync plan: %w", err)
 	}
 
+	s.reconcileScheduledPlans()
 	return plan, nil
 }
 
@@ -158,7 +159,33 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 		plan.ResolvedAPIs = nil
 	}
 	if req.CronExpression != nil {
-		plan.SetCronExpression(*req.CronExpression)
+		newCron := *req.CronExpression
+		if newCron != "" {
+			if err := s.cronCalculator.ParseCronExpression(newCron); err != nil {
+				return fmt.Errorf("invalid cron expression: %w", err)
+			}
+		}
+		plan.SetCronExpression(newCron)
+		// 非 disabled 即纳入 cron：resolved/enabled 等都会同步到调度器
+		if plan.Status != sync.PlanStatusDisabled {
+			if newCron != "" {
+				nextRunTime, err := s.cronCalculator.CalculateNextRunTime(newCron, time.Now())
+				if err != nil {
+					return fmt.Errorf("failed to calculate next run time: %w", err)
+				}
+				plan.NextExecuteAt = nextRunTime
+				if s.planScheduler != nil {
+					if err := s.planScheduler.SchedulePlan(id.String(), newCron); err != nil {
+						return fmt.Errorf("failed to reschedule plan: %w", err)
+					}
+				}
+			} else {
+				plan.NextExecuteAt = nil
+				if s.planScheduler != nil {
+					s.planScheduler.UnschedulePlan(id.String())
+				}
+			}
+		}
 	}
 	if req.DefaultExecuteParams != nil {
 		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
@@ -174,6 +201,7 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 		return fmt.Errorf("failed to update sync plan: %w", err)
 	}
 
+	s.reconcileScheduledPlans()
 	return nil
 }
 
@@ -196,6 +224,9 @@ func (s *SyncApplicationServiceImpl) DeleteSyncPlan(ctx context.Context, id shar
 		return fmt.Errorf("failed to delete sync plan: %w", err)
 	}
 
+	if s.planScheduler != nil {
+		s.planScheduler.UnschedulePlan(id.String())
+	}
 	return nil
 }
 
@@ -935,15 +966,13 @@ func (s *SyncApplicationServiceImpl) UpdatePlanSchedule(ctx context.Context, pla
 
 	plan.SetCronExpression(cronExpression)
 
-	// Recalculate next run time and reschedule if plan is enabled
-	if plan.Status == sync.PlanStatusEnabled {
+	// 非 disabled 即纳入 cron
+	if plan.Status != sync.PlanStatusDisabled {
 		nextRunTime, err := s.cronCalculator.CalculateNextRunTime(cronExpression, time.Now())
 		if err != nil {
 			return fmt.Errorf("failed to calculate next run time: %w", err)
 		}
 		plan.NextExecuteAt = nextRunTime
-
-		// Reschedule with new expression
 		if s.planScheduler != nil {
 			if err := s.planScheduler.SchedulePlan(planID.String(), cronExpression); err != nil {
 				return fmt.Errorf("failed to reschedule plan: %w", err)
@@ -956,6 +985,35 @@ func (s *SyncApplicationServiceImpl) UpdatePlanSchedule(ctx context.Context, pla
 	}
 
 	return nil
+}
+
+// reconcileScheduledPlans 以 DB 为准全量同步调度器：应被调度的全部注册，不应被调度的从调度器移除。
+// 在 CreateSyncPlan / UpdateSyncPlan 持久化后调用；Disable/Delete 已单独 UnschedulePlan。
+func (s *SyncApplicationServiceImpl) reconcileScheduledPlans() {
+	if s.planScheduler == nil {
+		return
+	}
+	plans, err := s.syncPlanRepo.GetSchedulablePlans()
+	if err != nil {
+		logrus.Warnf("[SyncPlan] reconcileScheduledPlans: get schedulable plans failed: %v", err)
+		return
+	}
+	schedulableIDs := make(map[string]struct{})
+	for _, p := range plans {
+		if p.CronExpression != nil && *p.CronExpression != "" {
+			id := p.ID.String()
+			schedulableIDs[id] = struct{}{}
+			if err := s.planScheduler.SchedulePlan(id, *p.CronExpression); err != nil {
+				logrus.Warnf("[SyncPlan] reconcileScheduledPlans: schedule plan %s failed: %v", id, err)
+				continue
+			}
+		}
+	}
+	for _, id := range s.planScheduler.GetScheduledPlanIDs() {
+		if _, ok := schedulableIDs[id]; !ok {
+			s.planScheduler.UnschedulePlan(id)
+		}
+	}
 }
 
 // ==================== Callback Handlers ====================

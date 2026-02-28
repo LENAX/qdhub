@@ -56,6 +56,9 @@ type PlanScheduler interface {
 	// UnschedulePlan removes a plan from the scheduler.
 	UnschedulePlan(planID string)
 
+	// GetScheduledPlanIDs returns IDs of plans currently registered in the scheduler (for reconciliation).
+	GetScheduledPlanIDs() []string
+
 	// IsScheduled returns true if the plan is currently scheduled.
 	IsScheduled(planID string) bool
 
