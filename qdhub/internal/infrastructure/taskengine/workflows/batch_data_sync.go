@@ -128,8 +128,8 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 
 	// ========== 支持 trade_date（按日期查询全市场）==========
 	// daily：传入单日 trade_date 只能获取一天数据，需将 date range 扩展为多个 trade_date，通过 trade_cal 在 [start_date,end_date] 内截取交易日逐日拉取
-	"daily": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
-	"weekly": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"daily":   {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"weekly":  {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"monthly": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	// daily_basic：Tushare 单次最多返回 6000 条，用 start_date/end_date 大范围只拿到约一天数据，需按 trade_date 逐日拉取才能覆盖日期范围
 	"daily_basic": {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
@@ -154,8 +154,8 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	"moneyflow_dc":      {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchStockBasic"}},
 
 	// ========== 龙虎榜相关 API ==========
-	"hsgt_top10":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
-	"ggt_top10":    {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
+	"hsgt_top10":     {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
+	"ggt_top10":      {PreferredParam: "trade_date", SupportDateRange: false, Dependencies: []string{"FetchTradeCal"}},
 	"limit_list_d":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 	"limit_list_ths": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 同花顺涨跌停榜单，涨停原因等详情优先用此表
 	"limit_step":     {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}}, // 涨停连板天梯
@@ -244,12 +244,7 @@ func (p *BatchDataSyncParams) Validate() error {
 	if p.TargetDBPath == "" {
 		return ErrEmptyTargetDBPath
 	}
-	if p.StartDate == "" {
-		return ErrEmptyStartDate
-	}
-	if p.EndDate == "" {
-		return ErrEmptyEndDate
-	}
+	// StartDate/EndDate 可选：仅当计划内 API 包含 date/time/dt 等参数时才由调用方保证非空
 	// APIConfigs 或 APINames 至少有一个不为空
 	if len(p.APINames) == 0 && len(p.APIConfigs) == 0 {
 		return ErrEmptyAPINames
@@ -476,20 +471,20 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		targetDBPath = "${target_db_path}"
 	}
 	startDate := params.GetStartDateTime()
-	if startDate == "" {
+	if startDate == "" && usePlaceholders {
 		startDate = "${start_date}"
 	}
 	endDate := params.GetEndDateTime()
-	if endDate == "" {
+	if endDate == "" && usePlaceholders {
 		endDate = "${end_date}"
 	}
 
 	// 基础参数（含 common_data_apis 供 SyncAPIDataJob 走缓存）
 	baseParams := map[string]interface{}{
-		"data_source_name":  dataSourceName,
-		"token":             token,
-		"target_db_path":    targetDBPath,
-		"common_data_apis":  params.CommonDataAPIs,
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
+		"common_data_apis": params.CommonDataAPIs,
 	}
 
 	// 日期时间参数（支持可选时间）
@@ -514,9 +509,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
 		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
 			"api_name": "trade_cal",
-			"params": map[string]interface{}{
-				"exchange": "SSE", // 只获取上交所日历，其他交易所可以按需添加
-			},
+			"params":   map[string]interface{}{},
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -528,12 +521,13 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	tasks = append(tasks, fetchTradeCalTask)
 	depNames = append(depNames, "FetchTradeCal")
 
-	// Task: 获取股票基础信息
+	// Task: 获取股票基础信息（含上市 L 与退市 D，便于数据质量按 delist_date 算有效区间）
 	fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
 		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
 			"api_name": "stock_basic",
 			"params": map[string]interface{}{
-				"list_status": "L",
+				"list_status": "L,D",
+				"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
 			},
 		})).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
@@ -873,22 +867,17 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 	if targetDBPath == "" {
 		return nil, ErrEmptyTargetDBPath
 	}
-	if startDate == "" {
-		return nil, ErrEmptyStartDate
-	}
-	if endDate == "" {
-		return nil, ErrEmptyEndDate
-	}
+	// startDate/endDate 可为空：仅同步无需日期参数的 API 时由调用方传空即可
 
 	var tasks []*task.Task
 	var depNames []string
 
 	// 基础参数（含 common_data_apis，来自 builder）
 	baseParams := map[string]interface{}{
-		"data_source_name":  dataSourceName,
-		"token":             token,
-		"target_db_path":    targetDBPath,
-		"common_data_apis":  b.params.CommonDataAPIs,
+		"data_source_name": dataSourceName,
+		"token":            token,
+		"target_db_path":   targetDBPath,
+		"common_data_apis": b.params.CommonDataAPIs,
 	}
 
 	// 日期时间参数

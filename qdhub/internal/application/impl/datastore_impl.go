@@ -46,6 +46,9 @@ type QuantDBAdapter interface {
 
 	// Query executes a read-only SQL query and returns rows. Caller must ensure SQL is safe (e.g. table name whitelist).
 	Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error)
+
+	// Execute executes a SQL statement (INSERT, UPDATE, DELETE) and returns affected rows. Caller must ensure SQL is safe.
+	Execute(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) (int64, error)
 }
 
 // NewDataStoreApplicationService creates a new DataStoreApplicationService implementation.

@@ -123,12 +123,7 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 	if req.TargetDBPath == "" {
 		return "", workflows.ErrEmptyTargetDBPath
 	}
-	if req.StartDate == "" {
-		return "", workflows.ErrEmptyStartDate
-	}
-	if req.EndDate == "" {
-		return "", workflows.ErrEmptyEndDate
-	}
+	// StartDate/EndDate 在仅同步无需日期参数的 API（如 stock_basic）时可为空，由调用方（如 ExecuteSyncPlan）根据计划 API 参数决定是否必填
 	if len(req.APIConfigs) == 0 && len(req.APINames) == 0 {
 		return "", workflows.ErrEmptyAPINames
 	}

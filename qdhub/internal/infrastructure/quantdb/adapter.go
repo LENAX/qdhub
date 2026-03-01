@@ -151,6 +151,15 @@ func (a *QuantDBAdapterImpl) Query(ctx context.Context, ds *datastore.QuantDataS
 	return conn.Query(ctx, sql, args...)
 }
 
+// Execute executes a SQL statement (INSERT, UPDATE, DELETE) and returns affected rows.
+func (a *QuantDBAdapterImpl) Execute(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) (int64, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return 0, err
+	}
+	return conn.Execute(ctx, sql, args...)
+}
+
 // InvalidateConnection drops the cached connection for the given data store ID.
 func (a *QuantDBAdapterImpl) InvalidateConnection(id shared.ID) {
 	a.mu.Lock()

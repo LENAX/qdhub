@@ -835,11 +835,7 @@ func (c *Container) initApplicationServices() error {
 		quantDBAdapter,
 	)
 
-	// DataQuality service（独立应用服务，归属 datastore 领域）
-	c.DataQualitySvc = impl.NewDataQualityApplicationService(c.DataStoreRepo, quantDBAdapter)
-
-	// Sync service
-	// 使用 SyncPlan 模型
+	// Sync service（需在 DataQuality 之前创建，因 DataQuality 依赖 SyncSvc 用于一键修复）
 	c.SyncSvc = impl.NewSyncApplicationService(
 		c.SyncPlanRepo,
 		c.CronCalculator,
@@ -852,6 +848,9 @@ func (c *Container) initApplicationServices() error {
 		c.UoW,
 		c.MetadataRepo,
 	)
+
+	// DataQuality service（独立应用服务，归属 datastore 领域，依赖 SyncSvc 用于一键修复）
+	c.DataQualitySvc = impl.NewDataQualityApplicationService(c.DataStoreRepo, c.SyncPlanRepo, quantDBAdapter, c.SyncSvc)
 
 	// Auth service
 	passwordHasher := auth.NewBcryptPasswordHasher(0) // Use default cost

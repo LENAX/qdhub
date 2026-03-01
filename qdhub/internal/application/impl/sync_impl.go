@@ -483,7 +483,9 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			eff.EndTime = p.EndTime
 		}
 	}
-	if eff.StartDate == "" || eff.EndDate == "" {
+	// 仅当计划内任一 API 的参数包含 date/time/dt 等模式时才要求配置日期范围
+	requiresDate := s.planRequiresDateRange(plan)
+	if requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
 		return "", shared.NewDomainError(shared.ErrCodeValidation,
 			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
 	}
@@ -623,6 +625,31 @@ func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
 				strategy.APIName, strategy.PreferredParam, strategy.SupportDateRange)
 		}
 	}
+}
+
+// planRequiresDateRange 根据计划内 API 的请求参数是否包含 date/time/dt 等模式，判断是否必须配置日期范围。
+// 若计划仅同步如 stock_basic 等无日期参数的 API，返回 false，执行时不会强制要求 start_dt/end_dt。
+func (s *SyncApplicationServiceImpl) planRequiresDateRange(plan *sync.SyncPlan) bool {
+	apiNames := plan.ResolvedAPIs
+	if len(apiNames) == 0 {
+		apiNames = plan.SelectedAPIs
+	}
+	if len(apiNames) == 0 {
+		return false
+	}
+	allAPIs, err := s.dataSourceRepo.ListAPIMetadataByDataSource(plan.DataSourceID)
+	if err != nil || len(allAPIs) == 0 {
+		return true // 无法获取元数据时保守要求日期，避免执行时报错
+	}
+	paramNamesByAPI := make(map[string][]string)
+	for _, api := range allAPIs {
+		names := make([]string, 0, len(api.RequestParams))
+		for _, p := range api.RequestParams {
+			names = append(names, p.Name)
+		}
+		paramNamesByAPI[api.Name] = names
+	}
+	return sync.PlanRequiresDateRange(apiNames, paramNamesByAPI)
 }
 
 // strategyToParamDependencies converts an APISyncStrategy to ParamDependency entries.

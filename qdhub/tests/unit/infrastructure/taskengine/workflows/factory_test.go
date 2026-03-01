@@ -209,28 +209,7 @@ func TestBatchDataSyncParams_Validate_MissingFields(t *testing.T) {
 			},
 			expected: workflows.ErrEmptyTargetDBPath,
 		},
-		{
-			name: "missing start_date",
-			params: workflows.BatchDataSyncParams{
-				DataSourceName: "tushare",
-				Token:          "token",
-				TargetDBPath:   "/tmp/db",
-				EndDate:        "20251231",
-				APINames:       []string{"daily"},
-			},
-			expected: workflows.ErrEmptyStartDate,
-		},
-		{
-			name: "missing end_date",
-			params: workflows.BatchDataSyncParams{
-				DataSourceName: "tushare",
-				Token:          "token",
-				TargetDBPath:   "/tmp/db",
-				StartDate:      "20251201",
-				APINames:       []string{"daily"},
-			},
-			expected: workflows.ErrEmptyEndDate,
-		},
+		// StartDate/EndDate 在工作流层为可选；是否必填由调用方（如 ExecuteSyncPlan）根据计划内 API 参数决定
 	}
 
 	for _, tt := range tests {

@@ -39,8 +39,14 @@ func (h *DataStoreHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/datastores/:id/tables", h.ListDatastoreTables)
 	rg.GET("/datastores/:id/tables/:tableName/data", h.GetDatastoreTableData)
 
-	// Data quality: dimension distribution (multi-dim stats for heatmap/bar chart)
-	rg.POST("/datastores/:id/tables/:tableName/dimension-stats", h.GetDimensionDistribution)
+	// Data quality (redesigned)
+	rg.POST("/datastores/:id/tables/:tableName/quality-report", h.GenerateQualityReport)
+	rg.POST("/datastores/:id/tables/:tableName/effective-range", h.GetEffectiveRange)
+	rg.POST("/datastores/:id/tables/:tableName/analyze-missing", h.AnalyzeMissing)
+	rg.POST("/datastores/:id/tables/:tableName/analyze-duplicates", h.AnalyzeDuplicates)
+	rg.POST("/datastores/:id/tables/:tableName/analyze-anomalies", h.AnalyzeAnomalies)
+	rg.POST("/datastores/:id/tables/:tableName/dimension-stats", h.GetSingleDimensionStats)
+	rg.POST("/datastores/:id/tables/:tableName/apply-fix", h.ApplyFix)
 }
 
 // ==================== Data Store Endpoints ====================
@@ -303,9 +309,160 @@ func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
 	Success(c, &contracts.TableDataPage{Rows: rows, Total: total})
 }
 
-// GetDimensionDistribution handles POST /api/v1/datastores/:id/tables/:tableName/dimension-stats
-// 按选定维度统计表数据量分布，返回多维结果（维度数=请求维度数），供前端热力图/条形图展示
-func (h *DataStoreHandler) GetDimensionDistribution(c *gin.Context) {
+// GenerateQualityReport handles POST /api/v1/datastores/:id/tables/:tableName/quality-report
+func (h *DataStoreHandler) GenerateQualityReport(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req QualityReportReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := toQualityReportRequest(id, tableName, &req)
+		result, err := h.dataQualitySvc.GenerateQualityReport(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// GetEffectiveRange handles POST /api/v1/datastores/:id/tables/:tableName/effective-range
+func (h *DataStoreHandler) GetEffectiveRange(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req EffectiveRangeReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.EffectiveRangeRequest{
+			QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
+			EndDate:               req.EndDate,
+			RefTableName:           req.RefTableName,
+			RefDateColumn:         req.RefDateColumn,
+			RefDateColumnEnd:      req.RefDateColumnEnd,
+		}
+		result, err := h.dataQualitySvc.GetEffectiveRange(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// AnalyzeMissing handles POST /api/v1/datastores/:id/tables/:tableName/analyze-missing
+func (h *DataStoreHandler) AnalyzeMissing(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req AnalyzeMissingReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.MissingAnalysisRequest{
+			QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
+			RefTableName:          req.RefTableName,
+			RefDateColumn:         req.RefDateColumn,
+			RefDateColumnEnd:      req.RefDateColumnEnd,
+		}
+		result, err := h.dataQualitySvc.AnalyzeMissing(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// AnalyzeDuplicates handles POST /api/v1/datastores/:id/tables/:tableName/analyze-duplicates
+func (h *DataStoreHandler) AnalyzeDuplicates(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req AnalyzeDuplicatesReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.DuplicateAnalysisRequest{
+			QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
+		}
+		result, err := h.dataQualitySvc.AnalyzeDuplicates(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// AnalyzeAnomalies handles POST /api/v1/datastores/:id/tables/:tableName/analyze-anomalies
+func (h *DataStoreHandler) AnalyzeAnomalies(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req AnalyzeAnomaliesReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.AnomalyAnalysisRequest{
+			QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
+		}
+		result, err := h.dataQualitySvc.AnalyzeAnomalies(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// GetSingleDimensionStats handles POST /api/v1/datastores/:id/tables/:tableName/dimension-stats
+func (h *DataStoreHandler) GetSingleDimensionStats(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req SingleDimensionStatsReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.SingleDimensionStatsRequest{
+			DataStoreID: id,
+			TableName:   tableName,
+			Dimension:   req.Dimension,
+			Filter:      toDimensionFilter(req.Filter),
+			Limit:       req.Limit,
+		}
+		result, err := h.dataQualitySvc.GetSingleDimensionStats(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, result)
+	})
+}
+
+// ApplyFix handles POST /api/v1/datastores/:id/tables/:tableName/apply-fix
+func (h *DataStoreHandler) ApplyFix(c *gin.Context) {
+	h.requireDataQuality(c, func(c *gin.Context, id shared.ID, tableName string) {
+		var req ApplyFixReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, "invalid request body: "+err.Error())
+			return
+		}
+		domainReq := datastore.ApplyFixRequest{
+			DataStoreID:  id,
+			TableName:    tableName,
+			SuggestionID: req.SuggestionID,
+			FixType:      datastore.FixType(req.FixType),
+			Params:       req.Params,
+		}
+		resultID, err := h.dataQualitySvc.ApplyFix(c.Request.Context(), domainReq)
+		if err != nil {
+			HandleError(c, err)
+			return
+		}
+		Success(c, gin.H{"execution_id": resultID.String()})
+	})
+}
+
+func (h *DataStoreHandler) requireDataQuality(c *gin.Context, fn func(*gin.Context, shared.ID, string)) {
 	if h.dataQualitySvc == nil {
 		BadRequest(c, "data quality service not available")
 		return
@@ -316,60 +473,105 @@ func (h *DataStoreHandler) GetDimensionDistribution(c *gin.Context) {
 		BadRequest(c, "table name is required")
 		return
 	}
-	var req DimensionStatsReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
+	fn(c, id, tableName)
+}
+
+func toQualityParams(id shared.ID, tableName, dateCol, entityCol string, pk []string) datastore.QualityAnalysisParams {
+	return datastore.QualityAnalysisParams{
+		DataStoreID:  id,
+		TableName:    tableName,
+		DateColumn:   dateCol,
+		EntityColumn: entityCol,
+		PrimaryKeys:  pk,
 	}
-	domainReq := datastore.DimensionStatsRequest{
-		DataStoreID: id,
-		TableName:   tableName,
-		Dimensions:  make([]datastore.DimensionDef, len(req.Dimensions)),
+}
+
+func toQualityReportRequest(id shared.ID, tableName string, req *QualityReportReq) datastore.QualityReportRequest {
+	return datastore.QualityReportRequest{
+		QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
+		RefTableName:          req.RefTableName,
+		RefDateColumn:         req.RefDateColumn,
+		RefDateColumnEnd:      req.RefDateColumnEnd,
 	}
-	for i, d := range req.Dimensions {
-		domainReq.Dimensions[i] = datastore.DimensionDef{
-			Type:        d.Type,
-			ColumnName:  d.ColumnName,
-			RangeStart:  d.RangeStart,
-			RangeEnd:    d.RangeEnd,
-		}
+}
+
+func toDimensionFilter(f *DimensionFilterReq) *datastore.DimensionFilter {
+	if f == nil || f.ColumnName == "" {
+		return nil
 	}
-	if req.Filter != nil {
-		domainReq.Filter = &datastore.DimensionFilter{
-			ColumnName: req.Filter.ColumnName,
-			Start:      req.Filter.Start,
-			End:        req.Filter.End,
-		}
+	return &datastore.DimensionFilter{
+		ColumnName: f.ColumnName,
+		Start:      f.Start,
+		End:        f.End,
 	}
-	result, err := h.dataQualitySvc.GetDimensionDistribution(c.Request.Context(), domainReq)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, result)
 }
 
 // ==================== Request DTOs ====================
-
-// DimensionStatsReq request body for dimension-stats
-type DimensionStatsReq struct {
-	Dimensions []DimensionDefReq   `json:"dimensions" binding:"required"`
-	Filter     *DimensionFilterReq `json:"filter"`
-}
-
-// DimensionDefReq single dimension definition
-type DimensionDefReq struct {
-	Type       string `json:"type"`                  // "column"
-	ColumnName string `json:"column_name,omitempty"`
-	RangeStart string `json:"range_start,omitempty"`
-	RangeEnd   string `json:"range_end,omitempty"`
-}
 
 // DimensionFilterReq optional filter (e.g. date range)
 type DimensionFilterReq struct {
 	ColumnName string `json:"column_name"`
 	Start      string `json:"start"`
 	End        string `json:"end"`
+}
+
+// QualityReportReq request body for quality-report
+type QualityReportReq struct {
+	DateColumn        string   `json:"date_column" binding:"required"`
+	EntityColumn      string   `json:"entity_column"`
+	PrimaryKeys       []string `json:"primary_keys"`
+	RefTableName      string   `json:"ref_table_name"`
+	RefDateColumn     string   `json:"ref_date_column"`
+	RefDateColumnEnd  string   `json:"ref_date_column_end"`
+}
+
+// EffectiveRangeReq request body for effective-range
+type EffectiveRangeReq struct {
+	DateColumn       string   `json:"date_column" binding:"required"`
+	EntityColumn     string   `json:"entity_column"`
+	PrimaryKeys      []string `json:"primary_keys"`
+	EndDate          string   `json:"end_date"`
+	RefTableName     string   `json:"ref_table_name"`
+	RefDateColumn    string   `json:"ref_date_column"`
+	RefDateColumnEnd string   `json:"ref_date_column_end"`
+}
+
+// AnalyzeMissingReq request body for analyze-missing
+type AnalyzeMissingReq struct {
+	DateColumn       string   `json:"date_column" binding:"required"`
+	EntityColumn     string   `json:"entity_column"`
+	PrimaryKeys      []string `json:"primary_keys"`
+	RefTableName     string   `json:"ref_table_name"`
+	RefDateColumn    string   `json:"ref_date_column"`
+	RefDateColumnEnd string   `json:"ref_date_column_end"`
+}
+
+// AnalyzeDuplicatesReq request body for analyze-duplicates
+type AnalyzeDuplicatesReq struct {
+	DateColumn   string   `json:"date_column" binding:"required"`
+	EntityColumn string  `json:"entity_column"`
+	PrimaryKeys  []string `json:"primary_keys" binding:"required"`
+}
+
+// AnalyzeAnomaliesReq request body for analyze-anomalies
+type AnalyzeAnomaliesReq struct {
+	DateColumn   string   `json:"date_column"`
+	EntityColumn string   `json:"entity_column"`
+	PrimaryKeys  []string `json:"primary_keys"`
+}
+
+// SingleDimensionStatsReq request body for dimension-stats (single dimension)
+type SingleDimensionStatsReq struct {
+	Dimension string             `json:"dimension" binding:"required"`
+	Filter    *DimensionFilterReq `json:"filter"`
+	Limit     int                `json:"limit"`
+}
+
+// ApplyFixReq request body for apply-fix
+type ApplyFixReq struct {
+	SuggestionID string         `json:"suggestion_id"`
+	FixType      string         `json:"fix_type" binding:"required"`
+	Params       map[string]any `json:"params"`
 }
 
 // CreateDataStoreReq represents the request body for creating a data store.
