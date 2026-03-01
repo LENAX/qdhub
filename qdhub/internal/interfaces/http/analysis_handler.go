@@ -2,6 +2,7 @@ package http
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,12 +25,16 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/analysis")
 	{
 		g.GET("/kline", h.GetKLine)
+		g.GET("/trade-cal", h.GetTradeCalendar)
 		g.GET("/stocks", h.ListStocks)
+		g.GET("/stocks/indicators", h.GetStockIndicators)
 		g.GET("/stocks/:ts_code/basic", h.GetStockBasic)
 		g.GET("/indices", h.ListIndices)
 		g.GET("/concepts", h.ListConcepts)
 		g.GET("/financial/indicators", h.GetFinancialIndicators)
-		g.GET("/financial/reports", h.GetFinancialReports)
+		g.GET("/financial/income", h.GetFinancialIncome)
+		g.GET("/financial/balancesheet", h.GetFinancialBalanceSheet)
+		g.GET("/financial/cashflow", h.GetFinancialCashFlow)
 		g.GET("/limit-stats", h.GetLimitStats)
 		g.GET("/limit-stocks", h.GetLimitStockList)
 		g.GET("/limit-up-ladder", h.GetLimitUpLadder)
@@ -101,6 +106,71 @@ func (h *AnalysisHandler) GetKLine(c *gin.Context) {
 	Success(c, data)
 }
 
+// GetStockIndicators handles GET /api/v1/analysis/stocks/indicators
+// @Summary      Get technical indicators
+// @Description  Get MA/RSI/MACD etc. for a stock, same date range and adjust as K-line
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        ts_code     query     string  true   "Stock code (e.g. 000001.SZ)"
+// @Param        start_date  query     string  true   "Start date YYYYMMDD"
+// @Param        end_date    query     string  true   "End date YYYYMMDD"
+// @Param        adjust_type query     string  false  "Adjust type: none, qfq, hfq" default(none)
+// @Param        period      query     string  false  "Period: D, W, M" default(D)
+// @Param        indicators  query     string  true   "Comma-separated: MA5,MA10,MA20,RSI,MACD"
+// @Success      200        {object}  Response
+// @Failure      400        {object}  Response
+// @Failure      500        {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/stocks/indicators [get]
+func (h *AnalysisHandler) GetStockIndicators(c *gin.Context) {
+	tsCode := c.Query("ts_code")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	adjust := c.DefaultQuery("adjust_type", "none")
+	period := c.DefaultQuery("period", "D")
+	indicatorsParam := c.Query("indicators")
+	if tsCode == "" || startDate == "" || endDate == "" || indicatorsParam == "" {
+		BadRequest(c, "ts_code, start_date, end_date, indicators required")
+		return
+	}
+	var indicators []string
+	for _, s := range splitAndTrim(indicatorsParam, ",") {
+		if s != "" {
+			indicators = append(indicators, s)
+		}
+	}
+	if len(indicators) == 0 {
+		BadRequest(c, "indicators must contain at least one of MA5,MA10,MA20,RSI,MACD")
+		return
+	}
+	req := analysis.StockIndicatorRequest{
+		TsCode:     tsCode,
+		StartDate:  startDate,
+		EndDate:    endDate,
+		AdjustType: analysis.AdjustType(adjust),
+		Period:     period,
+		Indicators: indicators,
+	}
+	data, err := h.svc.GetStockIndicators(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, data)
+}
+
+func splitAndTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // ListStocks handles GET /api/v1/analysis/stocks
 // @Summary      List stocks
 // @Description  List stocks with optional market/industry/list_status/query filter. query searches by name, ts_code, symbol.
@@ -141,6 +211,34 @@ func (h *AnalysisHandler) ListStocks(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// GetTradeCalendar handles GET /api/v1/analysis/trade-cal
+// @Summary      Get trading calendar
+// @Description  Returns list of trading dates (cal_date where is_open=1) from trade_cal table for the given range
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        start_date query string true "Start date YYYYMMDD"
+// @Param        end_date   query string true "End date YYYYMMDD"
+// @Success      200 {object} Response
+// @Failure      400 {object} Response
+// @Failure      500 {object} Response
+// @Security     BearerAuth
+// @Router       /analysis/trade-cal [get]
+func (h *AnalysisHandler) GetTradeCalendar(c *gin.Context) {
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	if startDate == "" || endDate == "" {
+		BadRequest(c, "start_date, end_date required")
+		return
+	}
+	dates, err := h.svc.GetTradeCalendar(c.Request.Context(), startDate, endDate)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"dates": dates})
 }
 
 // GetStockBasic handles GET /api/v1/analysis/stocks/:ts_code/basic
@@ -274,23 +372,8 @@ func (h *AnalysisHandler) GetFinancialIndicators(c *gin.Context) {
 	Success(c, gin.H{"total": len(list), "items": list})
 }
 
-// GetFinancialReports handles GET /api/v1/analysis/financial/reports
-// @Summary      Get financial reports
-// @Description  Get financial reports for a stock
-// @Tags         Analysis
-// @Accept       json
-// @Produce      json
-// @Param        ts_code     query     string  true   "Stock code"
-// @Param        start_date  query     string  false  "Start date YYYYMMDD"
-// @Param        end_date    query     string  false  "End date YYYYMMDD"
-// @Param        limit       query     int     false  "Limit" default(50)
-// @Param        offset      query     int     false  "Offset" default(0)
-// @Success      200        {object}  Response
-// @Failure      400        {object}  Response
-// @Failure      500        {object}  Response
-// @Security     BearerAuth
-// @Router       /analysis/financial/reports [get]
-func (h *AnalysisHandler) GetFinancialReports(c *gin.Context) {
+// getFinancialTableData 通用财报查询，table 由调用方指定
+func (h *AnalysisHandler) getFinancialTableData(c *gin.Context, table string) {
 	tsCode := c.Query("ts_code")
 	if tsCode == "" {
 		BadRequest(c, "ts_code required")
@@ -310,12 +393,30 @@ func (h *AnalysisHandler) GetFinancialReports(c *gin.Context) {
 		TsCode: tsCode, StartDate: startDate, EndDate: endDate, ReportType: reportType,
 		Limit: defaultInt(c.Query("limit"), 50), Offset: defaultInt(c.Query("offset"), 0),
 	}
-	list, err := h.svc.GetFinancialReports(c.Request.Context(), req)
+	list, err := h.svc.GetFinancialTableData(c.Request.Context(), table, req)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
 	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// GetFinancialIncome handles GET /api/v1/analysis/financial/income
+// @Router /analysis/financial/income [get]
+func (h *AnalysisHandler) GetFinancialIncome(c *gin.Context) {
+	h.getFinancialTableData(c, "income")
+}
+
+// GetFinancialBalanceSheet handles GET /api/v1/analysis/financial/balancesheet
+// @Router /analysis/financial/balancesheet [get]
+func (h *AnalysisHandler) GetFinancialBalanceSheet(c *gin.Context) {
+	h.getFinancialTableData(c, "balancesheet")
+}
+
+// GetFinancialCashFlow handles GET /api/v1/analysis/financial/cashflow
+// @Router /analysis/financial/cashflow [get]
+func (h *AnalysisHandler) GetFinancialCashFlow(c *gin.Context) {
+	h.getFinancialTableData(c, "cashflow")
 }
 
 // GetLimitStats handles GET /api/v1/analysis/limit-stats
@@ -397,7 +498,11 @@ func (h *AnalysisHandler) GetLimitUpLadder(c *gin.Context) {
 		HandleError(c, err)
 		return
 	}
-	Success(c, gin.H{"trade_date": tradeDate, "ladders": list})
+	FirstLimitUp, _ := h.svc.GetFirstLimitUpStocks(c.Request.Context(), tradeDate)
+	if FirstLimitUp == nil {
+		FirstLimitUp = []analysis.LimitStock{}
+	}
+	Success(c, gin.H{"trade_date": tradeDate, "ladders": list, "first_board_stocks": FirstLimitUp})
 }
 
 // GetLimitUpComparison handles GET /api/v1/analysis/limit-up-comparison
@@ -761,9 +866,9 @@ func (h *AnalysisHandler) ListNews(c *gin.Context) {
 // @Router       /analysis/factors [post]
 func (h *AnalysisHandler) CalculateFactors(c *gin.Context) {
 	var body struct {
-		TsCodes   []string               `json:"ts_codes"`
-		StartDate string                 `json:"start_date"`
-		EndDate   string                 `json:"end_date"`
+		TsCodes   []string                    `json:"ts_codes"`
+		StartDate string                      `json:"start_date"`
+		EndDate   string                      `json:"end_date"`
 		Factors   []analysis.FactorExpression `json:"factors"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {

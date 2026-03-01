@@ -534,6 +534,15 @@ paths:
       summary: Calculate factors
       tags:
       - Analysis
+  /analysis/financial/balancesheet:
+    get:
+      responses: {}
+  /analysis/financial/cashflow:
+    get:
+      responses: {}
+  /analysis/financial/income:
+    get:
+      responses: {}
   /analysis/financial/indicators:
     get:
       consumes:
@@ -581,55 +590,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Get financial indicators
-      tags:
-      - Analysis
-  /analysis/financial/reports:
-    get:
-      consumes:
-      - application/json
-      description: Get financial reports for a stock
-      parameters:
-      - description: Stock code
-        in: query
-        name: ts_code
-        required: true
-        type: string
-      - description: Start date YYYYMMDD
-        in: query
-        name: start_date
-        type: string
-      - description: End date YYYYMMDD
-        in: query
-        name: end_date
-        type: string
-      - default: 50
-        description: Limit
-        in: query
-        name: limit
-        type: integer
-      - default: 0
-        description: Offset
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/http.Response'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/http.Response'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/http.Response'
-      security:
-      - BearerAuth: []
-      summary: Get financial reports
       tags:
       - Analysis
   /analysis/indices:
@@ -1183,6 +1143,43 @@ paths:
       security:
       - BearerAuth: []
       summary: Get stock basic info
+      tags:
+      - Analysis
+  /analysis/trade-cal:
+    get:
+      consumes:
+      - application/json
+      description: Returns list of trading dates (cal_date where is_open=1) from trade_cal
+        table for the given range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get trading calendar
       tags:
       - Analysis
   /api-sync-strategies/{id}:

@@ -146,6 +146,11 @@ type LimitUpLadderReader interface {
 	GetByDate(ctx context.Context, tradeDate string) ([]LimitUpLadder, error)
 }
 
+// FirstLimitUpReader 首板列表（当日涨停且不在 limit_step 中的股票）
+type FirstLimitUpReader interface {
+	GetByDate(ctx context.Context, tradeDate string) ([]LimitStock, error)
+}
+
 // LimitUpComparisonReader 涨停今日/昨日对比
 type LimitUpComparisonReader interface {
 	GetComparison(ctx context.Context, todayDate string) (*LimitUpComparison, error)
@@ -171,7 +176,12 @@ type FinancialIndicatorReader interface {
 	GetIndicators(ctx context.Context, req FinancialIndicatorRequest) ([]FinancialIndicator, error)
 }
 
-// FinancialReportReader 财报数据
+// FinancialReportReader 财报数据（income / balancesheet / cashflow 三张独立表）
 type FinancialReportReader interface {
-	GetReports(ctx context.Context, req FinancialReportRequest) ([]FinancialReport, error)
+	GetTableData(ctx context.Context, table string, req FinancialReportRequest) ([]map[string]any, error)
+}
+
+// TradeCalendarReader 交易日历（来自 trade_cal 表，cal_date + is_open）
+type TradeCalendarReader interface {
+	GetTradingDates(ctx context.Context, startDate, endDate string) ([]string, error)
 }

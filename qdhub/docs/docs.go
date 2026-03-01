@@ -417,6 +417,21 @@ const docTemplate = `{
                 }
             }
         },
+        "/analysis/financial/balancesheet": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/analysis/financial/cashflow": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/analysis/financial/income": {
+            "get": {
+                "responses": {}
+            }
+        },
         "/analysis/financial/indicators": {
             "get": {
                 "security": [
@@ -435,81 +450,6 @@ const docTemplate = `{
                     "Analysis"
                 ],
                 "summary": "Get financial indicators",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Stock code",
-                        "name": "ts_code",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Start date YYYYMMDD",
-                        "name": "start_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "End date YYYYMMDD",
-                        "name": "end_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Limit",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Offset",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/analysis/financial/reports": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get financial reports for a stock",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Analysis"
-                ],
-                "summary": "Get financial reports",
                 "parameters": [
                     {
                         "type": "string",
@@ -1395,6 +1335,62 @@ const docTemplate = `{
                         "description": "Stock code (e.g. 000001.SZ)",
                         "name": "ts_code",
                         "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/trade-cal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns list of trading dates (cal_date where is_open=1) from trade_cal table for the given range",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get trading calendar",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
                         "required": true
                     }
                 ],

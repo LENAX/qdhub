@@ -2,37 +2,40 @@ package analysis
 
 import (
 	"context"
+	"math"
 	"sort"
 )
 
 // analysisServiceImpl 实现 AnalysisService，仅依赖 Reader 接口，不执行 SQL
 type analysisServiceImpl struct {
-	kLineReader              KLineReader
-	limitStatsReader         LimitStatsReader
-	limitStockListReader     LimitStockListReader
-	limitLadderReader        LimitLadderReader
-	limitComparisonReader    LimitComparisonReader
-	sectorLimitStatsReader   SectorLimitStatsReader
-	sectorLimitStocksReader  SectorLimitStocksReader
-	conceptHeatReader        ConceptHeatReader
-	conceptStocksReader      ConceptStocksReader
-	conceptRotationReader    ConceptRotationReader
-	stockListReader          StockListReader
-	indexListReader          IndexListReader
-	conceptListReader        ConceptListReader
-	dragonTigerReader        DragonTigerReader
-	moneyFlowReader          MoneyFlowReader
-	popularityRankReader     PopularityRankReader
-	newsReader               NewsReader
-	limitUpListReader        LimitUpListReader
-	limitUpLadderReader      LimitUpLadderReader
-	limitUpComparisonReader  LimitUpComparisonReader
-	limitUpBySectorReader    LimitUpBySectorReader
+	kLineReader                 KLineReader
+	limitStatsReader            LimitStatsReader
+	limitStockListReader        LimitStockListReader
+	limitLadderReader           LimitLadderReader
+	limitComparisonReader       LimitComparisonReader
+	sectorLimitStatsReader      SectorLimitStatsReader
+	sectorLimitStocksReader     SectorLimitStocksReader
+	conceptHeatReader           ConceptHeatReader
+	conceptStocksReader         ConceptStocksReader
+	conceptRotationReader       ConceptRotationReader
+	stockListReader             StockListReader
+	indexListReader             IndexListReader
+	conceptListReader           ConceptListReader
+	dragonTigerReader           DragonTigerReader
+	moneyFlowReader             MoneyFlowReader
+	popularityRankReader        PopularityRankReader
+	newsReader                  NewsReader
+	limitUpListReader           LimitUpListReader
+	limitUpLadderReader         LimitUpLadderReader
+	limitUpComparisonReader     LimitUpComparisonReader
+	limitUpBySectorReader       LimitUpBySectorReader
+	FirstLimitUpReader          FirstLimitUpReader
 	limitUpStocksBySectorReader LimitUpStocksBySectorReader
-	stockBasicReader         StockBasicReader
-	financialIndicatorReader FinancialIndicatorReader
-	financialReportReader    FinancialReportReader
-	customQueryExecutor      CustomQueryExecutor
+	stockBasicReader            StockBasicReader
+	financialIndicatorReader    FinancialIndicatorReader
+	financialReportReader       FinancialReportReader
+	customQueryExecutor         CustomQueryExecutor
+	tradeCalendarReader         TradeCalendarReader
 }
 
 // NewAnalysisService 构造分析领域服务，依赖各 Reader 与 CustomQueryExecutor
@@ -58,18 +61,20 @@ func NewAnalysisService(
 	limitUpLadderReader LimitUpLadderReader,
 	limitUpComparisonReader LimitUpComparisonReader,
 	limitUpBySectorReader LimitUpBySectorReader,
+	FirstLimitUpReader FirstLimitUpReader,
 	limitUpStocksBySectorReader LimitUpStocksBySectorReader,
 	stockBasicReader StockBasicReader,
 	financialIndicatorReader FinancialIndicatorReader,
 	financialReportReader FinancialReportReader,
 	customQueryExecutor CustomQueryExecutor,
+	tradeCalendarReader TradeCalendarReader,
 ) AnalysisService {
 	return &analysisServiceImpl{
 		kLineReader:                 kLineReader,
 		limitStatsReader:            limitStatsReader,
 		limitStockListReader:        limitStockListReader,
 		limitLadderReader:           limitLadderReader,
-		limitComparisonReader:      limitComparisonReader,
+		limitComparisonReader:       limitComparisonReader,
 		sectorLimitStatsReader:      sectorLimitStatsReader,
 		sectorLimitStocksReader:     sectorLimitStocksReader,
 		conceptHeatReader:           conceptHeatReader,
@@ -85,12 +90,14 @@ func NewAnalysisService(
 		limitUpListReader:           limitUpListReader,
 		limitUpLadderReader:         limitUpLadderReader,
 		limitUpComparisonReader:     limitUpComparisonReader,
-		limitUpBySectorReader:        limitUpBySectorReader,
-		limitUpStocksBySectorReader:  limitUpStocksBySectorReader,
+		limitUpBySectorReader:       limitUpBySectorReader,
+		FirstLimitUpReader:          FirstLimitUpReader,
+		limitUpStocksBySectorReader: limitUpStocksBySectorReader,
 		stockBasicReader:            stockBasicReader,
 		financialIndicatorReader:    financialIndicatorReader,
 		financialReportReader:       financialReportReader,
-		customQueryExecutor:          customQueryExecutor,
+		customQueryExecutor:         customQueryExecutor,
+		tradeCalendarReader:         tradeCalendarReader,
 	}
 }
 
@@ -103,47 +110,178 @@ func (s *analysisServiceImpl) GetKLine(ctx context.Context, req KLineRequest) ([
 	return applyAdjustAndToKLineData(rows, req.AdjustType), nil
 }
 
+// GetStockIndicators 基于 K 线计算技术指标，与 K 线同区间、同复权
+func (s *analysisServiceImpl) GetStockIndicators(ctx context.Context, req StockIndicatorRequest) ([]StockIndicatorItem, error) {
+	klineReq := KLineRequest{
+		TsCode: req.TsCode, StartDate: req.StartDate, EndDate: req.EndDate,
+		AdjustType: req.AdjustType, Period: req.Period,
+	}
+	klines, err := s.GetKLine(ctx, klineReq)
+	if err != nil || len(klines) == 0 {
+		return nil, err
+	}
+	closes := make([]float64, len(klines))
+	for i := range klines {
+		closes[i] = klines[i].Close
+	}
+	out := make([]StockIndicatorItem, 0, len(req.Indicators))
+	seen := make(map[string]bool)
+	for _, name := range req.Indicators {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		var item StockIndicatorItem
+		switch name {
+		case "MA5":
+			item = StockIndicatorItem{Name: "MA5", Values: calcMA(closes, 5), Color: "#ff6b6b"}
+		case "MA10":
+			item = StockIndicatorItem{Name: "MA10", Values: calcMA(closes, 10), Color: "#4ecdc4"}
+		case "MA20":
+			item = StockIndicatorItem{Name: "MA20", Values: calcMA(closes, 20), Color: "#45b7d1"}
+		case "RSI":
+			item = StockIndicatorItem{Name: "RSI", Values: calcRSI(closes, 14), Color: "#f39c12"}
+		case "MACD":
+			item = StockIndicatorItem{Name: "MACD", Values: calcMACDDIF(closes, 12, 26), Color: "#9b59b6"}
+		default:
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func calcMA(closes []float64, period int) []float64 {
+	out := make([]float64, len(closes))
+	for i := range closes {
+		if i < period-1 {
+			out[i] = 0
+			continue
+		}
+		sum := 0.0
+		for j := i - period + 1; j <= i; j++ {
+			sum += closes[j]
+		}
+		out[i] = round2(sum / float64(period))
+	}
+	return out
+}
+
+func calcRSI(closes []float64, period int) []float64 {
+	out := make([]float64, len(closes))
+	if len(closes) == 0 {
+		return out
+	}
+	out[0] = 50
+	for i := 1; i < len(closes); i++ {
+		gains := 0.0
+		losses := 0.0
+		start := i - period + 1
+		if start < 0 {
+			start = 0
+		}
+		for j := start + 1; j <= i; j++ {
+			ch := closes[j] - closes[j-1]
+			if ch > 0 {
+				gains += ch
+			} else {
+				losses -= ch
+			}
+		}
+		n := float64(i - start)
+		if n == 0 {
+			out[i] = 50
+			continue
+		}
+		avgGain := gains / n
+		avgLoss := losses / n
+		if avgLoss == 0 {
+			out[i] = 100
+			continue
+		}
+		rs := avgGain / avgLoss
+		out[i] = round2(100 - 100/(1+rs))
+	}
+	return out
+}
+
+// calcMACDDIF 返回 MACD DIF 线（12,26），与 K 线等长，前 26 个为 0
+func calcMACDDIF(closes []float64, short, long int) []float64 {
+	out := make([]float64, len(closes))
+	if len(closes) < long {
+		return out
+	}
+	emaShort := ema(closes, short)
+	emaLong := ema(closes, long)
+	for i := range closes {
+		if i < long-1 {
+			out[i] = 0
+			continue
+		}
+		out[i] = round2(emaShort[i] - emaLong[i])
+	}
+	return out
+}
+
+func ema(closes []float64, period int) []float64 {
+	out := make([]float64, len(closes))
+	if len(closes) == 0 {
+		return out
+	}
+	k := 2.0 / float64(period+1)
+	out[0] = closes[0]
+	for i := 1; i < len(closes); i++ {
+		out[i] = closes[i]*k + out[i-1]*(1-k)
+	}
+	return out
+}
+
+// round2 保留两位小数（价格、涨跌幅等展示用）
+func round2(x float64) float64 { return math.Round(x*100) / 100 }
+
+// applyAdjustAndToKLineData 按 Tushare 规则做动态复权：前复权以最近一日为基准，后复权为价格×复权因子；涨跌额/涨跌幅用复权后的 close、pre_close 重算。
 func applyAdjustAndToKLineData(rows []RawDailyRow, adj AdjustType) []KLineData {
 	if len(rows) == 0 {
 		return nil
 	}
-	var firstFactor, latestFactor float64
-	for i, r := range rows {
-		if i == 0 || r.AdjFactor < firstFactor {
-			firstFactor = r.AdjFactor
-		}
-		if r.AdjFactor > latestFactor {
-			latestFactor = r.AdjFactor
-		}
-	}
-	if latestFactor == 0 {
-		latestFactor = 1
-	}
-	if firstFactor == 0 {
-		firstFactor = 1
+	// 前复权基准：查询区间内最近一日的复权因子（rows 已按 trade_date 升序）
+	qfqBase := rows[len(rows)-1].AdjFactor
+	if qfqBase == 0 {
+		qfqBase = 1
 	}
 	out := make([]KLineData, 0, len(rows))
 	for _, r := range rows {
 		var ratio float64
 		switch adj {
 		case AdjustQfq:
-			ratio = r.AdjFactor / latestFactor
+			ratio = r.AdjFactor / qfqBase
 		case AdjustHfq:
-			ratio = r.AdjFactor / firstFactor
+			// 后复权：price * adj_factor（Tushare 写法，不除基准）
+			ratio = r.AdjFactor
+			if ratio == 0 {
+				ratio = 1
+			}
 		default:
 			ratio = 1
 		}
+		closeAdj := round2(r.Close * ratio)
+		preCloseAdj := round2(r.PreClose * ratio)
+		changeAdj := round2(closeAdj - preCloseAdj)
+		pctChgAdj := 0.0
+		if preCloseAdj != 0 {
+			pctChgAdj = round2((changeAdj / preCloseAdj) * 100)
+		}
 		out = append(out, KLineData{
 			TradeDate: r.TradeDate,
-			Open:      r.Open * ratio,
-			High:      r.High * ratio,
-			Low:       r.Low * ratio,
-			Close:     r.Close * ratio,
+			Open:      round2(r.Open * ratio),
+			High:      round2(r.High * ratio),
+			Low:       round2(r.Low * ratio),
+			Close:     closeAdj,
 			Volume:    r.Vol,
-			Amount:    r.Amount,
-			PreClose:  r.PreClose * ratio,
-			Change:    r.Change * ratio,
-			PctChg:    r.PctChg,
+			Amount:    round2(r.Amount),
+			PreClose:  preCloseAdj,
+			Change:    changeAdj,
+			PctChg:    pctChgAdj,
 		})
 	}
 	return out
@@ -221,6 +359,10 @@ func (s *analysisServiceImpl) GetLimitUpLadder(ctx context.Context, tradeDate st
 	return s.limitUpLadderReader.GetByDate(ctx, tradeDate)
 }
 
+func (s *analysisServiceImpl) GetFirstLimitUpStocks(ctx context.Context, tradeDate string) ([]LimitStock, error) {
+	return s.FirstLimitUpReader.GetByDate(ctx, tradeDate)
+}
+
 func (s *analysisServiceImpl) GetLimitUpComparison(ctx context.Context, todayDate string) (*LimitUpComparison, error) {
 	return s.limitUpComparisonReader.GetComparison(ctx, todayDate)
 }
@@ -290,10 +432,14 @@ func (s *analysisServiceImpl) GetFinancialIndicators(ctx context.Context, req Fi
 	return s.financialIndicatorReader.GetIndicators(ctx, req)
 }
 
-func (s *analysisServiceImpl) GetFinancialReports(ctx context.Context, req FinancialReportRequest) ([]FinancialReport, error) {
-	return s.financialReportReader.GetReports(ctx, req)
+func (s *analysisServiceImpl) GetFinancialTableData(ctx context.Context, table string, req FinancialReportRequest) ([]map[string]any, error) {
+	return s.financialReportReader.GetTableData(ctx, table, req)
 }
 
 func (s *analysisServiceImpl) ExecuteReadOnlyQuery(ctx context.Context, req CustomQueryRequest) (*CustomQueryResult, error) {
 	return s.customQueryExecutor.ExecuteReadOnlyQuery(ctx, req)
+}
+
+func (s *analysisServiceImpl) GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error) {
+	return s.tradeCalendarReader.GetTradingDates(ctx, startDate, endDate)
 }

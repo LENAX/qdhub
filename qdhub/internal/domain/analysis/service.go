@@ -6,6 +6,8 @@ import "context"
 type AnalysisService interface {
 	// K线数据
 	GetKLine(ctx context.Context, req KLineRequest) ([]KLineData, error)
+	// 技术指标（基于 K 线，与 K 线同区间、同复权）
+	GetStockIndicators(ctx context.Context, req StockIndicatorRequest) ([]StockIndicatorItem, error)
 
 	// 涨跌停统计
 	GetLimitStats(ctx context.Context, startDate, endDate string) ([]LimitStats, error)
@@ -49,6 +51,8 @@ type AnalysisService interface {
 
 	// 涨停天梯统计（按连板天数）
 	GetLimitUpLadder(ctx context.Context, tradeDate string) ([]LimitUpLadder, error)
+	// 首板列表（当日涨停且不在 limit_step 中的股票）
+	GetFirstLimitUpStocks(ctx context.Context, tradeDate string) ([]LimitStock, error)
 
 	// 涨停今日/昨日对比
 	GetLimitUpComparison(ctx context.Context, todayDate string) (*LimitUpComparison, error)
@@ -71,11 +75,14 @@ type AnalysisService interface {
 	// 财务指标查询
 	GetFinancialIndicators(ctx context.Context, req FinancialIndicatorRequest) ([]FinancialIndicator, error)
 
-	// 财报数据查询
-	GetFinancialReports(ctx context.Context, req FinancialReportRequest) ([]FinancialReport, error)
+	// 财报数据查询（按表名：income / balancesheet / cashflow）
+	GetFinancialTableData(ctx context.Context, table string, req FinancialReportRequest) ([]map[string]any, error)
 
 	// 自定义只读 SQL 查询（高权限，仅 SELECT，受 max_rows/timeout 限制）
 	ExecuteReadOnlyQuery(ctx context.Context, req CustomQueryRequest) (*CustomQueryResult, error)
+
+	// 交易日历：从 trade_cal 表取 is_open=1 的 cal_date，供前端过滤非交易日
+	GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error)
 }
 
 // CustomQueryRequest 自定义查询请求（只读 SQL）
@@ -92,6 +99,23 @@ type KLineRequest struct {
 	EndDate    string     // 结束日期
 	AdjustType AdjustType // 复权类型
 	Period     string     // 周期：D/W/M
+}
+
+// StockIndicatorRequest 技术指标请求（与 K 线同 ts_code/区间/复权/周期）
+type StockIndicatorRequest struct {
+	TsCode     string
+	StartDate  string
+	EndDate    string
+	AdjustType AdjustType
+	Period     string
+	Indicators []string // MA5, MA10, MA20, RSI, MACD
+}
+
+// StockIndicatorItem 单条技术指标（与 K 线一一对应）
+type StockIndicatorItem struct {
+	Name   string    `json:"name"`
+	Values []float64 `json:"values"`
+	Color  string    `json:"color"`
 }
 
 // FactorRequest 因子计算请求

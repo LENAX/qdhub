@@ -234,6 +234,9 @@ type SyncPlan struct {
 	// 增量模式：定时触发时用上次成功执行的 EndDate 作为本次 StartDate，EndDate 为当前日期；首次无记录时用 DefaultExecuteParams
 	IncrementalMode       bool    `json:"incremental_mode"`
 	LastSuccessfulEndDate *string `json:"last_successful_end_date,omitempty"`
+	// 可选：用于取“数据最新日期”的 API（表名）与列名，从目标 DuckDB 执行 MAX(列) 得到
+	IncrementalStartDateAPI    *string `json:"incremental_start_date_api,omitempty"`
+	IncrementalStartDateColumn *string `json:"incremental_start_date_column,omitempty"`
 
 	// 状态
 	Status         PlanStatus  `json:"status"`
