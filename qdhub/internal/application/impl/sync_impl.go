@@ -4,6 +4,7 @@ package impl
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,6 +44,9 @@ type SyncApplicationServiceImpl struct {
 
 	// 依赖：用于查询 api_sync_strategies 补充 param_dependencies
 	metadataRepo metadata.Repository
+
+	// 可选：用于增量模式下从目标 DuckDB 查询 MAX(列) 得到数据最新日期
+	quantDBFactory datastore.QuantDBFactory
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -57,6 +61,7 @@ func NewSyncApplicationService(
 	taskEngineAdapter workflow.TaskEngineAdapter,
 	uow contracts.UnitOfWork,
 	metadataRepo metadata.Repository,
+	quantDBFactory datastore.QuantDBFactory,
 ) contracts.SyncApplicationService {
 	return &SyncApplicationServiceImpl{
 		syncPlanRepo:       syncPlanRepo,
@@ -69,6 +74,7 @@ func NewSyncApplicationService(
 		taskEngineAdapter:  taskEngineAdapter,
 		uow:                uow,
 		metadataRepo:       metadataRepo,
+		quantDBFactory:     quantDBFactory,
 	}
 }
 
@@ -104,6 +110,9 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		plan.SetDefaultExecuteParams(req.DefaultExecuteParams)
 	}
 	plan.SetIncrementalMode(req.IncrementalMode)
+	if req.IncrementalStartDateAPI != "" || req.IncrementalStartDateColumn != "" {
+		plan.SetIncrementalStartDateSource(req.IncrementalStartDateAPI, req.IncrementalStartDateColumn)
+	}
 
 	// Persist
 	if err := s.syncPlanRepo.Create(plan); err != nil {
@@ -192,6 +201,16 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 	}
 	if req.IncrementalMode != nil {
 		plan.SetIncrementalMode(*req.IncrementalMode)
+	}
+	if req.IncrementalStartDateAPI != nil || req.IncrementalStartDateColumn != nil {
+		api, col := "", ""
+		if req.IncrementalStartDateAPI != nil {
+			api = *req.IncrementalStartDateAPI
+		}
+		if req.IncrementalStartDateColumn != nil {
+			col = *req.IncrementalStartDateColumn
+		}
+		plan.SetIncrementalStartDateSource(api, col)
 	}
 
 	plan.UpdatedAt = shared.Now()
@@ -483,8 +502,33 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			eff.EndTime = p.EndTime
 		}
 	}
-	// 仅当计划内任一 API 的参数包含 date/time/dt 等模式时才要求配置日期范围
+	// 增量模式且日期未传：用 min(上次成功结束日, 数据最新日期) 作为起始，结束日默认为今天
 	requiresDate := s.planRequiresDateRange(plan)
+	if requiresDate && plan.IncrementalMode && (eff.StartDate == "" || eff.EndDate == "") {
+		var startCandidates []string
+		if plan.LastSuccessfulEndDate != nil && *plan.LastSuccessfulEndDate != "" {
+			startCandidates = append(startCandidates, *plan.LastSuccessfulEndDate)
+		}
+		if plan.IncrementalStartDateAPI != nil && plan.IncrementalStartDateColumn != nil &&
+			*plan.IncrementalStartDateAPI != "" && *plan.IncrementalStartDateColumn != "" && s.quantDBFactory != nil {
+			dataDate := s.getMaxDateFromTargetDB(ctx, targetDBPath, *plan.IncrementalStartDateAPI, *plan.IncrementalStartDateColumn)
+			if dataDate != "" {
+				startCandidates = append(startCandidates, dataDate)
+			}
+		}
+		if len(startCandidates) > 0 {
+			eff.StartDate = startCandidates[0]
+			for i := 1; i < len(startCandidates); i++ {
+				if startCandidates[i] < eff.StartDate {
+					eff.StartDate = startCandidates[i]
+				}
+			}
+		} else if plan.DefaultExecuteParams != nil && eff.StartDate == "" {
+			eff.StartDate = plan.DefaultExecuteParams.StartDate
+		}
+		eff.EndDate = time.Now().Format("20060102")
+	}
+	// 仅当计划内任一 API 的参数包含 date/time/dt 等模式时才要求配置日期范围
 	if requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
 		return "", shared.NewDomainError(shared.ErrCodeValidation,
 			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
@@ -624,6 +668,83 @@ func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
 			logrus.Infof("[ResolveSyncPlan] Supplemented param_dependencies for %s from api_sync_strategies (preferred_param=%s, support_date_range=%v)",
 				strategy.APIName, strategy.PreferredParam, strategy.SupportDateRange)
 		}
+	}
+}
+
+// safeSQLIdentifier 仅允许 [a-zA-Z0-9_]，用于表名/列名防注入；合法则返回 true。
+func safeSQLIdentifier(name string) bool {
+	return regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(name)
+}
+
+// syncQuoteIdentifier 双引号包裹并转义内部双引号（DuckDB 标识符），仅用于 getMaxDateFromTargetDB。
+func syncQuoteIdentifier(name string) string {
+	escaped := strings.ReplaceAll(name, `"`, `""`)
+	return `"` + escaped + `"`
+}
+
+// getMaxDateFromTargetDB 在目标 DuckDB 上执行 SELECT MAX(column) FROM table，返回日期字符串（20060102），失败或空表返回 ""。
+func (s *SyncApplicationServiceImpl) getMaxDateFromTargetDB(ctx context.Context, targetDBPath, tableName, columnName string) string {
+	if targetDBPath == "" || !safeSQLIdentifier(tableName) || !safeSQLIdentifier(columnName) {
+		return ""
+	}
+	qdb, err := s.quantDBFactory.Create(datastore.QuantDBConfig{
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: targetDBPath,
+	})
+	if err != nil {
+		logrus.Warnf("[getMaxDateFromTargetDB] Create QuantDB failed: %v", err)
+		return ""
+	}
+	if err := qdb.Connect(ctx); err != nil {
+		logrus.Warnf("[getMaxDateFromTargetDB] Connect failed: %v", err)
+		_ = qdb.Close()
+		return ""
+	}
+	defer func() { _ = qdb.Close() }()
+	sql := fmt.Sprintf("SELECT MAX(%s) AS mx FROM %s", syncQuoteIdentifier(columnName), syncQuoteIdentifier(tableName))
+	rows, err := qdb.Query(ctx, sql)
+	if err != nil {
+		logrus.Warnf("[getMaxDateFromTargetDB] Query failed: %v", err)
+		return ""
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	v, ok := rows[0]["mx"]
+	if !ok || v == nil {
+		return ""
+	}
+	// 归一化为 20060102：可能是 string "20060102"/"2006-01-02" 或 time.Time
+	switch val := v.(type) {
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return ""
+		}
+		// 2006-01-02 -> 20060102
+		if strings.Contains(val, "-") {
+			val = strings.ReplaceAll(val, "-", "")
+		}
+		if len(val) >= 8 {
+			return val[:8]
+		}
+		return val
+	case time.Time:
+		return val.Format("20060102")
+	case *time.Time:
+		if val == nil {
+			return ""
+		}
+		return val.Format("20060102")
+	default:
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if strings.Contains(s, "-") {
+			s = strings.ReplaceAll(s, "-", "")
+		}
+		if len(s) >= 8 {
+			return s[:8]
+		}
+		return s
 	}
 }
 

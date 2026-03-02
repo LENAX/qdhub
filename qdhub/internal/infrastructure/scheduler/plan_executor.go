@@ -4,7 +4,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -60,26 +59,25 @@ func (e *ScheduledPlanExecutor) ExecuteScheduledJob(ctx context.Context, jobID s
 }
 
 // buildExecuteRequest builds ExecuteSyncPlanRequest for scheduled run.
-// If incremental mode is on and LastSuccessfulEndDate is set, uses [LastSuccessfulEndDate, today];
-// otherwise uses DefaultExecuteParams. Returns nil if no valid date range can be built.
+// 增量模式：传空 StartDate/EndDate，由 ExecuteSyncPlan 内部统一计算（min(上次成功结束日, 数据最新日期) -> 今天）。
+// 非增量：使用 DefaultExecuteParams 的日期范围。Returns nil if no valid request can be built.
 func (e *ScheduledPlanExecutor) buildExecuteRequest(plan *sync.SyncPlan) *contracts.ExecuteSyncPlanRequest {
 	if plan.DefaultExecuteParams == nil {
 		return nil
 	}
 	p := plan.DefaultExecuteParams
 
-	// 增量模式：上次成功 EndDate -> 当前日期
-	if plan.IncrementalMode && plan.LastSuccessfulEndDate != nil && *plan.LastSuccessfulEndDate != "" {
-		today := time.Now().Format("20060102")
+	// 增量模式：不在此处构造日期，交给 ExecuteSyncPlan 内部按 min(LastSuccessfulEndDate, 数据最新日期) -> 今天 计算
+	if plan.IncrementalMode {
 		return &contracts.ExecuteSyncPlanRequest{
-			StartDate: *plan.LastSuccessfulEndDate,
-			EndDate:   today,
+			StartDate: "",
+			EndDate:   "",
 			StartTime: p.StartTime,
 			EndTime:   p.EndTime,
 		}
 	}
 
-	// 非增量或首次：使用默认日期范围
+	// 非增量：使用默认日期范围
 	if p.StartDate == "" || p.EndDate == "" {
 		return nil
 	}

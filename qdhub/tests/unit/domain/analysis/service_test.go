@@ -90,6 +90,13 @@ func (noopStockList) List(ctx context.Context, req analysis.StockListRequest) ([
 	return nil, nil
 }
 
+// noopStockSnapshot 仅 StockSnapshotReader
+type noopStockSnapshot struct{}
+
+func (noopStockSnapshot) GetSnapshot(ctx context.Context, tradeDate string, tsCodes []string) ([]analysis.StockInfo, error) {
+	return nil, nil
+}
+
 // noopIndexList 仅 IndexListReader
 type noopIndexList struct{}
 
@@ -155,6 +162,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 	nSector := noopSector{}
 	nLimitUpBySector := noopLimitUpBySector{}
 	nStock := noopStockList{}
+	nSnapshot := noopStockSnapshot{}
 	nIndex := noopIndexList{}
 	nConcept := noopConceptList{}
 	nNews := noopNews{}
@@ -173,7 +181,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nIndex, nConcept, n, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -195,15 +203,48 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nIndex, nConcept, n, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustQfq,
 		})
 		assert.NoError(t, err)
 		assert.Len(t, data, 2)
+		// 前复权基准=最近一日 adj=2.0，ratio 分别为 0.5、1.0
 		assert.InDelta(t, 10.5*0.5, data[0].Close, 1e-6)
 		assert.InDelta(t, 11.5*1.0, data[1].Close, 1e-6)
+		// 涨跌额/涨跌幅由复权后的 close、pre_close 重算
+		assert.InDelta(t, 0.25, data[0].Change, 1e-6)
+		assert.InDelta(t, 5.0, data[0].PctChg, 1e-2)
+		assert.InDelta(t, 1.0, data[1].Change, 1e-6)
+		assert.InDelta(t, (1.0/10.5)*100, data[1].PctChg, 1e-2)
+		mockK.AssertExpectations(t)
+	})
+
+	t.Run("hfq", func(t *testing.T) {
+		mockK := new(mockKLineReader)
+		rows := []analysis.RawDailyRow{
+			{TradeDate: "20240102", Open: 10, High: 11, Low: 9.5, Close: 10.5, Vol: 1e6, Amount: 1e7, PreClose: 10, Change: 0.5, PctChg: 5, AdjFactor: 1.0},
+			{TradeDate: "20240103", Open: 11, High: 12, Low: 10.5, Close: 11.5, Vol: 1.2e6, Amount: 1.2e7, PreClose: 10.5, Change: 1, PctChg: 9.52, AdjFactor: 2.0},
+		}
+		mockK.On("GetDailyWithAdjFactor", ctx, "000001.SZ", "20240101", "20240131").Return(rows, nil)
+
+		svc := analysis.NewAnalysisService(
+			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+		)
+		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
+			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustHfq,
+		})
+		assert.NoError(t, err)
+		assert.Len(t, data, 2)
+		// 后复权：price * adj_factor，无除基准
+		assert.InDelta(t, 10.5*1.0, data[0].Close, 1e-6)
+		assert.InDelta(t, 11.5*2.0, data[1].Close, 1e-6)
+		assert.InDelta(t, 0.5, data[0].Change, 1e-6)
+		assert.InDelta(t, 5.0, data[0].PctChg, 1e-2)
+		assert.InDelta(t, 23.0-10.5, data[1].Change, 1e-6)
+		assert.InDelta(t, (23.0-10.5)/10.5*100, data[1].PctChg, 1e-2)
 		mockK.AssertExpectations(t)
 	})
 
@@ -213,7 +254,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nIndex, nConcept, n, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "999999.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -229,7 +270,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nIndex, nConcept, n, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,

@@ -513,6 +513,10 @@ func (c *Container) runMigrations() error {
 	if err := c.runMigrationFile("./migrations/014_daily_basic_sync_strategy_fix.up.sql"); err != nil {
 		return fmt.Errorf("failed to run 014_daily_basic_sync_strategy_fix: %w", err)
 	}
+	// 015_sync_plan_incremental_start_date_source：增量模式下可选“数据最新日期”来源（API+列）
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/015_sync_plan_incremental_start_date_source.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 015_sync_plan_incremental_start_date_source: %w", err)
+	}
 
 	// 008_seed_guest_user (driver-specific)
 	if err := c.runGuestSeed(); err != nil {
@@ -847,6 +851,7 @@ func (c *Container) initApplicationServices() error {
 		c.TaskEngineAdapter,
 		c.UoW,
 		c.MetadataRepo,
+		c.QuantDBFactory,
 	)
 
 	// DataQuality service（独立应用服务，归属 datastore 领域，依赖 SyncSvc 用于一键修复）

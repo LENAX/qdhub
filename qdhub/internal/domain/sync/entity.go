@@ -312,6 +312,26 @@ func (sp *SyncPlan) SetLastSuccessfulEndDate(endDate string) {
 	sp.UpdatedAt = shared.Now()
 }
 
+// SetIncrementalStartDateSource sets the optional API (table name) and column for querying "data latest date" from target DuckDB (MAX(column)).
+func (sp *SyncPlan) SetIncrementalStartDateSource(api, column string) {
+	if api == "" && column == "" {
+		sp.IncrementalStartDateAPI = nil
+		sp.IncrementalStartDateColumn = nil
+	} else {
+		if api != "" {
+			sp.IncrementalStartDateAPI = &api
+		} else {
+			sp.IncrementalStartDateAPI = nil
+		}
+		if column != "" {
+			sp.IncrementalStartDateColumn = &column
+		} else {
+			sp.IncrementalStartDateColumn = nil
+		}
+	}
+	sp.UpdatedAt = shared.Now()
+}
+
 // Enable enables the sync plan.
 func (sp *SyncPlan) Enable() error {
 	if sp.Status == PlanStatusRunning {

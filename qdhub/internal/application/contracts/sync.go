@@ -110,25 +110,29 @@ type SyncApplicationService interface {
 
 // CreateSyncPlanRequest represents a request to create a sync plan.
 type CreateSyncPlanRequest struct {
-	Name                 string
-	Description          string
-	DataSourceID         shared.ID
-	DataStoreID          shared.ID
-	SelectedAPIs         []string
-	CronExpression       *string
-	DefaultExecuteParams *sync.ExecuteParams
-	IncrementalMode      bool
+	Name                        string
+	Description                  string
+	DataSourceID                shared.ID
+	DataStoreID                 shared.ID
+	SelectedAPIs                []string
+	CronExpression              *string
+	DefaultExecuteParams        *sync.ExecuteParams
+	IncrementalMode             bool
+	IncrementalStartDateAPI     string // optional: API (table) name for MAX(column) in target DuckDB
+	IncrementalStartDateColumn  string // optional: column name for date, e.g. trade_date
 }
 
 // UpdateSyncPlanRequest represents a request to update a sync plan.
 type UpdateSyncPlanRequest struct {
-	Name                 *string
-	Description          *string
-	DataStoreID          *shared.ID
-	SelectedAPIs         *[]string
-	CronExpression       *string
-	DefaultExecuteParams *sync.ExecuteParams
-	IncrementalMode      *bool
+	Name                        *string
+	Description                  *string
+	DataStoreID                 *shared.ID
+	SelectedAPIs                *[]string
+	CronExpression              *string
+	DefaultExecuteParams        *sync.ExecuteParams
+	IncrementalMode             *bool
+	IncrementalStartDateAPI     *string
+	IncrementalStartDateColumn  *string
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.

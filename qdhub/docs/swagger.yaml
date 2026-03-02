@@ -104,6 +104,10 @@ definitions:
         type: string
       incremental_mode:
         type: boolean
+      incremental_start_date_api:
+        type: string
+      incremental_start_date_column:
+        type: string
       name:
         type: string
       selected_apis:
@@ -247,6 +251,10 @@ definitions:
         type: string
       incremental_mode:
         type: boolean
+      incremental_start_date_api:
+        type: string
+      incremental_start_date_column:
+        type: string
       name:
         type: string
       selected_apis:
@@ -1143,6 +1151,105 @@ paths:
       security:
       - BearerAuth: []
       summary: Get stock basic info
+      tags:
+      - Analysis
+  /analysis/stocks/indicators:
+    get:
+      consumes:
+      - application/json
+      description: Calculate MA/RSI/MACD indicators for given stock and date range,
+        with same adjust type & period as K line
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: qfq
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - default: D
+        description: 'Period: D, W, M'
+        in: query
+        name: period
+        type: string
+      - description: Comma separated indicator names, e.g. MA5,MA10,MA20,RSI,MACD
+        in: query
+        name: indicators
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get technical indicators for a stock
+      tags:
+      - Analysis
+  /analysis/stocks/snapshot:
+    get:
+      consumes:
+      - application/json
+      description: Get latest adjusted close price and change for given stocks on
+        a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: qfq
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - description: Comma separated ts_code list
+        in: query
+        name: ts_codes
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get stock snapshot
       tags:
       - Analysis
   /analysis/trade-cal:

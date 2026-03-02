@@ -28,11 +28,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
 		selected_apis, resolved_apis, execution_graph, cron_expression, default_execute_params,
-		incremental_mode, last_successful_end_date,
+		incremental_mode, last_successful_end_date, incremental_start_date_api, incremental_start_date_column,
 		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
 		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :default_execute_params,
-		:incremental_mode, :last_successful_end_date,
+		:incremental_mode, :last_successful_end_date, :incremental_start_date_api, :incremental_start_date_column,
 		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
@@ -72,6 +72,7 @@ func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
 		default_execute_params = :default_execute_params,
 		incremental_mode = :incremental_mode, last_successful_end_date = :last_successful_end_date,
+		incremental_start_date_api = :incremental_start_date_api, incremental_start_date_column = :incremental_start_date_column,
 		status = :status, last_executed_at = :last_executed_at,
 		next_execute_at = :next_execute_at, updated_at = :updated_at
 		WHERE id = :id`
@@ -275,6 +276,13 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 		row.NextExecuteAt = sql.NullTime{Time: *entity.NextExecuteAt, Valid: true}
 	}
 
+	if entity.IncrementalStartDateAPI != nil {
+		row.IncrementalStartDateAPI = sql.NullString{String: *entity.IncrementalStartDateAPI, Valid: true}
+	}
+	if entity.IncrementalStartDateColumn != nil {
+		row.IncrementalStartDateColumn = sql.NullString{String: *entity.IncrementalStartDateColumn, Valid: true}
+	}
+
 	return row, nil
 }
 
@@ -331,6 +339,12 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 	entity.IncrementalMode = row.IncrementalMode
 	if row.LastSuccessfulEndDate.Valid {
 		entity.LastSuccessfulEndDate = &row.LastSuccessfulEndDate.String
+	}
+	if row.IncrementalStartDateAPI.Valid {
+		entity.IncrementalStartDateAPI = &row.IncrementalStartDateAPI.String
+	}
+	if row.IncrementalStartDateColumn.Valid {
+		entity.IncrementalStartDateColumn = &row.IncrementalStartDateColumn.String
 	}
 
 	return entity, nil

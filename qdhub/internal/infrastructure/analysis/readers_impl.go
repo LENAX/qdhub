@@ -67,6 +67,7 @@ var (
 	_ analysis.FinancialIndicatorReader    = (*Readers)(nil)
 	_ analysis.FinancialReportReader       = (*Readers)(nil)
 	_ analysis.TradeCalendarReader         = (*Readers)(nil)
+	_ analysis.StockSnapshotReader         = (*Readers)(nil)
 )
 
 // GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算。
@@ -228,8 +229,97 @@ func (r *Readers) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQ
 }
 
 // GetLimitStats 涨跌停统计
-// 封板/打开数来自 limit_list_ths（open_num=0 为封板，>0 为打开），无该表时保持 0。
+// 优先用 limit_list_d（limit 字段 U/D/Z）直接统计涨跌停与封板/打开数；
+// 有 limit_list_ths 时用 open_num 补充涨停封板/打开更准确数据。
+// 涨停数量兜底：当 limit 字段不匹配 U/Z 时，用 pct_chg>=9.8 统计，避免显示不全。
 func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
+	// 尝试从 limit_list_d 直接统计（U=涨停封板 D=跌停封板 Z=炸板）
+	if ldOk, _ := r.db.TableExists(ctx, "limit_list_d"); ldOk {
+		ldSQL := `
+SELECT trade_date,
+       COUNT(DISTINCT CASE WHEN "limit" = 'U' THEN ts_code END) AS limit_up_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'Z' THEN ts_code END) AS limit_up_opened,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z') THEN ts_code END) AS limit_up_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_from_pct,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('D') THEN ts_code END) AS limit_down_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
+FROM limit_list_d
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date ORDER BY trade_date`
+		ldRows, ldErr := r.db.Query(ctx, ldSQL, startDate, endDate)
+		if ldErr == nil && len(ldRows) > 0 {
+			out := make([]analysis.LimitStats, 0, len(ldRows))
+			for _, m := range ldRows {
+				sealed := int_(m, "limit_up_sealed")
+				opened := int_(m, "limit_up_opened")
+				upFromLimit := int_(m, "limit_up_from_limit")
+				upFromPct := int_(m, "limit_up_from_pct")
+				total := sealed + opened
+				if total < upFromPct {
+					total = upFromPct
+				}
+				if total < upFromLimit {
+					total = upFromLimit
+				}
+				if total > 0 && sealed == 0 && opened == 0 {
+					sealed = total
+				}
+				dSealed := int_(m, "limit_down_sealed")
+				dFromLimit := int_(m, "limit_down_from_limit")
+				dFromPct := int_(m, "limit_down_from_pct")
+				dCount := dSealed
+				if dCount < dFromPct {
+					dCount = dFromPct
+				}
+				if dCount < dFromLimit {
+					dCount = dFromLimit
+				}
+				dSealedVal := dSealed
+				if dSealedVal == 0 && dCount > 0 {
+					dSealedVal = dCount
+				}
+				out = append(out, analysis.LimitStats{
+					TradeDate:       str(m, "trade_date"),
+					LimitUpCount:    total,
+					LimitDownCount:  dCount,
+					LimitUpSealed:   sealed,
+					LimitUpOpened:   opened,
+					LimitDownSealed: dSealedVal,
+					LimitDownOpened: 0,
+				})
+			}
+			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数
+			if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+				thsSQL := `
+SELECT trade_date,
+       SUM(CASE WHEN COALESCE(open_num, 0) = 0 THEN 1 ELSE 0 END) AS limit_up_sealed,
+       SUM(CASE WHEN COALESCE(open_num, 0) > 0 THEN 1 ELSE 0 END) AS limit_up_opened
+FROM limit_list_ths
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date`
+				thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
+				if thsErr == nil {
+					byDate := make(map[string]*struct{ sealed, opened int })
+					for _, m := range thsRows {
+						byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
+							sealed: int_(m, "limit_up_sealed"),
+							opened: int_(m, "limit_up_opened"),
+						}
+					}
+					for i := range out {
+						if v, ok := byDate[out[i].TradeDate]; ok {
+							out[i].LimitUpSealed = v.sealed
+							out[i].LimitUpOpened = v.opened
+							out[i].LimitUpCount = v.sealed + v.opened
+						}
+					}
+				}
+			}
+			return out, nil
+		}
+	}
+	// 兜底：从 daily 表统计（无封板/打开区分）
 	sql := `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_count,
@@ -247,43 +337,13 @@ GROUP BY trade_date ORDER BY trade_date`
 	out := make([]analysis.LimitStats, 0, len(rows))
 	for _, m := range rows {
 		out = append(out, analysis.LimitStats{
-			TradeDate:       str(m, "trade_date"),
-			LimitUpCount:    int_(m, "limit_up_count"),
-			LimitDownCount:  int_(m, "limit_down_count"),
-			LimitUpSealed:   0,
-			LimitUpOpened:   0,
-			LimitDownSealed: 0,
-			LimitDownOpened: 0,
-			UpCount:         int_(m, "up_count"),
-			DownCount:       int_(m, "down_count"),
-			FlatCount:       int_(m, "flat_count"),
-			LimitUpRatio:    float(m, "limit_up_ratio"),
+			TradeDate:      str(m, "trade_date"),
+			LimitUpCount:   int_(m, "limit_up_count"),
+			LimitDownCount: int_(m, "limit_down_count"),
+			UpCount:        int_(m, "up_count"),
+			DownCount:      int_(m, "down_count"),
+			FlatCount:      int_(m, "flat_count"),
 		})
-	}
-	if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
-		thsSQL := `
-SELECT trade_date,
-       SUM(CASE WHEN COALESCE(open_num, 0) = 0 THEN 1 ELSE 0 END) AS limit_up_sealed,
-       SUM(CASE WHEN COALESCE(open_num, 0) > 0 THEN 1 ELSE 0 END) AS limit_up_opened
-FROM limit_list_ths
-WHERE trade_date BETWEEN ? AND ?
-GROUP BY trade_date`
-		thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
-		if thsErr == nil {
-			byDate := make(map[string]*struct{ sealed, opened int })
-			for _, m := range thsRows {
-				byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
-					sealed: int_(m, "limit_up_sealed"),
-					opened: int_(m, "limit_up_opened"),
-				}
-			}
-			for i := range out {
-				if v, ok := byDate[out[i].TradeDate]; ok {
-					out[i].LimitUpSealed = v.sealed
-					out[i].LimitUpOpened = v.opened
-				}
-			}
-		}
 	}
 	return out, nil
 }
@@ -304,9 +364,18 @@ func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType str
 			limitVal = "U"
 		}
 	}
+	// 默认用 limit_list_d 查询，包含 open_times/last_time（炸板列表需要）
 	sql := `
-SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name, COALESCE(l.first_time, '') AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason,
-       l.close, l.pct_chg, COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(l.float_mv, 0) AS float_cap, COALESCE(s.industry, l.industry, '') AS industry
+SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name,
+       COALESCE(l.first_time, '') AS limit_time,
+       COALESCE(l.last_time, '') AS last_limit_time,
+       '' AS limit_reason,
+       l.close, l.pct_chg,
+       COALESCE(l.turnover_ratio, 0) AS turnover_rate,
+       COALESCE(l.amount, 0) AS amount,
+       COALESCE(l.float_mv, 0) AS float_cap,
+       COALESCE(l.open_times, 0) AS open_times,
+       COALESCE(s.industry, l.industry, '') AS industry
 FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l.limit = ?
@@ -316,11 +385,16 @@ ORDER BY l.first_time`
 		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
 			// 以 limit_list_ths 为主表，保证涨停原因来自 lu_desc；缺字段时用 limit_list_d 补
 			sql = `
-SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name, COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
-       COALESCE(NULLIF(TRIM(ths.lu_desc), ''), l.up_stat, l.limit, '') AS limit_reason,
-       COALESCE(ths.price, l.close, 0) AS close, COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
-       COALESCE(ths.turnover_rate, l.turnover_ratio, 0) AS turnover_rate, COALESCE(ths.turnover, l.amount, 0) AS amount,
+SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name,
+       COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
+       COALESCE(ths.last_lu_time, l.last_time, '') AS last_limit_time,
+       COALESCE(NULLIF(TRIM(ths.lu_desc), ''), '') AS limit_reason,
+       COALESCE(ths.price, l.close, 0) AS close,
+       COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
+       COALESCE(ths.turnover_rate, l.turnover_ratio, 0) AS turnover_rate,
+       COALESCE(ths.turnover, l.amount, 0) AS amount,
        COALESCE(ths.free_float, l.float_mv, 0) AS float_cap,
+       COALESCE(ths.open_num, l.open_times, 0) AS open_times,
        COALESCE(s.industry, l.industry, '') AS industry
 FROM limit_list_ths ths
 LEFT JOIN limit_list_d l ON l.ts_code = ths.ts_code AND l.trade_date = ths.trade_date AND l.limit = 'U'
@@ -340,7 +414,9 @@ ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
 			TsCode:          str(m, "ts_code"),
 			Name:            str(m, "name"),
 			LimitTime:       str(m, "limit_time"),
+			LastLimitTime:   str(m, "last_limit_time"),
 			LimitReason:     str(m, "limit_reason"),
+			OpenTimes:       int_(m, "open_times"),
 			ConsecutiveDays: 0, FirstLimitDate: tradeDate,
 			Close: float(m, "close"), PctChg: float(m, "pct_chg"),
 			TurnoverRate: float(m, "turnover_rate"), Amount: float(m, "amount"),
@@ -769,6 +845,88 @@ ORDER BY s.ts_code`
 	return out, nil
 }
 
+// GetSnapshot StockSnapshotReader：按交易日与 ts_code 列表返回价格、涨跌幅等
+func (r *Readers) GetSnapshot(ctx context.Context, tradeDate string, tsCodes []string) ([]analysis.StockInfo, error) {
+	if len(tsCodes) == 0 {
+		return nil, nil
+	}
+	// 构造 IN (?, ?, ...) 占位符
+	placeholders := make([]string, 0, len(tsCodes))
+	args := make([]any, 0, len(tsCodes)+1)
+	args = append(args, tradeDate)
+	for _, code := range tsCodes {
+		if strings.TrimSpace(code) == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, code)
+	}
+	if len(placeholders) == 0 {
+		return nil, nil
+	}
+	sql := `
+SELECT d.ts_code,
+       COALESCE(s.symbol, '') AS symbol,
+       COALESCE(s.name, '')   AS name,
+       COALESCE(s.area, '')   AS area,
+       COALESCE(s.industry, '') AS industry,
+       COALESCE(s.market, '') AS market,
+       COALESCE(s.list_date, '') AS list_date,
+       COALESCE(s.is_hs, '')  AS is_hs,
+       d.close  AS price,
+       d.pct_chg AS pct_chg,
+       d.change  AS change,
+       d.vol     AS volume,
+       d.amount  AS amount
+FROM daily d
+JOIN (
+    SELECT ts_code, MAX(trade_date) AS last_trade_date
+    FROM daily
+    WHERE trade_date <= ? AND ts_code IN (` + strings.Join(placeholders, ",") + `)
+    GROUP BY ts_code
+) t ON d.ts_code = t.ts_code AND d.trade_date = t.last_trade_date
+LEFT JOIN stock_basic s ON d.ts_code = s.ts_code`
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.StockInfo, 0, len(rows))
+	for _, m := range rows {
+		info := analysis.StockInfo{
+			TsCode:   str(m, "ts_code"),
+			Symbol:   str(m, "symbol"),
+			Name:     str(m, "name"),
+			Area:     str(m, "area"),
+			Industry: str(m, "industry"),
+			Market:   str(m, "market"),
+			ListDate: str(m, "list_date"),
+			IsHS:     str(m, "is_hs"),
+		}
+		if v, ok := m["price"]; ok && v != nil {
+			f := float(m, "price")
+			info.Price = &f
+		}
+		if v, ok := m["pct_chg"]; ok && v != nil {
+			f := float(m, "pct_chg")
+			info.PctChg = &f
+		}
+		if v, ok := m["change"]; ok && v != nil {
+			f := float(m, "change")
+			info.Change = &f
+		}
+		if v, ok := m["volume"]; ok && v != nil {
+			f := float(m, "volume")
+			info.Volume = &f
+		}
+		if v, ok := m["amount"]; ok && v != nil {
+			f := float(m, "amount")
+			info.Amount = &f
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 // ListStocks StockListReader.List
 func (r *Readers) ListStocks(ctx context.Context, req analysis.StockListRequest) ([]analysis.StockInfo, error) {
 	sql := `SELECT ts_code, symbol, name, area, industry, market, list_date, is_hs FROM stock_basic WHERE 1=1`
@@ -1181,13 +1339,9 @@ FROM stock_basic WHERE ts_code = ?`
 }
 
 // GetIndicators FinancialIndicatorReader
+// fina_indicator 表由 Tushare 元数据动态建表，列名因版本/接口而异，用 SELECT * 避免 Binder 报错，映射时按 key 取存在的字段即可
 func (r *Readers) GetIndicators(ctx context.Context, req analysis.FinancialIndicatorRequest) ([]analysis.FinancialIndicator, error) {
-	// 注意：fina_indicator 表由 Tushare 元数据动态建表，无 report_type/comp_type 列，仅查询存在的列
-	sql := `SELECT ts_code, ann_date, end_date, roe, roe_avg, roe_diluted, roa,
-       gross_profit_margin, net_profit_margin, total_asset_turnover, current_asset_turnover, fixed_asset_turnover,
-       current_ratio, quick_ratio, cash_ratio, debt_to_asset, equity_to_asset,
-       revenue_yoy, profit_yoy, total_asset_yoy, equity_yoy, eps, bps, cps, pe, pb, ps
-FROM fina_indicator WHERE ts_code = ?`
+	sql := `SELECT * FROM fina_indicator WHERE ts_code = ?`
 	args := []any{req.TsCode}
 	if req.EndDate != nil && *req.EndDate != "" {
 		sql += " AND end_date <= ?"

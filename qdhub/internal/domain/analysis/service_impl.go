@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"time"
 )
 
 // analysisServiceImpl 实现 AnalysisService，仅依赖 Reader 接口，不执行 SQL
@@ -19,6 +20,7 @@ type analysisServiceImpl struct {
 	conceptStocksReader         ConceptStocksReader
 	conceptRotationReader       ConceptRotationReader
 	stockListReader             StockListReader
+	stockSnapshotReader         StockSnapshotReader
 	indexListReader             IndexListReader
 	conceptListReader           ConceptListReader
 	dragonTigerReader           DragonTigerReader
@@ -51,6 +53,7 @@ func NewAnalysisService(
 	conceptStocksReader ConceptStocksReader,
 	conceptRotationReader ConceptRotationReader,
 	stockListReader StockListReader,
+	stockSnapshotReader StockSnapshotReader,
 	indexListReader IndexListReader,
 	conceptListReader ConceptListReader,
 	dragonTigerReader DragonTigerReader,
@@ -81,6 +84,7 @@ func NewAnalysisService(
 		conceptStocksReader:         conceptStocksReader,
 		conceptRotationReader:       conceptRotationReader,
 		stockListReader:             stockListReader,
+		stockSnapshotReader:         stockSnapshotReader,
 		indexListReader:             indexListReader,
 		conceptListReader:           conceptListReader,
 		dragonTigerReader:           dragonTigerReader,
@@ -108,132 +112,6 @@ func (s *analysisServiceImpl) GetKLine(ctx context.Context, req KLineRequest) ([
 		return nil, err
 	}
 	return applyAdjustAndToKLineData(rows, req.AdjustType), nil
-}
-
-// GetStockIndicators 基于 K 线计算技术指标，与 K 线同区间、同复权
-func (s *analysisServiceImpl) GetStockIndicators(ctx context.Context, req StockIndicatorRequest) ([]StockIndicatorItem, error) {
-	klineReq := KLineRequest{
-		TsCode: req.TsCode, StartDate: req.StartDate, EndDate: req.EndDate,
-		AdjustType: req.AdjustType, Period: req.Period,
-	}
-	klines, err := s.GetKLine(ctx, klineReq)
-	if err != nil || len(klines) == 0 {
-		return nil, err
-	}
-	closes := make([]float64, len(klines))
-	for i := range klines {
-		closes[i] = klines[i].Close
-	}
-	out := make([]StockIndicatorItem, 0, len(req.Indicators))
-	seen := make(map[string]bool)
-	for _, name := range req.Indicators {
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		var item StockIndicatorItem
-		switch name {
-		case "MA5":
-			item = StockIndicatorItem{Name: "MA5", Values: calcMA(closes, 5), Color: "#ff6b6b"}
-		case "MA10":
-			item = StockIndicatorItem{Name: "MA10", Values: calcMA(closes, 10), Color: "#4ecdc4"}
-		case "MA20":
-			item = StockIndicatorItem{Name: "MA20", Values: calcMA(closes, 20), Color: "#45b7d1"}
-		case "RSI":
-			item = StockIndicatorItem{Name: "RSI", Values: calcRSI(closes, 14), Color: "#f39c12"}
-		case "MACD":
-			item = StockIndicatorItem{Name: "MACD", Values: calcMACDDIF(closes, 12, 26), Color: "#9b59b6"}
-		default:
-			continue
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-func calcMA(closes []float64, period int) []float64 {
-	out := make([]float64, len(closes))
-	for i := range closes {
-		if i < period-1 {
-			out[i] = 0
-			continue
-		}
-		sum := 0.0
-		for j := i - period + 1; j <= i; j++ {
-			sum += closes[j]
-		}
-		out[i] = round2(sum / float64(period))
-	}
-	return out
-}
-
-func calcRSI(closes []float64, period int) []float64 {
-	out := make([]float64, len(closes))
-	if len(closes) == 0 {
-		return out
-	}
-	out[0] = 50
-	for i := 1; i < len(closes); i++ {
-		gains := 0.0
-		losses := 0.0
-		start := i - period + 1
-		if start < 0 {
-			start = 0
-		}
-		for j := start + 1; j <= i; j++ {
-			ch := closes[j] - closes[j-1]
-			if ch > 0 {
-				gains += ch
-			} else {
-				losses -= ch
-			}
-		}
-		n := float64(i - start)
-		if n == 0 {
-			out[i] = 50
-			continue
-		}
-		avgGain := gains / n
-		avgLoss := losses / n
-		if avgLoss == 0 {
-			out[i] = 100
-			continue
-		}
-		rs := avgGain / avgLoss
-		out[i] = round2(100 - 100/(1+rs))
-	}
-	return out
-}
-
-// calcMACDDIF 返回 MACD DIF 线（12,26），与 K 线等长，前 26 个为 0
-func calcMACDDIF(closes []float64, short, long int) []float64 {
-	out := make([]float64, len(closes))
-	if len(closes) < long {
-		return out
-	}
-	emaShort := ema(closes, short)
-	emaLong := ema(closes, long)
-	for i := range closes {
-		if i < long-1 {
-			out[i] = 0
-			continue
-		}
-		out[i] = round2(emaShort[i] - emaLong[i])
-	}
-	return out
-}
-
-func ema(closes []float64, period int) []float64 {
-	out := make([]float64, len(closes))
-	if len(closes) == 0 {
-		return out
-	}
-	k := 2.0 / float64(period+1)
-	out[0] = closes[0]
-	for i := 1; i < len(closes); i++ {
-		out[i] = closes[i]*k + out[i-1]*(1-k)
-	}
-	return out
 }
 
 // round2 保留两位小数（价格、涨跌幅等展示用）
@@ -329,6 +207,62 @@ func (s *analysisServiceImpl) CalculateFactors(ctx context.Context, req FactorRe
 
 func (s *analysisServiceImpl) ListStocks(ctx context.Context, req StockListRequest) ([]StockInfo, error) {
 	return s.stockListReader.List(ctx, req)
+}
+
+func (s *analysisServiceImpl) GetStockSnapshot(ctx context.Context, tradeDate string, adjustType AdjustType, tsCodes []string) ([]StockInfo, error) {
+	if len(tsCodes) == 0 {
+		return nil, nil
+	}
+
+	// 统一计算交易日历查询起始日期：tradeDate 往前推 1 个月
+	startCalDate := tradeDate
+	if len(tradeDate) == 8 {
+		if t, err := time.Parse("20060102", tradeDate); err == nil {
+			start := t.AddDate(0, -1, 0)
+			startCalDate = start.Format("20060102")
+		}
+	}
+
+	// 使用 trade_cal 在最近 1 个月区间内查找 <= tradeDate 的最近一个交易日，
+	// 在这个交易日上做一次批量快照查询，避免对每个 ts_code 循环查 K 线。
+	tradingDates, err := s.tradeCalendarReader.GetTradingDates(ctx, startCalDate, tradeDate)
+	if err == nil && len(tradingDates) > 0 {
+		lastTradeDate := tradingDates[len(tradingDates)-1]
+		// 这里直接委托给 StockSnapshotReader 做批量 SQL 查询。
+		// adjustType 暂未参与快照价格计算，快照主要用于列表展示，精确复权价格由 K 线图承担。
+		return s.stockSnapshotReader.GetSnapshot(ctx, lastTradeDate, tsCodes)
+	}
+
+	// 如果 trade_cal 表无数据或查询失败，则回退到基于 daily 表的按股票扫描方案（限定最近 1 个月窗口），
+	// 保持在未同步 trade_cal 场景下也能返回最近有数据的快照。
+	startDate := startCalDate
+	out := make([]StockInfo, 0, len(tsCodes))
+	for _, code := range tsCodes {
+		if code == "" {
+			continue
+		}
+		rows, err := s.kLineReader.GetDailyWithAdjFactor(ctx, code, startDate, tradeDate)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		kline := applyAdjustAndToKLineData(rows, adjustType)
+		if len(kline) == 0 {
+			continue
+		}
+		latest := kline[len(kline)-1]
+		price := latest.Close
+		change := latest.Change
+		pct := latest.PctChg
+		snap := StockInfo{
+			TsCode:   code,
+			ListDate: "", // 其余基础信息如需展示可后续通过 StockBasic 补全
+		}
+		snap.Price = &price
+		snap.Change = &change
+		snap.PctChg = &pct
+		out = append(out, snap)
+	}
+	return out, nil
 }
 
 func (s *analysisServiceImpl) ListIndices(ctx context.Context, req IndexListRequest) ([]IndexInfo, error) {
@@ -442,4 +376,170 @@ func (s *analysisServiceImpl) ExecuteReadOnlyQuery(ctx context.Context, req Cust
 
 func (s *analysisServiceImpl) GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error) {
 	return s.tradeCalendarReader.GetTradingDates(ctx, startDate, endDate)
+}
+
+// GetTechnicalIndicators 基于复权后的 K 线在内存中计算简单技术指标（MA/RSI/MACD）
+func (s *analysisServiceImpl) GetTechnicalIndicators(ctx context.Context, req TechnicalIndicatorCalcRequest) ([]TechnicalIndicator, error) {
+	if req.TsCode == "" || req.StartDate == "" || req.EndDate == "" || len(req.Indicators) == 0 {
+		return nil, nil
+	}
+	rows, err := s.kLineReader.GetDailyWithAdjFactor(ctx, req.TsCode, req.StartDate, req.EndDate)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	kline := applyAdjustAndToKLineData(rows, req.AdjustType)
+	if len(kline) == 0 {
+		return nil, nil
+	}
+	closes := make([]float64, len(kline))
+	for i, d := range kline {
+		closes[i] = d.Close
+	}
+
+	var out []TechnicalIndicator
+	colorMap := map[string]string{
+		"MA5":  "#F59E0B",
+		"MA10": "#10B981",
+		"MA20": "#3B82F6",
+		"RSI":  "#A855F7",
+		"MACD": "#EF4444",
+	}
+
+	for _, name := range req.Indicators {
+		switch {
+		case name == "RSI":
+			vals := calcRSI(closes, 14)
+			out = append(out, TechnicalIndicator{
+				Name:   name,
+				Values: vals,
+				Color:  colorMap[name],
+			})
+		case name == "MACD":
+			vals := calcMACDDiff(closes, 12, 26)
+			out = append(out, TechnicalIndicator{
+				Name:   name,
+				Values: vals,
+				Color:  colorMap[name],
+			})
+		case len(name) > 2 && name[:2] == "MA":
+			// 简单移动平均：如 MA5/MA10/MA20
+			window := 0
+			for i := 2; i < len(name); i++ {
+				window = window*10 + int(name[i]-'0')
+			}
+			if window <= 0 {
+				continue
+			}
+			vals := calcSMA(closes, window)
+			out = append(out, TechnicalIndicator{
+				Name:   name,
+				Values: vals,
+				Color:  colorMap[name],
+			})
+		default:
+			// 未识别的指标暂不计算
+		}
+	}
+	return out, nil
+}
+
+// calcSMA 计算简单移动平均
+func calcSMA(values []float64, window int) []float64 {
+	n := len(values)
+	out := make([]float64, n)
+	if window <= 0 || n == 0 {
+		return out
+	}
+	var sum float64
+	for i := 0; i < n; i++ {
+		sum += values[i]
+		if i >= window {
+			sum -= values[i-window]
+		}
+		if i+1 >= window {
+			out[i] = sum / float64(window)
+		} else {
+			out[i] = 0
+		}
+	}
+	return out
+}
+
+// calcRSI 计算相对强弱指标（简单 14 日版本）
+func calcRSI(values []float64, period int) []float64 {
+	n := len(values)
+	out := make([]float64, n)
+	if period <= 0 || n < 2 {
+		return out
+	}
+	var gainSum, lossSum float64
+	for i := 1; i <= period && i < n; i++ {
+		diff := values[i] - values[i-1]
+		if diff > 0 {
+			gainSum += diff
+		} else {
+			lossSum -= diff
+		}
+	}
+	if period < n {
+		avgGain := gainSum / float64(period)
+		avgLoss := lossSum / float64(period)
+		var rsi float64
+		if avgLoss == 0 {
+			rsi = 100
+		} else {
+			rs := avgGain / avgLoss
+			rsi = 100 - (100 / (1 + rs))
+		}
+		out[period] = rsi
+		for i := period + 1; i < n; i++ {
+			diff := values[i] - values[i-1]
+			gain, loss := 0.0, 0.0
+			if diff > 0 {
+				gain = diff
+			} else {
+				loss = -diff
+			}
+			avgGain = (avgGain*float64(period-1) + gain) / float64(period)
+			avgLoss = (avgLoss*float64(period-1) + loss) / float64(period)
+			if avgLoss == 0 {
+				rsi = 100
+			} else {
+				rs := avgGain / avgLoss
+				rsi = 100 - (100 / (1 + rs))
+			}
+			out[i] = rsi
+		}
+	}
+	return out
+}
+
+// calcMACDDiff 计算 MACD 的 DIF 线（12/26 EMA 差）
+func calcMACDDiff(values []float64, shortPeriod, longPeriod int) []float64 {
+	n := len(values)
+	out := make([]float64, n)
+	if n == 0 || shortPeriod <= 0 || longPeriod <= 0 {
+		return out
+	}
+	shortEMA := calcEMA(values, shortPeriod)
+	longEMA := calcEMA(values, longPeriod)
+	for i := 0; i < n; i++ {
+		out[i] = shortEMA[i] - longEMA[i]
+	}
+	return out
+}
+
+// calcEMA 计算指数移动平均
+func calcEMA(values []float64, period int) []float64 {
+	n := len(values)
+	out := make([]float64, n)
+	if n == 0 || period <= 0 {
+		return out
+	}
+	k := 2.0 / (float64(period) + 1)
+	out[0] = values[0]
+	for i := 1; i < n; i++ {
+		out[i] = values[i]*k + out[i-1]*(1-k)
+	}
+	return out
 }

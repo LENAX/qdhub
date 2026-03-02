@@ -20,9 +20,6 @@ func NewAnalysisApplicationService(svc analysis.AnalysisService) contracts.Analy
 func (a *AnalysisApplicationServiceImpl) GetKLine(ctx context.Context, req analysis.KLineRequest) ([]analysis.KLineData, error) {
 	return a.svc.GetKLine(ctx, req)
 }
-func (a *AnalysisApplicationServiceImpl) GetStockIndicators(ctx context.Context, req analysis.StockIndicatorRequest) ([]analysis.StockIndicatorItem, error) {
-	return a.svc.GetStockIndicators(ctx, req)
-}
 func (a *AnalysisApplicationServiceImpl) GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
 	return a.svc.GetLimitStats(ctx, startDate, endDate)
 }
@@ -58,6 +55,9 @@ func (a *AnalysisApplicationServiceImpl) ListIndices(ctx context.Context, req an
 }
 func (a *AnalysisApplicationServiceImpl) ListConcepts(ctx context.Context, req analysis.ConceptListRequest) ([]analysis.ConceptInfo, error) {
 	return a.svc.ListConcepts(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetStockSnapshot(ctx context.Context, tradeDate string, adjustType analysis.AdjustType, tsCodes []string) ([]analysis.StockInfo, error) {
+	return a.svc.GetStockSnapshot(ctx, tradeDate, adjustType, tsCodes)
 }
 func (a *AnalysisApplicationServiceImpl) GetDragonTigerList(ctx context.Context, req analysis.DragonTigerRequest) ([]analysis.DragonTigerList, error) {
 	return a.svc.GetDragonTigerList(ctx, req)
@@ -106,4 +106,7 @@ func (a *AnalysisApplicationServiceImpl) ExecuteReadOnlyQuery(ctx context.Contex
 }
 func (a *AnalysisApplicationServiceImpl) GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error) {
 	return a.svc.GetTradeCalendar(ctx, startDate, endDate)
+}
+func (a *AnalysisApplicationServiceImpl) GetTechnicalIndicators(ctx context.Context, req analysis.TechnicalIndicatorCalcRequest) ([]analysis.TechnicalIndicator, error) {
+	return a.svc.GetTechnicalIndicators(ctx, req)
 }

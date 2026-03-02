@@ -18,6 +18,7 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		r,
 		r,
 		&stockListReaderImpl{r},
+		r,
 		&indexListReaderImpl{r},
 		&conceptListReaderImpl{r},
 		&dragonTigerReaderImpl{r},

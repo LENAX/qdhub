@@ -82,14 +82,16 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 	}
 
 	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
-		Name:                 req.Name,
-		Description:          req.Description,
-		DataSourceID:         shared.ID(req.DataSourceID),
-		DataStoreID:          shared.ID(req.DataStoreID),
-		SelectedAPIs:         req.SelectedAPIs,
-		CronExpression:       req.CronExpression,
-		DefaultExecuteParams: req.DefaultExecuteParams,
-		IncrementalMode:      req.IncrementalMode,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		DataSourceID:                shared.ID(req.DataSourceID),
+		DataStoreID:                 shared.ID(req.DataStoreID),
+		SelectedAPIs:                req.SelectedAPIs,
+		CronExpression:              req.CronExpression,
+		DefaultExecuteParams:        req.DefaultExecuteParams,
+		IncrementalMode:             req.IncrementalMode,
+		IncrementalStartDateAPI:     req.IncrementalStartDateAPI,
+		IncrementalStartDateColumn:  req.IncrementalStartDateColumn,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -169,14 +171,25 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		dataStoreID = &id
 	}
 
+	var incrAPI, incrCol *string
+	if req.IncrementalStartDateAPI != nil {
+		s := *req.IncrementalStartDateAPI
+		incrAPI = &s
+	}
+	if req.IncrementalStartDateColumn != nil {
+		s := *req.IncrementalStartDateColumn
+		incrCol = &s
+	}
 	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
-		Name:                 req.Name,
-		Description:          req.Description,
-		DataStoreID:          dataStoreID,
-		SelectedAPIs:         req.SelectedAPIs,
-		CronExpression:       req.CronExpression,
-		DefaultExecuteParams: req.DefaultExecuteParams,
-		IncrementalMode:      req.IncrementalMode,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		DataStoreID:                dataStoreID,
+		SelectedAPIs:               req.SelectedAPIs,
+		CronExpression:             req.CronExpression,
+		DefaultExecuteParams:       req.DefaultExecuteParams,
+		IncrementalMode:            req.IncrementalMode,
+		IncrementalStartDateAPI:    incrAPI,
+		IncrementalStartDateColumn: incrCol,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -581,8 +594,10 @@ type CreateSyncPlanReq struct {
 	DataStoreID          string              `json:"data_store_id"`
 	SelectedAPIs         []string            `json:"selected_apis" binding:"required"`
 	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
-	IncrementalMode     bool                `json:"incremental_mode"`
+	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode             bool                `json:"incremental_mode"`
+	IncrementalStartDateAPI     string              `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn  string              `json:"incremental_start_date_column"`
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
@@ -592,8 +607,10 @@ type UpdateSyncPlanReq struct {
 	DataStoreID          *string             `json:"data_store_id"`
 	SelectedAPIs         *[]string           `json:"selected_apis"`
 	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
-	IncrementalMode      *bool               `json:"incremental_mode"`
+	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode             *bool               `json:"incremental_mode"`
+	IncrementalStartDateAPI     *string             `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn  *string             `json:"incremental_start_date_column"`
 }
 
 // ExecuteSyncPlanReq represents the request body for triggering a sync plan.

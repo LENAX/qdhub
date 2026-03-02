@@ -147,8 +147,9 @@ func TestSyncApplicationService_Integration_CreateAndGetSyncPlan(t *testing.T) {
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -199,7 +200,8 @@ func TestSyncApplicationService_Integration_ListSyncPlans(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Create a data source first
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -241,7 +243,8 @@ func TestSyncApplicationService_Integration_UpdateSyncPlan(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -292,7 +295,8 @@ func TestSyncApplicationService_Integration_DeleteSyncPlan(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -335,7 +339,8 @@ func TestSyncApplicationService_Integration_EnableDisablePlan(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Create a data source
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
@@ -390,8 +395,9 @@ func TestSyncApplicationService_Integration_CreateSyncPlan_DataSourceNotFound(t 
 	workflowExecutor := &MockSyncWorkflowExecutor{}
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	// Try to create sync plan with non-existent data source
 	_, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
@@ -419,9 +425,10 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_PassesAPIConfigs(t *
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, dependencyResolver, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
 
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
 	if err := dataSourceRepo.Create(dataSource); err != nil {
@@ -493,9 +500,10 @@ func TestSyncApplicationService_Integration_ExecuteSyncPlan_APIConfigsHaveParamK
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
 	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
-	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, resolverWithMappings, nil, uowImpl)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, capturingExecutor, resolverWithMappings, nil, uowImpl, metadataRepo, nil)
 
 	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
 	if err := dataSourceRepo.Create(dataSource); err != nil {

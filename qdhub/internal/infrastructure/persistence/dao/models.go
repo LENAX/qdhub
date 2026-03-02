@@ -150,10 +150,12 @@ type SyncPlanRow struct {
 	ResolvedAPIs         string         `db:"resolved_apis"`
 	ExecutionGraph       string         `db:"execution_graph"`
 	CronExpression       sql.NullString `db:"cron_expression"`
-	DefaultExecuteParams       string         `db:"default_execute_params"` // JSON: ExecuteParams
-	IncrementalMode            bool           `db:"incremental_mode"`
-	LastSuccessfulEndDate      sql.NullString `db:"last_successful_end_date"`
-	Status                     string         `db:"status"`
+	DefaultExecuteParams           string         `db:"default_execute_params"` // JSON: ExecuteParams
+	IncrementalMode                bool           `db:"incremental_mode"`
+	LastSuccessfulEndDate          sql.NullString `db:"last_successful_end_date"`
+	IncrementalStartDateAPI        sql.NullString `db:"incremental_start_date_api"`
+	IncrementalStartDateColumn     sql.NullString `db:"incremental_start_date_column"`
+	Status                         string         `db:"status"`
 	LastExecutedAt             sql.NullTime   `db:"last_executed_at"`
 	NextExecuteAt              sql.NullTime   `db:"next_execute_at"`
 	CreatedAt                  time.Time      `db:"created_at"`

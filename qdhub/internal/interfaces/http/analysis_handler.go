@@ -28,6 +28,7 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.GET("/trade-cal", h.GetTradeCalendar)
 		g.GET("/stocks", h.ListStocks)
 		g.GET("/stocks/indicators", h.GetStockIndicators)
+		g.GET("/stocks/snapshot", h.GetStockSnapshot)
 		g.GET("/stocks/:ts_code/basic", h.GetStockBasic)
 		g.GET("/indices", h.ListIndices)
 		g.GET("/concepts", h.ListConcepts)
@@ -106,71 +107,6 @@ func (h *AnalysisHandler) GetKLine(c *gin.Context) {
 	Success(c, data)
 }
 
-// GetStockIndicators handles GET /api/v1/analysis/stocks/indicators
-// @Summary      Get technical indicators
-// @Description  Get MA/RSI/MACD etc. for a stock, same date range and adjust as K-line
-// @Tags         Analysis
-// @Accept       json
-// @Produce      json
-// @Param        ts_code     query     string  true   "Stock code (e.g. 000001.SZ)"
-// @Param        start_date  query     string  true   "Start date YYYYMMDD"
-// @Param        end_date    query     string  true   "End date YYYYMMDD"
-// @Param        adjust_type query     string  false  "Adjust type: none, qfq, hfq" default(none)
-// @Param        period      query     string  false  "Period: D, W, M" default(D)
-// @Param        indicators  query     string  true   "Comma-separated: MA5,MA10,MA20,RSI,MACD"
-// @Success      200        {object}  Response
-// @Failure      400        {object}  Response
-// @Failure      500        {object}  Response
-// @Security     BearerAuth
-// @Router       /analysis/stocks/indicators [get]
-func (h *AnalysisHandler) GetStockIndicators(c *gin.Context) {
-	tsCode := c.Query("ts_code")
-	startDate := c.Query("start_date")
-	endDate := c.Query("end_date")
-	adjust := c.DefaultQuery("adjust_type", "none")
-	period := c.DefaultQuery("period", "D")
-	indicatorsParam := c.Query("indicators")
-	if tsCode == "" || startDate == "" || endDate == "" || indicatorsParam == "" {
-		BadRequest(c, "ts_code, start_date, end_date, indicators required")
-		return
-	}
-	var indicators []string
-	for _, s := range splitAndTrim(indicatorsParam, ",") {
-		if s != "" {
-			indicators = append(indicators, s)
-		}
-	}
-	if len(indicators) == 0 {
-		BadRequest(c, "indicators must contain at least one of MA5,MA10,MA20,RSI,MACD")
-		return
-	}
-	req := analysis.StockIndicatorRequest{
-		TsCode:     tsCode,
-		StartDate:  startDate,
-		EndDate:    endDate,
-		AdjustType: analysis.AdjustType(adjust),
-		Period:     period,
-		Indicators: indicators,
-	}
-	data, err := h.svc.GetStockIndicators(c.Request.Context(), req)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	Success(c, data)
-}
-
-func splitAndTrim(s, sep string) []string {
-	parts := strings.Split(s, sep)
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // ListStocks handles GET /api/v1/analysis/stocks
 // @Summary      List stocks
 // @Description  List stocks with optional market/industry/list_status/query filter. query searches by name, ts_code, symbol.
@@ -211,6 +147,47 @@ func (h *AnalysisHandler) ListStocks(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// GetStockSnapshot handles GET /api/v1/analysis/stocks/snapshot
+// @Summary      Get stock snapshot
+// @Description  Get latest adjusted close price and change for given stocks on a trade date
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        trade_date  query     string  true  "Trade date YYYYMMDD"
+// @Param        adjust_type query     string  false "Adjust type: none, qfq, hfq" default(qfq)
+// @Param        ts_codes    query     string  true  "Comma separated ts_code list"
+// @Success      200        {object}  Response
+// @Failure      400        {object}  Response
+// @Failure      500        {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/stocks/snapshot [get]
+func (h *AnalysisHandler) GetStockSnapshot(c *gin.Context) {
+	tradeDate := c.Query("trade_date")
+	adjust := c.DefaultQuery("adjust_type", "qfq")
+	rawCodes := c.Query("ts_codes")
+	if tradeDate == "" || rawCodes == "" {
+		BadRequest(c, "trade_date, ts_codes required")
+		return
+	}
+	parts := strings.Split(rawCodes, ",")
+	tsCodes := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			tsCodes = append(tsCodes, v)
+		}
+	}
+	if len(tsCodes) == 0 {
+		BadRequest(c, "ts_codes required")
+		return
+	}
+	list, err := h.svc.GetStockSnapshot(c.Request.Context(), tradeDate, analysis.AdjustType(adjust), tsCodes)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"trade_date": tradeDate, "items": list})
 }
 
 // GetTradeCalendar handles GET /api/v1/analysis/trade-cal
@@ -370,6 +347,61 @@ func (h *AnalysisHandler) GetFinancialIndicators(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// GetStockIndicators handles GET /api/v1/analysis/stocks/indicators
+// @Summary      Get technical indicators for a stock
+// @Description  Calculate MA/RSI/MACD indicators for given stock and date range, with same adjust type & period as K line
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        ts_code     query     string  true   "Stock code (e.g. 000001.SZ)"
+// @Param        start_date  query     string  true   "Start date YYYYMMDD"
+// @Param        end_date    query     string  true   "End date YYYYMMDD"
+// @Param        adjust_type query     string  false  "Adjust type: none, qfq, hfq" default(qfq)
+// @Param        period      query     string  false  "Period: D, W, M" default(D)
+// @Param        indicators  query     string  true   "Comma separated indicator names, e.g. MA5,MA10,MA20,RSI,MACD"
+// @Success      200        {object}  Response
+// @Failure      400        {object}  Response
+// @Failure      500        {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/stocks/indicators [get]
+func (h *AnalysisHandler) GetStockIndicators(c *gin.Context) {
+	tsCode := c.Query("ts_code")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	adjust := c.DefaultQuery("adjust_type", "qfq")
+	period := c.DefaultQuery("period", "D")
+	rawIndicators := c.Query("indicators")
+	if tsCode == "" || startDate == "" || endDate == "" || rawIndicators == "" {
+		BadRequest(c, "ts_code, start_date, end_date, indicators required")
+		return
+	}
+	parts := strings.Split(rawIndicators, ",")
+	names := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			names = append(names, v)
+		}
+	}
+	if len(names) == 0 {
+		BadRequest(c, "indicators required")
+		return
+	}
+	req := analysis.TechnicalIndicatorCalcRequest{
+		TsCode:     tsCode,
+		StartDate:  startDate,
+		EndDate:    endDate,
+		AdjustType: analysis.AdjustType(adjust),
+		Period:     period,
+		Indicators: names,
+	}
+	list, err := h.svc.GetTechnicalIndicators(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, list)
 }
 
 // getFinancialTableData 通用财报查询，table 由调用方指定

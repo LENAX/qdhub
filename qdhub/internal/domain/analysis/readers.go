@@ -105,6 +105,11 @@ type StockListReader interface {
 	List(ctx context.Context, req StockListRequest) ([]StockInfo, error)
 }
 
+// StockSnapshotReader 股票快照：按交易日与 ts_code 列表返回价格、涨跌幅等
+type StockSnapshotReader interface {
+	GetSnapshot(ctx context.Context, tradeDate string, tsCodes []string) ([]StockInfo, error)
+}
+
 // IndexListReader 指数列表
 type IndexListReader interface {
 	List(ctx context.Context, req IndexListRequest) ([]IndexInfo, error)

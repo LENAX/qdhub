@@ -57,6 +57,8 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 		dependencyResolver,
 		nil,
 		uowImpl,
+		nil, // metadataRepo
+		nil, // quantDBFactory
 	)
 	planExec.SetSyncService(svc)
 

@@ -74,7 +74,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	uowImpl := uow.NewUnitOfWork(db)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// 创建认证相关组件

@@ -34,6 +34,7 @@ func TestSyncService_Integration_ResolveSyncPlan_Transactional(t *testing.T) {
 	uowImpl := uow.NewUnitOfWork(db)
 
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	metadataRepo := repository.NewMetadataRepository(db)
 	svc := impl.NewSyncApplicationService(
 		syncPlanRepo,
 		cronCalculator,
@@ -44,6 +45,8 @@ func TestSyncService_Integration_ResolveSyncPlan_Transactional(t *testing.T) {
 		dependencyResolver,
 		nil,
 		uowImpl,
+		metadataRepo,
+		nil,
 	)
 
 	// Create a data source
@@ -114,6 +117,7 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 	dependencyResolver := &MockSyncDependencyResolver{}
 	uowImpl := uow.NewUnitOfWork(db)
 
+	metadataRepo := repository.NewMetadataRepository(db)
 	svc := impl.NewSyncApplicationService(
 		syncPlanRepo,
 		cronCalculator,
@@ -124,6 +128,8 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 		dependencyResolver,
 		nil,
 		uowImpl,
+		metadataRepo,
+		nil,
 	)
 
 	// Create a data source with token

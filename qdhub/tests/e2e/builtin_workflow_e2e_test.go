@@ -707,6 +707,8 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		dependencyResolver,
 		taskEngineAdapter,
 		uowImpl,
+		metadataRepo,
+		nil, // quantDBFactory
 	)
 
 	// 13. 有 QuantDB 时创建 Analysis 应用服务（含兜底），供 Analysis E2E 使用

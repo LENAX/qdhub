@@ -449,9 +449,11 @@ func (p *Parser) parseTableAsFields(table *goquery.Selection) []metadata.FieldMe
 		// Also consider "默认输出" column - Y means it's a commonly used field
 		if field.Name != "" {
 			nameLower := strings.ToLower(field.Name)
-			// ts_code + trade_date/end_date + report_type/comp_type for financial reports
+			// ts_code + trade_date/end_date/ann_date + report_type/comp_type for financial reports
+			// ann_date+end_date+ts_code 常用于财报类 API 的联合主键
 			if nameLower == "ts_code" || nameLower == "trade_date" || nameLower == "end_date" ||
-				nameLower == "report_type" || nameLower == "comp_type" || strings.HasSuffix(nameLower, "_code") {
+				nameLower == "ann_date" || nameLower == "report_type" || nameLower == "comp_type" ||
+				strings.HasSuffix(nameLower, "_code") {
 				field.IsPrimary = true
 				field.IsIndex = true
 			} else if strings.HasSuffix(nameLower, "_date") || strings.HasSuffix(nameLower, "_time") {

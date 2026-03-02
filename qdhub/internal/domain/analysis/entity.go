@@ -236,6 +236,13 @@ type FinancialReport struct {
 	NetCashFlow          *float64 `json:"net_cash_flow,omitempty"`
 }
 
+// TechnicalIndicator 技术指标（值对象）
+type TechnicalIndicator struct {
+	Name   string    `json:"name"`   // 指标名称，如 MA5/RSI/MACD
+	Values []float64 `json:"values"` // 与 K 线数据一一对应的数值序列
+	Color  string    `json:"color"`  // 建议前端使用的颜色
+}
+
 // IndexInfo 指数信息（值对象）
 type IndexInfo struct {
 	TsCode     string   `json:"ts_code"`

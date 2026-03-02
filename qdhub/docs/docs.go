@@ -1311,6 +1311,153 @@ const docTemplate = `{
                 }
             }
         },
+        "/analysis/stocks/indicators": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Calculate MA/RSI/MACD indicators for given stock and date range, with same adjust type \u0026 period as K line",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get technical indicators for a stock",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Stock code (e.g. 000001.SZ)",
+                        "name": "ts_code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "qfq",
+                        "description": "Adjust type: none, qfq, hfq",
+                        "name": "adjust_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "D",
+                        "description": "Period: D, W, M",
+                        "name": "period",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma separated indicator names, e.g. MA5,MA10,MA20,RSI,MACD",
+                        "name": "indicators",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/stocks/snapshot": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get latest adjusted close price and change for given stocks on a trade date",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get stock snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade date YYYYMMDD",
+                        "name": "trade_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "qfq",
+                        "description": "Adjust type: none, qfq, hfq",
+                        "name": "adjust_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma separated ts_code list",
+                        "name": "ts_codes",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/analysis/stocks/{ts_code}/basic": {
             "get": {
                 "security": [
@@ -4620,6 +4767,12 @@ const docTemplate = `{
                 "incremental_mode": {
                     "type": "boolean"
                 },
+                "incremental_start_date_api": {
+                    "type": "string"
+                },
+                "incremental_start_date_column": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -4829,6 +4982,12 @@ const docTemplate = `{
                 },
                 "incremental_mode": {
                     "type": "boolean"
+                },
+                "incremental_start_date_api": {
+                    "type": "string"
+                },
+                "incremental_start_date_column": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"

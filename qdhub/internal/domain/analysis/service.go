@@ -6,8 +6,6 @@ import "context"
 type AnalysisService interface {
 	// K线数据
 	GetKLine(ctx context.Context, req KLineRequest) ([]KLineData, error)
-	// 技术指标（基于 K 线，与 K 线同区间、同复权）
-	GetStockIndicators(ctx context.Context, req StockIndicatorRequest) ([]StockIndicatorItem, error)
 
 	// 涨跌停统计
 	GetLimitStats(ctx context.Context, startDate, endDate string) ([]LimitStats, error)
@@ -30,6 +28,9 @@ type AnalysisService interface {
 
 	// 股票列表
 	ListStocks(ctx context.Context, req StockListRequest) ([]StockInfo, error)
+
+	// 股票快照：指定交易日、复权方式与 ts_code 列表，返回价格/涨跌幅等
+	GetStockSnapshot(ctx context.Context, tradeDate string, adjustType AdjustType, tsCodes []string) ([]StockInfo, error)
 
 	// 指数列表
 	ListIndices(ctx context.Context, req IndexListRequest) ([]IndexInfo, error)
@@ -83,6 +84,9 @@ type AnalysisService interface {
 
 	// 交易日历：从 trade_cal 表取 is_open=1 的 cal_date，供前端过滤非交易日
 	GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error)
+
+	// 技术指标：基于 K 线数据在内存中计算 MA/RSI/MACD 等
+	GetTechnicalIndicators(ctx context.Context, req TechnicalIndicatorCalcRequest) ([]TechnicalIndicator, error)
 }
 
 // CustomQueryRequest 自定义查询请求（只读 SQL）
@@ -99,23 +103,6 @@ type KLineRequest struct {
 	EndDate    string     // 结束日期
 	AdjustType AdjustType // 复权类型
 	Period     string     // 周期：D/W/M
-}
-
-// StockIndicatorRequest 技术指标请求（与 K 线同 ts_code/区间/复权/周期）
-type StockIndicatorRequest struct {
-	TsCode     string
-	StartDate  string
-	EndDate    string
-	AdjustType AdjustType
-	Period     string
-	Indicators []string // MA5, MA10, MA20, RSI, MACD
-}
-
-// StockIndicatorItem 单条技术指标（与 K 线一一对应）
-type StockIndicatorItem struct {
-	Name   string    `json:"name"`
-	Values []float64 `json:"values"`
-	Color  string    `json:"color"`
 }
 
 // FactorRequest 因子计算请求
@@ -233,4 +220,14 @@ type FinancialReportRequest struct {
 	Fields     []string // 需要返回的字段列表（可选，默认返回全部）
 	Limit      int      // 返回数量限制
 	Offset     int      // 偏移量
+}
+
+// TechnicalIndicatorCalcRequest 技术指标计算请求
+type TechnicalIndicatorCalcRequest struct {
+	TsCode     string     // 股票代码（ts_code）
+	StartDate  string     // 开始日期 YYYYMMDD
+	EndDate    string     // 结束日期 YYYYMMDD
+	AdjustType AdjustType // 复权类型：none/qfq/hfq
+	Period     string     // 周期：D/W/M（目前仅 D 完全支持，其它按原始 K 线粒度计算）
+	Indicators []string   // 需要计算的指标名：如 MA5/MA10/MA20/RSI/MACD
 }

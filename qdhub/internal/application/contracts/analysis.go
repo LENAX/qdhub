@@ -10,7 +10,6 @@ import (
 // AnalysisApplicationService 分析应用服务：编排领域服务，对外提供分析与可视化 API
 type AnalysisApplicationService interface {
 	GetKLine(ctx context.Context, req analysis.KLineRequest) ([]analysis.KLineData, error)
-	GetStockIndicators(ctx context.Context, req analysis.StockIndicatorRequest) ([]analysis.StockIndicatorItem, error)
 	GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error)
 	GetLimitStockList(ctx context.Context, tradeDate string, limitType string) ([]analysis.LimitStock, error)
 	GetLimitLadder(ctx context.Context, tradeDate string) (*analysis.LimitLadderStats, error)
@@ -23,6 +22,7 @@ type AnalysisApplicationService interface {
 	ListStocks(ctx context.Context, req analysis.StockListRequest) ([]analysis.StockInfo, error)
 	ListIndices(ctx context.Context, req analysis.IndexListRequest) ([]analysis.IndexInfo, error)
 	ListConcepts(ctx context.Context, req analysis.ConceptListRequest) ([]analysis.ConceptInfo, error)
+	GetStockSnapshot(ctx context.Context, tradeDate string, adjustType analysis.AdjustType, tsCodes []string) ([]analysis.StockInfo, error)
 	GetDragonTigerList(ctx context.Context, req analysis.DragonTigerRequest) ([]analysis.DragonTigerList, error)
 	GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error)
 	GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error)
@@ -39,4 +39,5 @@ type AnalysisApplicationService interface {
 	GetFinancialTableData(ctx context.Context, table string, req analysis.FinancialReportRequest) ([]map[string]any, error)
 	ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQueryRequest) (*analysis.CustomQueryResult, error)
 	GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error)
+	GetTechnicalIndicators(ctx context.Context, req analysis.TechnicalIndicatorCalcRequest) ([]analysis.TechnicalIndicator, error)
 }
