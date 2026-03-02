@@ -489,12 +489,16 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	}{TargetDBPath: targetDBPath, StartDate: req.StartDate, EndDate: req.EndDate, StartTime: req.StartTime, EndTime: req.EndTime}
 	if plan.DefaultExecuteParams != nil {
 		p := plan.DefaultExecuteParams
-		if eff.StartDate == "" {
-			eff.StartDate = p.StartDate
+		// 非增量模式：若调用方未显式传入日期，则使用计划默认日期范围
+		if !plan.IncrementalMode {
+			if eff.StartDate == "" {
+				eff.StartDate = p.StartDate
+			}
+			if eff.EndDate == "" {
+				eff.EndDate = p.EndDate
+			}
 		}
-		if eff.EndDate == "" {
-			eff.EndDate = p.EndDate
-		}
+		// 无论是否为增量模式，时间段均可从默认参数补充
 		if eff.StartTime == "" {
 			eff.StartTime = p.StartTime
 		}
@@ -527,6 +531,8 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			eff.StartDate = plan.DefaultExecuteParams.StartDate
 		}
 		eff.EndDate = time.Now().Format("20060102")
+		logrus.Infof("[ExecuteSyncPlan] IncrementalMode=true for plan %s, resolved date range: %s -> %s (requiresDate=%v)",
+			plan.ID, eff.StartDate, eff.EndDate, requiresDate)
 	}
 	// 仅当计划内任一 API 的参数包含 date/time/dt 等模式时才要求配置日期范围
 	if requiresDate && (eff.StartDate == "" || eff.EndDate == "") {

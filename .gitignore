@@ -57,3 +57,6 @@ qdhub/data/qdhub.db-wal
 qdhub/logs/qdhub.log
 qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal
+bak/qdhub.duckdb
+qdhub/data/qdhub.db-shm
+qdhub/data/qdhub.db-wal
