@@ -1,0 +1,2 @@
+-- Rollback incremental mode columns (SQLite does not support DROP COLUMN in older versions; skip if needed)
+-- For SQLite 3.35.0+: ALTER TABLE sync_plan DROP COLUMN incremental_mode; ALTER TABLE sync_plan DROP COLUMN last_successful_end_date;

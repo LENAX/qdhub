@@ -1,0 +1,3261 @@
+basePath: /api/v1
+definitions:
+  contracts.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  contracts.RegisterRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 8
+        type: string
+      username:
+        maxLength: 64
+        minLength: 3
+        type: string
+    required:
+    - email
+    - password
+    - username
+    type: object
+  contracts.UpdatePasswordRequest:
+    properties:
+      new_password:
+        minLength: 8
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
+  http.CreateAPISyncStrategyReq:
+    properties:
+      api_name:
+        type: string
+      dependencies:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      preferred_param:
+        description: none/trade_date/ts_code
+        type: string
+      required_params:
+        items:
+          type: string
+        type: array
+      support_date_range:
+        type: boolean
+    required:
+    - api_name
+    - preferred_param
+    type: object
+  http.CreateDataSourceReq:
+    properties:
+      base_url:
+        type: string
+      description:
+        type: string
+      doc_url:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  http.CreateDataStoreReq:
+    properties:
+      description:
+        type: string
+      dsn:
+        type: string
+      name:
+        type: string
+      storage_path:
+        type: string
+      type:
+        description: duckdb, clickhouse, postgresql
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  http.CreateSyncPlanReq:
+    properties:
+      cron_expression:
+        type: string
+      data_source_id:
+        type: string
+      data_store_id:
+        type: string
+      default_execute_params:
+        $ref: '#/definitions/sync.ExecuteParams'
+      description:
+        type: string
+      incremental_mode:
+        type: boolean
+      incremental_start_date_api:
+        type: string
+      incremental_start_date_column:
+        type: string
+      name:
+        type: string
+      selected_apis:
+        items:
+          type: string
+        type: array
+    required:
+    - data_source_id
+    - name
+    - selected_apis
+    type: object
+  http.CreateTablesForDatasourceReq:
+    properties:
+      data_source_id:
+        type: string
+      max_tables:
+        type: integer
+    required:
+    - data_source_id
+    type: object
+  http.ExecuteSyncPlanReq:
+    properties:
+      end_dt:
+        description: optional, datetime
+        type: string
+      start_dt:
+        description: optional, datetime (RFC3339 or 2006-01-02)
+        type: string
+    type: object
+  http.ExecutionCallbackReq:
+    properties:
+      error_message:
+        type: string
+      execution_id:
+        type: string
+      record_count:
+        type: integer
+      success:
+        type: boolean
+    required:
+    - execution_id
+    type: object
+  http.ListAPINamesResp:
+    properties:
+      api_names:
+        items:
+          type: string
+        type: array
+    type: object
+  http.PagedResponse:
+    properties:
+      code:
+        type: integer
+      data: {}
+      message:
+        type: string
+      page:
+        type: integer
+      size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  http.RefreshMetadataReq:
+    properties:
+      doc_content:
+        description: Optional - workflow fetches from DocURL
+        type: string
+      doc_type:
+        description: Optional - workflow detects type automatically
+        type: string
+    type: object
+  http.Response:
+    description: Standard API response wrapper
+    properties:
+      code:
+        example: 0
+        type: integer
+      data:
+        type: object
+      message:
+        example: success
+        type: string
+    type: object
+  http.SetTokenReq:
+    properties:
+      expires_at:
+        type: string
+      token:
+        type: string
+    required:
+    - token
+    type: object
+  http.UpdateAPISyncStrategyReq:
+    properties:
+      dependencies:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      preferred_param:
+        type: string
+      required_params:
+        items:
+          type: string
+        type: array
+      support_date_range:
+        type: boolean
+    type: object
+  http.UpdateDataSourceCommonDataAPIsReq:
+    properties:
+      common_data_apis:
+        items:
+          type: string
+        type: array
+    type: object
+  http.UpdateDataStoreReq:
+    properties:
+      description:
+        type: string
+      dsn:
+        type: string
+      name:
+        type: string
+      storage_path:
+        type: string
+      type:
+        description: duckdb, clickhouse, postgresql
+        type: string
+    type: object
+  http.UpdateSyncPlanReq:
+    properties:
+      cron_expression:
+        type: string
+      data_store_id:
+        type: string
+      default_execute_params:
+        $ref: '#/definitions/sync.ExecuteParams'
+      description:
+        type: string
+      incremental_mode:
+        type: boolean
+      incremental_start_date_api:
+        type: string
+      incremental_start_date_column:
+        type: string
+      name:
+        type: string
+      selected_apis:
+        items:
+          type: string
+        type: array
+    type: object
+  sync.ExecuteParams:
+    properties:
+      end_date:
+        type: string
+      end_time:
+        type: string
+      start_date:
+        type: string
+      start_time:
+        type: string
+      target_db_path:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@qdhub.example.com
+    name: QDHub Support
+    url: https://github.com/qdhub/qdhub
+  description: |-
+    QDHub - Quantitative Data Hub Management System API
+    Provides metadata management, automatic table creation, data synchronization, and workflow orchestration.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: QDHub API
+  version: "1.0"
+paths:
+  /analysis/concept-heat:
+    get:
+      consumes:
+      - application/json
+      description: Get concept theme heat for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept heat
+      tags:
+      - Analysis
+  /analysis/concept-rotation:
+    get:
+      consumes:
+      - application/json
+      description: Get concept rotation stats for a date range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: pct_chg
+        description: Rank by field
+        in: query
+        name: rank_by
+        type: string
+      - description: Top N
+        in: query
+        name: top_n
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept rotation
+      tags:
+      - Analysis
+  /analysis/concept-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get stocks under a concept for a trade date
+      parameters:
+      - description: Concept code
+        in: query
+        name: concept_code
+        required: true
+        type: string
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get concept stocks
+      tags:
+      - Analysis
+  /analysis/concepts:
+    get:
+      consumes:
+      - application/json
+      description: List concept themes with optional source filter
+      parameters:
+      - description: Source filter
+        in: query
+        name: source
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List concepts
+      tags:
+      - Analysis
+  /analysis/custom-query/query:
+    post:
+      consumes:
+      - application/json
+      description: Execute a read-only SQL query (max_rows, timeout_seconds apply)
+      parameters:
+      - description: sql, max_rows, timeout_seconds
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Execute read-only query
+      tags:
+      - Analysis
+  /analysis/dragon-tiger:
+    get:
+      consumes:
+      - application/json
+      description: Get dragon-tiger (龙虎榜) list with optional trade_date/ts_code filter
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        type: string
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get dragon-tiger list
+      tags:
+      - Analysis
+  /analysis/factors:
+    post:
+      consumes:
+      - application/json
+      description: Calculate factor values for given stocks and date range
+      parameters:
+      - description: ts_codes, start_date, end_date, factors
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Calculate factors
+      tags:
+      - Analysis
+  /analysis/financial/balancesheet:
+    get:
+      responses: {}
+  /analysis/financial/cashflow:
+    get:
+      responses: {}
+  /analysis/financial/income:
+    get:
+      responses: {}
+  /analysis/financial/indicators:
+    get:
+      consumes:
+      - application/json
+      description: Get financial indicators for a stock
+      parameters:
+      - description: Stock code
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 50
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get financial indicators
+      tags:
+      - Analysis
+  /analysis/indices:
+    get:
+      consumes:
+      - application/json
+      description: List market indices with optional market/category filter
+      parameters:
+      - description: Market filter
+        in: query
+        name: market
+        type: string
+      - description: Category filter
+        in: query
+        name: category
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List indices
+      tags:
+      - Analysis
+  /analysis/kline:
+    get:
+      consumes:
+      - application/json
+      description: Get daily/weekly/monthly K-line data for a stock
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: none
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - default: D
+        description: 'Period: D, W, M'
+        in: query
+        name: period
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get K-line data
+      tags:
+      - Analysis
+  /analysis/limit-stats:
+    get:
+      consumes:
+      - application/json
+      description: Get daily limit statistics for a date range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up/down stats
+      tags:
+      - Analysis
+  /analysis/limit-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get list of limit up or limit down stocks for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: up
+        description: up or down
+        in: query
+        name: limit_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up/down stock list
+      tags:
+      - Analysis
+  /analysis/limit-up-comparison:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up comparison for today vs previous days
+      parameters:
+      - description: Today date YYYYMMDD
+        in: query
+        name: today_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up comparison
+      tags:
+      - Analysis
+  /analysis/limit-up-ladder:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up ladder stats for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up ladder
+      tags:
+      - Analysis
+  /analysis/limit-up-list:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated limit up stock list for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get limit up list
+      tags:
+      - Analysis
+  /analysis/money-flow:
+    get:
+      consumes:
+      - application/json
+      description: Get main/net money flow for a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - description: Market
+        in: query
+        name: market
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get money flow
+      tags:
+      - Analysis
+  /analysis/news:
+    get:
+      consumes:
+      - application/json
+      description: List news with optional ts_code, category, date range
+      parameters:
+      - description: Stock code
+        in: query
+        name: ts_code
+        type: string
+      - description: News category
+        in: query
+        name: category
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 20
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List news
+      tags:
+      - Analysis
+  /analysis/popularity-rank:
+    get:
+      consumes:
+      - application/json
+      description: Get stock popularity rank by volume or other metric
+      parameters:
+      - default: volume
+        description: Rank type (e.g. volume)
+        in: query
+        name: rank_type
+        type: string
+      - default: 20
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get popularity rank
+      tags:
+      - Analysis
+  /analysis/sector-limit-up-stats:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up statistics by sector (industry/concept) for a trade
+        date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: industry
+        description: industry or concept
+        in: query
+        name: sector_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sector limit up stats
+      tags:
+      - Analysis
+  /analysis/sector-limit-up-stocks:
+    get:
+      consumes:
+      - application/json
+      description: Get limit up stocks for a specific sector on a trade date
+      parameters:
+      - description: Sector code
+        in: query
+        name: sector_code
+        required: true
+        type: string
+      - default: industry
+        description: industry or concept
+        in: query
+        name: sector_type
+        type: string
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sector limit up stocks
+      tags:
+      - Analysis
+  /analysis/stocks:
+    get:
+      consumes:
+      - application/json
+      description: List stocks with optional market/industry/list_status/query filter.
+        query searches by name, ts_code, symbol.
+      parameters:
+      - description: Market filter
+        in: query
+        name: market
+        type: string
+      - description: Industry filter
+        in: query
+        name: industry
+        type: string
+      - description: List status filter
+        in: query
+        name: list_status
+        type: string
+      - description: Search by name or code (fuzzy)
+        in: query
+        name: query
+        type: string
+      - default: 100
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List stocks
+      tags:
+      - Analysis
+  /analysis/stocks/{ts_code}/basic:
+    get:
+      consumes:
+      - application/json
+      description: Get basic information for a stock by ts_code
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: path
+        name: ts_code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get stock basic info
+      tags:
+      - Analysis
+  /analysis/stocks/indicators:
+    get:
+      consumes:
+      - application/json
+      description: Calculate MA/RSI/MACD indicators for given stock and date range,
+        with same adjust type & period as K line
+      parameters:
+      - description: Stock code (e.g. 000001.SZ)
+        in: query
+        name: ts_code
+        required: true
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: qfq
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - default: D
+        description: 'Period: D, W, M'
+        in: query
+        name: period
+        type: string
+      - description: Comma separated indicator names, e.g. MA5,MA10,MA20,RSI,MACD
+        in: query
+        name: indicators
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get technical indicators for a stock
+      tags:
+      - Analysis
+  /analysis/stocks/snapshot:
+    get:
+      consumes:
+      - application/json
+      description: Get latest adjusted close price and change for given stocks on
+        a trade date
+      parameters:
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        required: true
+        type: string
+      - default: qfq
+        description: 'Adjust type: none, qfq, hfq'
+        in: query
+        name: adjust_type
+        type: string
+      - description: Comma separated ts_code list
+        in: query
+        name: ts_codes
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get stock snapshot
+      tags:
+      - Analysis
+  /analysis/trade-cal:
+    get:
+      consumes:
+      - application/json
+      description: Returns list of trading dates (cal_date where is_open=1) from trade_cal
+        table for the given range
+      parameters:
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get trading calendar
+      tags:
+      - Analysis
+  /api-sync-strategies/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific API sync strategy
+      parameters:
+      - description: API sync strategy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete API sync strategy
+      tags:
+      - DataSources
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific API sync strategy by ID
+      parameters:
+      - description: API sync strategy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get API sync strategy
+      tags:
+      - DataSources
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific API sync strategy
+      parameters:
+      - description: API sync strategy ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated API sync strategy details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateAPISyncStrategyReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update API sync strategy
+      tags:
+      - DataSources
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user and return access tokens
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Login user
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      description: Get current authenticated user information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get current user
+      tags:
+      - Auth
+  /auth/password:
+    put:
+      consumes:
+      - application/json
+      description: Update current user's password
+      parameters:
+      - description: Password update details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.UpdatePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update password
+      tags:
+      - Auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refresh access token using refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: refresh_token
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Refresh access token
+      tags:
+      - Auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Register a new user account
+      parameters:
+      - description: Registration details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      summary: Register a new user
+      tags:
+      - Auth
+  /datasources:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all registered data sources
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List all data sources
+      tags:
+      - DataSources
+    post:
+      consumes:
+      - application/json
+      description: Register a new data source with its connection details
+      parameters:
+      - description: Data source details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateDataSourceReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a new data source
+      tags:
+      - DataSources
+  /datasources/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a data source and cascade to api_metadata, api_sync_strategies,
+        api_categories, token. Admin only.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden (non-admin)
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete a data source
+      tags:
+      - DataSources
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific data source by ID
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get a data source
+      tags:
+      - DataSources
+  /datasources/{id}/api-categories:
+    get:
+      consumes:
+      - application/json
+      description: Get API categories. When has_apis_only=true, only categories that
+        have at least one api_metadata are returned (for catalog dropdown).
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: If true, only return categories that have at least one API
+        in: query
+        name: has_apis_only
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: []APICategory'
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List API categories for a data source
+      tags:
+      - DataSources
+  /datasources/{id}/api-metadata:
+    get:
+      consumes:
+      - application/json
+      description: 'Get a paginated list of API metadata. Each item includes category_id.
+        Optional filters: api_metadata_id, name, category_id.'
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 1
+        description: Page number (1-based)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size (max 100)
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter by API metadata ID (exact)
+        in: query
+        name: api_metadata_id
+        type: string
+      - description: Filter by name (contains)
+        in: query
+        name: name
+        type: string
+      - description: Filter by API category ID (exact)
+        in: query
+        name: category_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: API metadata list with category_id; total, page, size'
+          schema:
+            $ref: '#/definitions/http.PagedResponse'
+        "404":
+          description: Data source not found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List API metadata for a data source
+      tags:
+      - DataSources
+  /datasources/{id}/api-metadata/{meta_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a single API metadata by ID. Admin only.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: API metadata ID
+        in: path
+        name: meta_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden (non-admin)
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete API metadata
+      tags:
+      - DataSources
+  /datasources/{id}/api-names:
+    get:
+      description: Get all API names for the data source (e.g. for common-data-apis
+        checkbox form).
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.ListAPINamesResp'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List API names for a data source
+      tags:
+      - DataSources
+  /datasources/{id}/api-sync-strategies:
+    get:
+      consumes:
+      - application/json
+      description: Get all API sync strategies for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List API sync strategies
+      tags:
+      - DataSources
+    post:
+      consumes:
+      - application/json
+      description: Create a new API sync strategy for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: API sync strategy details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateAPISyncStrategyReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create API sync strategy
+      tags:
+      - DataSources
+  /datasources/{id}/common-data-apis:
+    put:
+      consumes:
+      - application/json
+      description: Set the list of API names treated as common data (e.g. trade_cal,
+        stock_basic for tushare). Used for cache/DataStore reuse across workflows.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: common_data_apis array
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateDataSourceCommonDataAPIsReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update common data APIs for a data source
+      tags:
+      - DataSources
+  /datasources/{id}/config:
+    get:
+      consumes:
+      - application/json
+      description: Returns api_url and token for pre-filling the configure modal.
+        Token is only included when present.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: api_url, token (optional)
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get data source config for edit
+      tags:
+      - DataSources
+  /datasources/{id}/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Trigger metadata crawl workflow for the data source. The workflow
+        will fetch documentation from the data source's DocURL and parse it.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Request body (optional, workflow will fetch from DocURL)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/http.RefreshMetadataReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Refresh metadata from data source
+      tags:
+      - DataSources
+  /datasources/{id}/token:
+    get:
+      consumes:
+      - application/json
+      description: Get token information for a data source (token value is not returned
+        for security)
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get data source token
+      tags:
+      - DataSources
+    post:
+      consumes:
+      - application/json
+      description: Set or update the authentication token for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Token details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.SetTokenReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Set data source token
+      tags:
+      - DataSources
+  /datasources/{id}/token/validate:
+    get:
+      consumes:
+      - application/json
+      description: Check if data source has a token and validate it via adapter test
+        request. No token returns unauthenticated; with token runs a test request
+        and returns success or error detail.
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: has_token, valid, message
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Validate data source token
+      tags:
+      - DataSources
+  /datastores:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all configured data stores
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List all data stores
+      tags:
+      - DataStores
+    post:
+      consumes:
+      - application/json
+      description: Create a new quantitative data store configuration
+      parameters:
+      - description: Data store details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateDataStoreReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a new data store
+      tags:
+      - DataStores
+  /datastores/{id}:
+    delete:
+      description: Delete a data store. Fails if any sync plan references it.
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete a data store
+      tags:
+      - DataStores
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific data store by ID
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get a data store
+      tags:
+      - DataStores
+    put:
+      consumes:
+      - application/json
+      description: Update name, description, type, dsn, or storage_path of a data
+        store
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateDataStoreReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update a data store
+      tags:
+      - DataStores
+  /datastores/{id}/create-tables:
+    post:
+      consumes:
+      - application/json
+      description: Create tables for all APIs of a data source in the data store using
+        the built-in create_tables workflow
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Create tables request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateTablesForDatasourceReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create tables for datasource
+      tags:
+      - DataStores
+  /datastores/{id}/tables:
+    get:
+      description: Returns table names in the data store's database (e.g. main schema)
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: []string'
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List tables in a data store
+      tags:
+      - DataStores
+  /datastores/{id}/tables/{tableName}/data:
+    get:
+      description: 'Returns a page of rows from a table and total count. Query: page,
+        page_size, q (search), search_column (optional)'
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Table name
+        in: path
+        name: tableName
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size (max 100)
+        in: query
+        name: page_size
+        type: integer
+      - description: Search term (ILIKE)
+        in: query
+        name: q
+        type: string
+      - description: Column to search in (omit for all)
+        in: query
+        name: search_column
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: rows, total: count'
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get paginated table data
+      tags:
+      - DataStores
+  /datastores/{id}/validate:
+    post:
+      description: Check whether the data store's database actually exists and is
+        reachable
+      parameters:
+      - description: Data store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'Valid: true/false, Message when invalid'
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Validate a data store
+      tags:
+      - DataStores
+  /executions/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync execution
+      tags:
+      - SyncPlans
+  /executions/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Cancel a running sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Cancel sync execution
+      tags:
+      - SyncPlans
+  /executions/{id}/detail:
+    get:
+      consumes:
+      - application/json
+      description: Get per-API stats and task-level error details for a sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync execution detail
+      tags:
+      - SyncPlans
+  /executions/{id}/pause:
+    post:
+      consumes:
+      - application/json
+      description: Pause a running sync execution (workflow instance)
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Pause sync execution
+      tags:
+      - SyncPlans
+  /executions/{id}/resume:
+    post:
+      consumes:
+      - application/json
+      description: Resume a paused sync execution
+      parameters:
+      - description: Execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Resume sync execution
+      tags:
+      - SyncPlans
+  /instances:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of workflow instances, optionally filtered by status
+      parameters:
+      - description: Workflow definition ID
+        in: query
+        name: workflow_id
+        required: true
+        type: string
+      - description: Filter by instance status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List workflow instances
+      tags:
+      - Workflows
+  /instances/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Cancel a running or paused workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Cancel workflow instance
+      tags:
+      - Workflows
+  /instances/{id}/progress:
+    get:
+      consumes:
+      - application/json
+      description: Get the progress status of a workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get instance progress
+      tags:
+      - Workflows
+  /instances/{id}/progress-stream:
+    get:
+      consumes:
+      - application/json
+      description: Stream the progress status of a workflow instance via Server-Sent
+        Events (SSE)
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of progress events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Stream instance progress
+      tags:
+      - Workflows
+  /instances/{id}/tasks:
+    get:
+      consumes:
+      - application/json
+      description: Get all task instances for a workflow instance
+      parameters:
+      - description: Workflow instance ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get task instances
+      tags:
+      - Workflows
+  /sync-plans:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all sync plans
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List all sync plans
+      tags:
+      - SyncPlans
+    post:
+      consumes:
+      - application/json
+      description: Create a sync plan to synchronize data from APIs to a data store
+      parameters:
+      - description: Sync plan details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.CreateSyncPlanReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a new sync plan
+      tags:
+      - SyncPlans
+  /sync-plans/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a specific sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete a sync plan
+      tags:
+      - SyncPlans
+    get:
+      consumes:
+      - application/json
+      description: Get details of a specific sync plan by ID
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get a sync plan
+      tags:
+      - SyncPlans
+    put:
+      consumes:
+      - application/json
+      description: Update details of a specific sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated sync plan details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.UpdateSyncPlanReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Update a sync plan
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/disable:
+    post:
+      consumes:
+      - application/json
+      description: Disable a sync plan to stop scheduled execution
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Disable a sync plan
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/enable:
+    post:
+      consumes:
+      - application/json
+      description: Enable a sync plan for scheduled execution
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Enable a sync plan
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      description: Manually trigger execution of a sync plan. Target DB path is resolved
+        from the sync plan's associated data store. Request body may be empty; start_dt/end_dt
+        are optional.
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Execution parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.ExecuteSyncPlanReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Execute a sync plan
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/executions:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all executions for a sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List sync executions
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/history:
+    get:
+      consumes:
+      - application/json
+      description: 'Returns paginated execution history for the plan. Query: limit
+        (default 20), offset (default 0).'
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 20
+        description: Page size
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync plan execution history
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/progress:
+    get:
+      consumes:
+      - application/json
+      description: Get aggregated progress of the latest execution for a sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync plan progress
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/progress-stream:
+    get:
+      consumes:
+      - application/json
+      description: Stream aggregated progress of the latest execution for a sync plan
+        via SSE
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of progress events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Stream sync plan progress
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/resolve:
+    post:
+      consumes:
+      - application/json
+      description: Resolve API dependencies for a sync plan
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Resolve sync plan dependencies
+      tags:
+      - SyncPlans
+  /sync-plans/{id}/summary:
+    get:
+      consumes:
+      - application/json
+      description: Returns the latest execution summary for the plan (status, record_count,
+        synced_apis, skipped_apis). Null when the plan has never been executed.
+      parameters:
+      - description: Sync plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get sync plan execution summary
+      tags:
+      - SyncPlans
+  /sync/callback:
+    post:
+      consumes:
+      - application/json
+      description: Handle callback from workflow engine for sync execution (internal
+        use)
+      parameters:
+      - description: Execution callback details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.ExecutionCallbackReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Handle execution callback
+      tags:
+      - SyncPlans
+securityDefinitions:
+  ApiKeyAuth:
+    description: API Key for authentication
+    in: header
+    name: Authorization
+    type: apiKey
+  BearerAuth:
+    description: JWT Bearer token (e.g. "Bearer <access_token>")
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
