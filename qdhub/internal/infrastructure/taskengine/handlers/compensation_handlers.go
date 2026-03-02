@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -13,6 +12,7 @@ import (
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/taskengine/jobs"
 )
 
 // ==================== SAGA 补偿函数 ====================
@@ -224,17 +224,14 @@ func CompensateCreateTableHandler(tc *task.TaskContext) {
 		return
 	}
 
-	// 打开数据库并删除表
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := jobs.GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 获取 QuantDB 失败: %v", err)
 		return
 	}
-	defer db.Close()
 
-	// 执行 DROP TABLE
-	dropSQL := `DROP TABLE IF EXISTS "` + tableName + `"`
-	if _, err := db.Exec(dropSQL); err != nil {
+	ctx := context.Background()
+	if err := quantDB.DropTable(ctx, tableName); err != nil {
 		logrus.Printf("[Compensate] ❌ 删除表失败: %v", err)
 		return
 	}
@@ -275,25 +272,20 @@ func CompensateSyncDataHandler(tc *task.TaskContext) {
 		return
 	}
 
-	// 打开数据库
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := jobs.GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 获取 QuantDB 失败: %v", err)
 		return
 	}
-	defer db.Close()
 
-	// 尝试删除带有 sync_batch_id 的记录
-	deleteSQL := `DELETE FROM "` + apiName + `" WHERE sync_batch_id = ?`
-	result, err := db.Exec(deleteSQL, syncBatchID)
+	ctx := context.Background()
+	affected, err := quantDB.DeleteBySyncBatchID(ctx, apiName, syncBatchID)
 	if err != nil {
-		// 表可能没有 sync_batch_id 字段
-		logrus.Printf("[Compensate] ⚠️ 无法按批次删除，sync_batch_id 字段可能不存在: %v", err)
+		logrus.Printf("[Compensate] ⚠️ 无法按批次删除: %v", err)
 		logrus.Printf("[Compensate] 📝 需要手动回滚 - Table: %s, BatchID: %s", apiName, syncBatchID)
 		return
 	}
 
-	affected, _ := result.RowsAffected()
 	logrus.Printf("[Compensate] ✅ SyncData 回滚成功 - Table: %s, 删除记录数: %d", apiName, affected)
 }
 
@@ -328,15 +320,13 @@ func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
 		return
 	}
 
-	// 打开数据库并恢复旧检查点
-	db, err := sql.Open("sqlite3", targetDBPath)
+	quantDB, err := jobs.GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		logrus.Printf("[Compensate] ❌ 打开数据库失败: %v", err)
+		logrus.Printf("[Compensate] ❌ 获取 QuantDB 失败: %v", err)
 		return
 	}
-	defer db.Close()
 
-	// 恢复旧的检查点值
+	ctx := context.Background()
 	for apiName, oldDate := range oldCheckpoints {
 		dateStr, ok := oldDate.(string)
 		if !ok {
@@ -344,7 +334,7 @@ func CompensateUpdateCheckpointHandler(tc *task.TaskContext) {
 		}
 
 		updateSQL := `UPDATE "` + checkpointTable + `" SET last_sync_date = ? WHERE api_name = ?`
-		if _, err := db.Exec(updateSQL, dateStr, apiName); err != nil {
+		if _, err := quantDB.Execute(ctx, updateSQL, dateStr, apiName); err != nil {
 			logrus.Printf("[Compensate] ⚠️ 恢复检查点失败: %s, error=%v", apiName, err)
 			continue
 		}

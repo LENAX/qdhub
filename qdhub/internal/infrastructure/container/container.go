@@ -19,17 +19,21 @@ import (
 	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/datasourcevalidator"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
 	analysisinfra "qdhub/internal/infrastructure/analysis"
+	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/scheduler"
+	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 	httpserver "qdhub/internal/interfaces/http"
@@ -66,6 +70,7 @@ type DependencyContainer interface {
 	// Application Services
 	GetMetadataSvc() contracts.MetadataApplicationService
 	GetDataStoreSvc() contracts.DataStoreApplicationService
+	GetDataQualitySvc() contracts.DataQualityApplicationService
 	GetSyncSvc() contracts.SyncApplicationService
 	GetWorkflowSvc() contracts.WorkflowApplicationService
 
@@ -111,10 +116,11 @@ type schedulerModule struct {
 
 // applicationServiceModule holds application service dependencies.
 type applicationServiceModule struct {
-	MetadataSvc  contracts.MetadataApplicationService
-	DataStoreSvc contracts.DataStoreApplicationService
-	SyncSvc      contracts.SyncApplicationService
-	WorkflowSvc  contracts.WorkflowApplicationService
+	MetadataSvc    contracts.MetadataApplicationService
+	DataStoreSvc   contracts.DataStoreApplicationService
+	DataQualitySvc contracts.DataQualityApplicationService
+	SyncSvc        contracts.SyncApplicationService
+	WorkflowSvc    contracts.WorkflowApplicationService
 }
 
 // Container holds all application dependencies and implements DependencyContainer interface.
@@ -149,18 +155,20 @@ type Container struct {
 	DependencyResolver sync.DependencyResolver
 
 	// Application Services (backward compatibility: direct field access)
-	MetadataSvc  contracts.MetadataApplicationService
-	DataStoreSvc contracts.DataStoreApplicationService
-	SyncSvc      contracts.SyncApplicationService
-	WorkflowSvc  contracts.WorkflowApplicationService
-	AuthSvc      contracts.AuthApplicationService
-	AnalysisSvc contracts.AnalysisApplicationService
+	MetadataSvc    contracts.MetadataApplicationService
+	DataStoreSvc   contracts.DataStoreApplicationService
+	DataQualitySvc contracts.DataQualityApplicationService
+	SyncSvc        contracts.SyncApplicationService
+	WorkflowSvc    contracts.WorkflowApplicationService
+	AuthSvc        contracts.AuthApplicationService
+	AnalysisSvc    contracts.AnalysisApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
 
 	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
-	QuantDBAdapter datastore.QuantDB
+	QuantDBAdapter  datastore.QuantDB
+	QuantDBFactory  datastore.QuantDBFactory
 
 	// Unit of Work for transaction management
 	UoW contracts.UnitOfWork
@@ -380,6 +388,11 @@ func (c *Container) GetDataStoreSvc() contracts.DataStoreApplicationService {
 	return c.DataStoreSvc
 }
 
+// GetDataQualitySvc returns the data quality application service.
+func (c *Container) GetDataQualitySvc() contracts.DataQualityApplicationService {
+	return c.DataQualitySvc
+}
+
 // GetSyncSvc returns the sync application service.
 func (c *Container) GetSyncSvc() contracts.SyncApplicationService {
 	return c.SyncSvc
@@ -471,6 +484,38 @@ func (c *Container) runMigrations() error {
 	// 007_daily_adj_factor_trade_date_expand
 	if err := c.runMigrationFile("./migrations/007_daily_adj_factor_trade_date_expand.up.sql"); err != nil {
 		return fmt.Errorf("failed to run 007_daily_adj_factor_trade_date_expand: %w", err)
+	}
+
+	// 009_add_api_metadata_param_dependencies (idempotent: 001 may already have the column)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/009_add_api_metadata_param_dependencies.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 009_add_api_metadata_param_dependencies: %w", err)
+	}
+
+	// 010_sync_plan_incremental_mode (idempotent)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/010_sync_plan_incremental_mode.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 010_sync_plan_incremental_mode: %w", err)
+	}
+
+	// 011_data_source_common_data_apis (idempotent)
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/011_data_source_common_data_apis.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 011_data_source_common_data_apis: %w", err)
+	}
+
+	// 012_sync_execution_detail
+	if err := c.runMigrationFile("./migrations/012_sync_execution_detail.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 012_sync_execution_detail: %w", err)
+	}
+	// 013_sync_execution_workflow_error_message
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/013_sync_execution_workflow_error_message.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 013_sync_execution_workflow_error_message: %w", err)
+	}
+	// 014_daily_basic_sync_strategy_fix：daily_basic 按 trade_date 逐日拉取以覆盖日期范围
+	if err := c.runMigrationFile("./migrations/014_daily_basic_sync_strategy_fix.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 014_daily_basic_sync_strategy_fix: %w", err)
+	}
+	// 015_sync_plan_incremental_start_date_source：增量模式下可选“数据最新日期”来源（API+列）
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/015_sync_plan_incremental_start_date_source.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 015_sync_plan_incremental_start_date_source: %w", err)
 	}
 
 	// 008_seed_guest_user (driver-specific)
@@ -660,20 +705,30 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		MetadataRepo:       c.MetadataRepo,
 	}
 
-	// 如果配置了默认 DuckDB 路径，创建并注入 QuantDB adapter
-	log.Printf("[Container] DefaultDuckDBPath from config: '%s'", c.config.DefaultDuckDBPath)
+	// QuantDBFactory：按 target_db_path（来自数据库 Quant Data Store）按需创建 DuckDB 连接，与 config 默认路径解耦
+	// 同一个 Factory 实例同时注入 Task Engine 和 Application Service，确保共享同一连接
+	c.QuantDBFactory = duckdb.NewFactory()
+	taskEngineDeps.QuantDBFactory = c.QuantDBFactory
+	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
+
+	// CommonDataCache：公共数据内存缓存（TTL 24h），SyncAPIDataJob 按 common_data_apis 走 Cache→DuckDB→API
+	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
+	log.Printf("[Container] ✅ CommonDataCache (memory, TTL 24h) registered")
+
+	// 可选：若配置了默认 DuckDB 路径，通过共享 Factory 获取连接（避免独立 DuckDB 引擎实例）
 	if c.config.DefaultDuckDBPath != "" {
-		log.Printf("[Container] Creating DuckDB adapter for: %s", c.config.DefaultDuckDBPath)
-		quantDBAdapter := duckdb.NewAdapter(c.config.DefaultDuckDBPath)
-		if err := quantDBAdapter.Connect(ctx); err != nil {
+		log.Printf("[Container] DefaultDuckDBPath from config: '%s' (optional)", c.config.DefaultDuckDBPath)
+		quantDBAdapter, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+			Type:        datastore.DataStoreTypeDuckDB,
+			StoragePath: c.config.DefaultDuckDBPath,
+		})
+		if err != nil {
 			log.Printf("[Container] WARNING: Failed to connect to default DuckDB at %s: %v", c.config.DefaultDuckDBPath, err)
 		} else {
 			taskEngineDeps.QuantDB = quantDBAdapter
 			c.QuantDBAdapter = quantDBAdapter
-			log.Printf("[Container] ✅ QuantDB (DuckDB) adapter initialized: %s", c.config.DefaultDuckDBPath)
+			log.Printf("[Container] ✅ QuantDB (DuckDB) default adapter also initialized: %s", c.config.DefaultDuckDBPath)
 		}
-	} else {
-		log.Printf("[Container] No DefaultDuckDBPath configured, skipping QuantDB initialization")
 	}
 
 	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
@@ -752,6 +807,10 @@ func (c *Container) initAuth() error {
 			return fmt.Errorf("failed to initialize default policies: %w", err)
 		}
 		logrus.Info("Default RBAC policies initialized")
+	} else {
+		if err := authinfra.EnsureAnalysisPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure analysis policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -766,28 +825,37 @@ func (c *Container) initApplicationServices() error {
 	// Metadata service
 	// 注意：MetadataSvc 使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc（应用服务）
 	// 这符合依赖倒置原则，避免了应用服务之间的直接依赖
-	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor)
+	c.MetadataSvc = impl.NewMetadataApplicationService(c.DataSourceRepo, c.MetadataRepo, nil, c.WorkflowExecutor, datasourcevalidator.NewTokenValidator())
 
-	// DataStore service
-	// 注意：DataStoreSvc 现在使用 WorkflowExecutor（领域服务接口）而不是 WorkflowSvc
+	// QuantDB adapter（共享实例供 DataStore 与 DataQuality 使用）
+	quantDBAdapter := quantdb.NewQuantDBAdapter(c.QuantDBFactory)
+
+	// DataStore service（注入 QuantDBAdapter：共享 QuantDBFactory 确保与 Task Engine 使用同一连接）
 	c.DataStoreSvc = impl.NewDataStoreApplicationService(
 		c.DataStoreRepo,
 		c.DataSourceRepo,
+		c.SyncPlanRepo,
 		c.WorkflowExecutor,
+		quantDBAdapter,
 	)
 
-	// Sync service
-	// 使用 SyncPlan 模型
+	// Sync service（需在 DataQuality 之前创建，因 DataQuality 依赖 SyncSvc 用于一键修复）
 	c.SyncSvc = impl.NewSyncApplicationService(
 		c.SyncPlanRepo,
 		c.CronCalculator,
 		c.PlanScheduler,
 		c.DataSourceRepo,
+		c.DataStoreRepo,
 		c.WorkflowExecutor,
 		c.DependencyResolver,
 		c.TaskEngineAdapter,
 		c.UoW,
+		c.MetadataRepo,
+		c.QuantDBFactory,
 	)
+
+	// DataQuality service（独立应用服务，归属 datastore 领域，依赖 SyncSvc 用于一键修复）
+	c.DataQualitySvc = impl.NewDataQualityApplicationService(c.DataStoreRepo, c.SyncPlanRepo, quantDBAdapter, c.SyncSvc)
 
 	// Auth service
 	passwordHasher := auth.NewBcryptPasswordHasher(0) // Use default cost
@@ -808,9 +876,9 @@ func (c *Container) initApplicationServices() error {
 	return nil
 }
 
-// restoreScheduledPlans re-registers enabled plans with cron expression to the scheduler.
+// restoreScheduledPlans re-registers schedulable plans (non-disabled with cron) to the scheduler.
 func (c *Container) restoreScheduledPlans(ctx context.Context) error {
-	plans, err := c.SyncPlanRepo.GetEnabledPlans()
+	plans, err := c.SyncPlanRepo.GetSchedulablePlans()
 	if err != nil {
 		return fmt.Errorf("get enabled plans: %w", err)
 	}
@@ -848,23 +916,55 @@ func (c *Container) initBuiltInWorkflows(ctx context.Context) error {
 
 // initHTTPServer initializes the HTTP server (infrastructure module).
 func (c *Container) initHTTPServer() error {
+	// WriteTimeout 设为 0 以支持长连接（如 progress-stream SSE），否则约 30s 后连接会被断开
 	serverConfig := httpserver.ServerConfig{
 		Host:         c.config.ServerHost,
 		Port:         c.config.ServerPort,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0,
 		Mode:         c.config.ServerMode,
 	}
 
-	// 当已初始化 QuantDB 时，创建分析应用服务并注册 /analysis 路由
-	if c.QuantDBAdapter != nil {
+	// 分析服务数据源：优先用默认 QuantDB；否则从 DataStore 中取第一个有效的 DuckDB 并连接
+	// 注意：使用共享 QuantDBFactory 获取连接，避免创建独立的 DuckDB 引擎实例
+	analysisQuantDB := c.QuantDBAdapter
+	if analysisQuantDB == nil && c.DataStoreRepo != nil && c.QuantDBFactory != nil {
+		stores, err := c.DataStoreRepo.List()
+		if err != nil {
+			logrus.Warnf("[Container] Analysis: cannot list data stores: %v", err)
+		} else if len(stores) == 0 {
+			logrus.Info("[Container] Analysis: no data stores in DB, /analysis routes will not be registered. Add a DuckDB data store and sync stock_basic/daily for stock charts.")
+		} else {
+			for _, ds := range stores {
+				if ds.Type != datastore.DataStoreTypeDuckDB || strings.TrimSpace(ds.StoragePath) == "" || ds.Status != shared.StatusActive {
+					continue
+				}
+				adapter, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+					Type:        datastore.DataStoreTypeDuckDB,
+					StoragePath: ds.StoragePath,
+				})
+				if err != nil {
+					logrus.Warnf("[Container] Analysis: skip data store %s (%s): %v", ds.Name, ds.StoragePath, err)
+					continue
+				}
+				c.QuantDBAdapter = adapter
+				analysisQuantDB = adapter
+				logrus.Infof("[Container] Analysis using data store: %s (%s). Ensure tables stock_basic and daily exist (sync via Data Sync).", ds.Name, ds.StoragePath)
+				break
+			}
+			if analysisQuantDB == nil {
+				logrus.Info("[Container] Analysis: no connectable DuckDB data store found (wrong type, empty path, inactive, or connect failed). /analysis routes will not be registered.")
+			}
+		}
+	}
+	if analysisQuantDB != nil {
 		var readers *analysisinfra.Readers
 		if c.DataSourceRegistry != nil && c.MetadataRepo != nil {
 			tokenResolver := &analysisinfra.TokenResolverImpl{Repo: c.MetadataRepo}
 			fallback := analysisinfra.NewFallbackProvider("tushare", c.DataSourceRegistry, tokenResolver)
-			readers = analysisinfra.NewReadersWithFallback(c.QuantDBAdapter, fallback)
+			readers = analysisinfra.NewReadersWithFallback(analysisQuantDB, fallback)
 		} else {
-			readers = analysisinfra.NewReaders(c.QuantDBAdapter)
+			readers = analysisinfra.NewReaders(analysisQuantDB)
 		}
 		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
 	}
@@ -874,6 +974,7 @@ func (c *Container) initHTTPServer() error {
 		c.AuthSvc,
 		c.MetadataSvc,
 		c.DataStoreSvc,
+		c.DataQualitySvc,
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,

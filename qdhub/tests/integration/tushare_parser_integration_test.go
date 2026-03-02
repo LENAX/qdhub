@@ -6,6 +6,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,9 +16,18 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare"
 )
 
+func requireNetwork(t *testing.T) {
+	t.Helper()
+	if os.Getenv("QDHUB_INTEGRATION_NETWORK") != "1" {
+		t.Skip("requires network access; set QDHUB_INTEGRATION_NETWORK=1 to run")
+	}
+}
+
 // TestTushareParser_ParseCatalog_Real tests parsing the real Tushare catalog page.
 // This test requires network access to tushare.pro.
 func TestTushareParser_ParseCatalog_Real(t *testing.T) {
+	requireNetwork(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -35,7 +45,7 @@ func TestTushareParser_ParseCatalog_Real(t *testing.T) {
 	t.Logf("Fetched catalog page, docType: %s, content length: %d", docType, len(content))
 
 	// Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(content)
+	categories, apiURLs, _, err := parser.ParseCatalog(content)
 	if err != nil {
 		t.Fatalf("failed to parse catalog: %v", err)
 	}
@@ -69,6 +79,8 @@ func TestTushareParser_ParseCatalog_Real(t *testing.T) {
 // TestTushareParser_ParseAPIDetail_Real tests parsing a real Tushare API detail page.
 // This test requires network access to tushare.pro.
 func TestTushareParser_ParseAPIDetail_Real(t *testing.T) {
+	requireNetwork(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -109,6 +121,8 @@ func TestTushareParser_ParseAPIDetail_Real(t *testing.T) {
 // 2. Parse catalog to get API URLs
 // 3. Fetch and parse first 3 API details
 func TestTushareParser_FullCrawlFlow_Real(t *testing.T) {
+	requireNetwork(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
@@ -125,7 +139,7 @@ func TestTushareParser_FullCrawlFlow_Real(t *testing.T) {
 	}
 
 	// Step 2: Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(catalogContent)
+	categories, apiURLs, _, err := parser.ParseCatalog(catalogContent)
 	if err != nil {
 		t.Fatalf("failed to parse catalog: %v", err)
 	}

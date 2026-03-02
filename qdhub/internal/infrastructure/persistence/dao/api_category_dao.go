@@ -80,8 +80,9 @@ func (d *APICategoryDAO) DeleteByID(tx *sqlx.Tx, id shared.ID) error {
 }
 
 // ListByDataSource retrieves all API categories for a data source.
+// Order: parent_id 为 null 的（顶层）优先排在前面，再按 sort_order.
 func (d *APICategoryDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) ([]*metadata.APICategory, error) {
-	query := d.DB().Rebind(`SELECT * FROM api_categories WHERE data_source_id = ? ORDER BY sort_order`)
+	query := d.DB().Rebind(`SELECT * FROM api_categories WHERE data_source_id = ? ORDER BY (CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END), sort_order`)
 	var rows []*APICategoryRow
 
 	var err error
@@ -95,6 +96,29 @@ func (d *APICategoryDAO) ListByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) (
 		return nil, fmt.Errorf("failed to list api categories: %w", err)
 	}
 
+	entities := make([]*metadata.APICategory, 0, len(rows))
+	for _, row := range rows {
+		entities = append(entities, d.toEntity(row))
+	}
+	return entities, nil
+}
+
+// ListByDataSourceWithAPIs returns only categories that have at least one api_metadata.
+// Order: parent_id 为 null 的（顶层）优先排在前面，再按 sort_order.
+func (d *APICategoryDAO) ListByDataSourceWithAPIs(tx *sqlx.Tx, dataSourceID shared.ID) ([]*metadata.APICategory, error) {
+	query := d.DB().Rebind(`SELECT c.* FROM api_categories c
+		WHERE c.data_source_id = ? AND EXISTS (SELECT 1 FROM api_metadata m WHERE m.category_id = c.id)
+		ORDER BY (CASE WHEN c.parent_id IS NULL THEN 0 ELSE 1 END), c.sort_order`)
+	var rows []*APICategoryRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, dataSourceID.String())
+	} else {
+		err = d.DB().Select(&rows, query, dataSourceID.String())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list api categories with apis: %w", err)
+	}
 	entities := make([]*metadata.APICategory, 0, len(rows))
 	for _, row := range rows {
 		entities = append(entities, d.toEntity(row))

@@ -35,6 +35,14 @@ func (m *MockIntegrationQuantDBAdapter) TableExists(ctx context.Context, ds *dat
 	return false, nil
 }
 
+func (m *MockIntegrationQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return []string{}, nil
+}
+
+func (m *MockIntegrationQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+
 // MockIntegrationWorkflowExecutor is a mock workflow executor for integration testing.
 type MockIntegrationWorkflowExecutor struct{}
 
@@ -73,9 +81,10 @@ func TestDataStoreApplicationService_Integration_CreateAndGetDataStore(t *testin
 	// Create repositories
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowExecutor := &MockIntegrationWorkflowExecutor{}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// Create data store
 	req := contracts.CreateDataStoreRequest{
@@ -115,9 +124,10 @@ func TestDataStoreApplicationService_Integration_ListDataStores(t *testing.T) {
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowExecutor := &MockIntegrationWorkflowExecutor{}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// Create multiple data stores
 	for i := 0; i < 3; i++ {
@@ -147,6 +157,7 @@ func TestDataStoreApplicationService_Integration_CreateTablesForDatasource(t *te
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowExecutor := &MockIntegrationWorkflowExecutor{}
 
 	// Create a data source first
@@ -155,7 +166,7 @@ func TestDataStoreApplicationService_Integration_CreateTablesForDatasource(t *te
 		t.Fatalf("Failed to create data source: %v", err)
 	}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -186,9 +197,10 @@ func TestDataStoreApplicationService_Integration_CreateTablesForDatasource_DataS
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowExecutor := &MockIntegrationWorkflowExecutor{}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// Create data store
 	ds, _ := svc.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
@@ -216,6 +228,7 @@ func TestDataStoreApplicationService_Integration_CreateTablesForDatasource_DataS
 
 	dsRepo := repository.NewQuantDataStoreRepository(db)
 	dataSourceRepo := repository.NewDataSourceRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowExecutor := &MockIntegrationWorkflowExecutor{}
 
 	// Create a data source
@@ -224,7 +237,7 @@ func TestDataStoreApplicationService_Integration_CreateTablesForDatasource_DataS
 		t.Fatalf("Failed to create data source: %v", err)
 	}
 
-	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
+	svc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// Try to create tables with non-existent data store
 	_, err := svc.CreateTablesForDatasource(ctx, contracts.CreateTablesForDatasourceRequest{

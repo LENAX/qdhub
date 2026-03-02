@@ -63,6 +63,38 @@ func extractAPIURLsFromUpstream(tc *task.TaskContext) []string {
 	return apiURLs
 }
 
+// extractAPICategoryIDsFromUpstream 从上游 ParseCatalog 结果中提取 api_category_ids（与 api_urls 一一对应）
+func extractAPICategoryIDsFromUpstream(tc *task.TaskContext) []string {
+	for key, val := range tc.Params {
+		if !strings.HasPrefix(key, "_cached_") {
+			continue
+		}
+		resultMap, ok := val.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		idsRaw, ok := resultMap["api_category_ids"]
+		if !ok {
+			continue
+		}
+		switch v := idsRaw.(type) {
+		case []string:
+			return v
+		case []interface{}:
+			ids := make([]string, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					ids = append(ids, s)
+				} else {
+					ids = append(ids, "")
+				}
+			}
+			return ids
+		}
+	}
+	return nil
+}
+
 // extractCategoriesFromUpstream 从上游任务结果中提取 categories
 func extractCategoriesFromUpstream(tc *task.TaskContext) []map[string]interface{} {
 	// 遍历所有参数查找 _cached_ 前缀的参数
@@ -213,7 +245,7 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	// Parse catalog
-	categories, apiURLs, err := parser.ParseCatalog(catalogContent)
+	categories, apiURLs, apiCategoryIDs, err := parser.ParseCatalog(catalogContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse catalog: %w", err)
 	}
@@ -234,11 +266,20 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
+	// Serialize category ID per API URL (same length as api_urls; empty string = no category)
+	apiCategoryIDStrs := make([]string, len(apiURLs))
+	for i, cid := range apiCategoryIDs {
+		if cid != nil {
+			apiCategoryIDStrs[i] = cid.String()
+		}
+	}
+
 	return map[string]interface{}{
-		"categories":     categoryMaps,
-		"api_urls":       apiURLs,
-		"api_count":      len(apiURLs),
-		"data_source_id": dataSourceID,
+		"categories":        categoryMaps,
+		"api_urls":          apiURLs,
+		"api_category_ids":  apiCategoryIDStrs,
+		"api_count":         len(apiURLs),
+		"data_source_id":    dataSourceID,
 	}, nil
 }
 
@@ -458,6 +499,12 @@ func FetchAndParseAPIDetailJob(tc *task.TaskContext) (interface{}, error) {
 	// Override data source ID
 	apiMetadata.DataSourceID = shared.ID(dataSourceID)
 
+	// Set category ID from workflow param (from ParseCatalog → GenerateAPIDetailFetchSubTasks)
+	if categoryIDStr := tc.GetParamString("api_category_id"); categoryIDStr != "" {
+		cid := shared.ID(categoryIDStr)
+		apiMetadata.CategoryID = &cid
+	}
+
 	// Convert to serializable format
 	result := map[string]interface{}{
 		"id":             apiMetadata.ID.String(),
@@ -467,6 +514,9 @@ func FetchAndParseAPIDetailJob(tc *task.TaskContext) (interface{}, error) {
 		"description":    apiMetadata.Description,
 		"endpoint":       apiMetadata.Endpoint,
 		"permission":     apiMetadata.Permission,
+	}
+	if apiMetadata.CategoryID != nil {
+		result["category_id"] = apiMetadata.CategoryID.String()
 	}
 
 	// Convert request params
@@ -789,6 +839,10 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 		if permission, ok := m["permission"].(string); ok {
 			apiMetadata.Permission = permission
 		}
+		if categoryIDStr, ok := m["category_id"].(string); ok && categoryIDStr != "" {
+			cid := shared.ID(categoryIDStr)
+			apiMetadata.CategoryID = &cid
+		}
 
 		// Parse request_params (can be JSON string or []map[string]interface{})
 		if paramsJSON, ok := m["request_params"].(string); ok && paramsJSON != "" {
@@ -969,7 +1023,7 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 		return nil, fmt.Errorf("[GenerateAPIDetailFetchSubTasks] cannot get Registry from Engine")
 	}
 
-	// Extract API URLs from upstream task result
+	// Extract API URLs and category IDs from upstream task result
 	apiURLs := extractAPIURLsFromUpstream(tc)
 	if len(apiURLs) == 0 {
 		logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 未找到 api_urls，Params keys: %v", getParamKeys(tc.Params))
@@ -980,10 +1034,21 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 		}, nil
 	}
 
+	apiCategoryIDs := extractAPICategoryIDsFromUpstream(tc)
+	if len(apiCategoryIDs) < len(apiURLs) {
+		// Pad with empty strings so categoryIDs[i] is safe
+		pad := make([]string, len(apiURLs)-len(apiCategoryIDs))
+		for i := range pad {
+			pad[i] = ""
+		}
+		apiCategoryIDs = append(apiCategoryIDs, pad...)
+	}
+
 	// Apply limit if specified
 	if maxAPICrawl > 0 && len(apiURLs) > maxAPICrawl {
 		logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 限制爬取数量从 %d 到 %d", len(apiURLs), maxAPICrawl)
 		apiURLs = apiURLs[:maxAPICrawl]
+		apiCategoryIDs = apiCategoryIDs[:maxAPICrawl]
 	}
 
 	logrus.Debugf("[GenerateAPIDetailFetchSubTasks] 从上游任务获取到 %d 个 API URLs", len(apiURLs))
@@ -993,16 +1058,22 @@ func GenerateAPIDetailFetchSubTasksJob(tc *task.TaskContext) (interface{}, error
 	generatedCount := 0
 
 	var subTaskInfos []map[string]interface{}
-	for _, apiURL := range apiURLs {
+	for i, apiURL := range apiURLs {
+		categoryID := ""
+		if i < len(apiCategoryIDs) && apiCategoryIDs[i] != "" {
+			categoryID = apiCategoryIDs[i]
+		}
 		subTaskName := fmt.Sprintf("FetchAPIDetail_%d", generatedCount+1)
-		// 使用组合 Job Function：FetchAndParseAPIDetail
-		// 该函数在一个步骤中完成获取和解析
+		params := map[string]interface{}{
+			"api_url":          apiURL,
+			"data_source_id":   dataSourceID,
+			"data_source_name": dataSourceName,
+		}
+		if categoryID != "" {
+			params["api_category_id"] = categoryID
+		}
 		subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("爬取并解析 API 详情: %s", apiURL), registry).
-			WithJobFunction("FetchAndParseAPIDetail", map[string]interface{}{
-				"api_url":          apiURL,
-				"data_source_id":   dataSourceID,
-				"data_source_name": dataSourceName,
-			}).
+			WithJobFunction("FetchAndParseAPIDetail", params).
 			WithTaskHandler(task.TaskStatusSuccess, "MetadataRefreshSuccess").
 			WithTaskHandler(task.TaskStatusFailed, "MetadataRefreshFailure").
 			Build()

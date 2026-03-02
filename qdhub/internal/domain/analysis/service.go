@@ -29,6 +29,9 @@ type AnalysisService interface {
 	// 股票列表
 	ListStocks(ctx context.Context, req StockListRequest) ([]StockInfo, error)
 
+	// 股票快照：指定交易日、复权方式与 ts_code 列表，返回价格/涨跌幅等
+	GetStockSnapshot(ctx context.Context, tradeDate string, adjustType AdjustType, tsCodes []string) ([]StockInfo, error)
+
 	// 指数列表
 	ListIndices(ctx context.Context, req IndexListRequest) ([]IndexInfo, error)
 
@@ -49,6 +52,8 @@ type AnalysisService interface {
 
 	// 涨停天梯统计（按连板天数）
 	GetLimitUpLadder(ctx context.Context, tradeDate string) ([]LimitUpLadder, error)
+	// 首板列表（当日涨停且不在 limit_step 中的股票）
+	GetFirstLimitUpStocks(ctx context.Context, tradeDate string) ([]LimitStock, error)
 
 	// 涨停今日/昨日对比
 	GetLimitUpComparison(ctx context.Context, todayDate string) (*LimitUpComparison, error)
@@ -71,11 +76,17 @@ type AnalysisService interface {
 	// 财务指标查询
 	GetFinancialIndicators(ctx context.Context, req FinancialIndicatorRequest) ([]FinancialIndicator, error)
 
-	// 财报数据查询
-	GetFinancialReports(ctx context.Context, req FinancialReportRequest) ([]FinancialReport, error)
+	// 财报数据查询（按表名：income / balancesheet / cashflow）
+	GetFinancialTableData(ctx context.Context, table string, req FinancialReportRequest) ([]map[string]any, error)
 
 	// 自定义只读 SQL 查询（高权限，仅 SELECT，受 max_rows/timeout 限制）
 	ExecuteReadOnlyQuery(ctx context.Context, req CustomQueryRequest) (*CustomQueryResult, error)
+
+	// 交易日历：从 trade_cal 表取 is_open=1 的 cal_date，供前端过滤非交易日
+	GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error)
+
+	// 技术指标：基于 K 线数据在内存中计算 MA/RSI/MACD 等
+	GetTechnicalIndicators(ctx context.Context, req TechnicalIndicatorCalcRequest) ([]TechnicalIndicator, error)
 }
 
 // CustomQueryRequest 自定义查询请求（只读 SQL）
@@ -109,6 +120,7 @@ type StockListRequest struct {
 	Area       *string // 地域
 	IsHS       *string // 是否沪深港通
 	ListStatus *string // 上市状态：L上市/D退市/P暂停
+	Query      *string // 关键词：按名称、ts_code、symbol 模糊查询
 	Limit      int     // 返回数量限制
 	Offset     int     // 偏移量
 }
@@ -208,4 +220,14 @@ type FinancialReportRequest struct {
 	Fields     []string // 需要返回的字段列表（可选，默认返回全部）
 	Limit      int      // 返回数量限制
 	Offset     int      // 偏移量
+}
+
+// TechnicalIndicatorCalcRequest 技术指标计算请求
+type TechnicalIndicatorCalcRequest struct {
+	TsCode     string     // 股票代码（ts_code）
+	StartDate  string     // 开始日期 YYYYMMDD
+	EndDate    string     // 结束日期 YYYYMMDD
+	AdjustType AdjustType // 复权类型：none/qfq/hfq
+	Period     string     // 周期：D/W/M（目前仅 D 完全支持，其它按原始 K 线粒度计算）
+	Indicators []string   // 需要计算的指标名：如 MA5/MA10/MA20/RSI/MACD
 }

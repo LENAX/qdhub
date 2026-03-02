@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -24,17 +25,18 @@ func NewDataSourceDAO(db *sqlx.DB) *DataSourceDAO {
 
 // Create inserts a new data source record.
 func (d *DataSourceDAO) Create(tx *sqlx.Tx, entity *metadata.DataSource) error {
-	query := `INSERT INTO data_sources (id, name, description, base_url, doc_url, status, created_at, updated_at)
-		VALUES (:id, :name, :description, :base_url, :doc_url, :status, :created_at, :updated_at)`
+	query := `INSERT INTO data_sources (id, name, description, base_url, doc_url, status, common_data_apis, created_at, updated_at)
+		VALUES (:id, :name, :description, :base_url, :doc_url, :status, :common_data_apis, :created_at, :updated_at)`
 
-	row := d.toRow(entity)
-	var err error
+	row, err := d.toRow(entity)
+	if err != nil {
+		return fmt.Errorf("failed to marshal entity: %w", err)
+	}
 	if tx != nil {
 		_, err = tx.NamedExec(query, row)
 	} else {
 		_, err = d.DB().NamedExec(query, row)
 	}
-
 	if err != nil {
 		return fmt.Errorf("failed to create data source: %w", err)
 	}
@@ -57,17 +59,18 @@ func (d *DataSourceDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*metadata.DataSource
 func (d *DataSourceDAO) Update(tx *sqlx.Tx, entity *metadata.DataSource) error {
 	query := `UPDATE data_sources SET
 		name = :name, description = :description, base_url = :base_url,
-		doc_url = :doc_url, status = :status, updated_at = :updated_at
+		doc_url = :doc_url, status = :status, common_data_apis = :common_data_apis, updated_at = :updated_at
 		WHERE id = :id`
 
-	row := d.toRow(entity)
-	var err error
+	row, err := d.toRow(entity)
+	if err != nil {
+		return fmt.Errorf("failed to marshal entity: %w", err)
+	}
 	if tx != nil {
 		_, err = tx.NamedExec(query, row)
 	} else {
 		_, err = d.DB().NamedExec(query, row)
 	}
-
 	if err != nil {
 		return fmt.Errorf("failed to update data source: %w", err)
 	}
@@ -115,22 +118,31 @@ func (d *DataSourceDAO) GetByName(tx *sqlx.Tx, name string) (*metadata.DataSourc
 }
 
 // toRow converts domain entity to database row.
-func (d *DataSourceDAO) toRow(entity *metadata.DataSource) *DataSourceRow {
-	return &DataSourceRow{
-		ID:          entity.ID.String(),
-		Name:        entity.Name,
-		Description: entity.Description,
-		BaseURL:     entity.BaseURL,
-		DocURL:      entity.DocURL,
-		Status:      entity.Status.String(),
-		CreatedAt:   entity.CreatedAt.ToTime(),
-		UpdatedAt:   entity.UpdatedAt.ToTime(),
+func (d *DataSourceDAO) toRow(entity *metadata.DataSource) (*DataSourceRow, error) {
+	commonDataAPIs, err := entity.MarshalCommonDataAPIsJSON()
+	if err != nil {
+		return nil, fmt.Errorf("marshal common_data_apis: %w", err)
 	}
+	commonDataAPIsNull := sql.NullString{}
+	if commonDataAPIs != "" {
+		commonDataAPIsNull = sql.NullString{String: commonDataAPIs, Valid: true}
+	}
+	return &DataSourceRow{
+		ID:             entity.ID.String(),
+		Name:           entity.Name,
+		Description:    entity.Description,
+		BaseURL:        entity.BaseURL,
+		DocURL:         entity.DocURL,
+		Status:         entity.Status.String(),
+		CommonDataAPIs: commonDataAPIsNull,
+		CreatedAt:      entity.CreatedAt.ToTime(),
+		UpdatedAt:      entity.UpdatedAt.ToTime(),
+	}, nil
 }
 
 // toEntity converts database row to domain entity.
 func (d *DataSourceDAO) toEntity(row *DataSourceRow) *metadata.DataSource {
-	return &metadata.DataSource{
+	entity := &metadata.DataSource{
 		ID:          shared.ID(row.ID),
 		Name:        row.Name,
 		Description: row.Description,
@@ -140,6 +152,10 @@ func (d *DataSourceDAO) toEntity(row *DataSourceRow) *metadata.DataSource {
 		CreatedAt:   shared.Timestamp(row.CreatedAt),
 		UpdatedAt:   shared.Timestamp(row.UpdatedAt),
 	}
+	if row.CommonDataAPIs.Valid && row.CommonDataAPIs.String != "" {
+		_ = entity.UnmarshalCommonDataAPIsJSON(row.CommonDataAPIs.String)
+	}
+	return entity
 }
 
 // GetCreatedAt helper to get created_at for testing.

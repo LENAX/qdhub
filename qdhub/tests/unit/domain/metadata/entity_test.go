@@ -58,6 +58,45 @@ func TestDataSource_UpdateInfo(t *testing.T) {
 	}
 }
 
+func TestDataSource_CommonDataAPIs(t *testing.T) {
+	ds := metadata.NewDataSource("T", "", "", "")
+
+	// Set and read
+	ds.SetCommonDataAPIs([]string{"trade_cal", "stock_basic"})
+	if len(ds.CommonDataAPIs) != 2 || ds.CommonDataAPIs[0] != "trade_cal" || ds.CommonDataAPIs[1] != "stock_basic" {
+		t.Errorf("CommonDataAPIs = %v, expected [trade_cal stock_basic]", ds.CommonDataAPIs)
+	}
+
+	// Marshal
+	jsonStr, err := ds.MarshalCommonDataAPIsJSON()
+	if err != nil {
+		t.Fatalf("MarshalCommonDataAPIsJSON() error = %v", err)
+	}
+	var decoded []string
+	if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
+		t.Fatalf("Unmarshal decoded: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0] != "trade_cal" || decoded[1] != "stock_basic" {
+		t.Errorf("decoded = %v, expected [trade_cal stock_basic]", decoded)
+	}
+
+	// Unmarshal empty
+	if err := ds.UnmarshalCommonDataAPIsJSON(""); err != nil {
+		t.Fatalf("UnmarshalCommonDataAPIsJSON('') error = %v", err)
+	}
+	if ds.CommonDataAPIs != nil {
+		t.Errorf("CommonDataAPIs after empty unmarshal = %v, expected nil", ds.CommonDataAPIs)
+	}
+
+	// Unmarshal JSON
+	if err := ds.UnmarshalCommonDataAPIsJSON(`["a","b"]`); err != nil {
+		t.Fatalf("UnmarshalCommonDataAPIsJSON('[a,b]') error = %v", err)
+	}
+	if len(ds.CommonDataAPIs) != 2 || ds.CommonDataAPIs[0] != "a" || ds.CommonDataAPIs[1] != "b" {
+		t.Errorf("CommonDataAPIs after unmarshal = %v, expected [a b]", ds.CommonDataAPIs)
+	}
+}
+
 func TestNewAPICategory(t *testing.T) {
 	dsID := shared.NewID()
 	cat := metadata.NewAPICategory(dsID, "股票", "股票数据", "/stock", nil, 1)

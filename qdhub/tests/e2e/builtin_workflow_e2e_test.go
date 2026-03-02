@@ -221,11 +221,12 @@ func newMockTushareParser() *mockTushareParser {
 	return &mockTushareParser{}
 }
 
-func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	// 返回模拟的分类和 API URL 列表
+	catID := shared.NewID()
 	categories := []metadata.APICategory{
 		{
-			ID:          shared.NewID(),
+			ID:          catID,
 			Name:        "股票数据",
 			Description: "股票相关的基础数据",
 		},
@@ -234,7 +235,8 @@ func (p *mockTushareParser) ParseCatalog(content string) ([]metadata.APICategory
 		"https://tushare.pro/document/2?doc_id=25",
 		"https://tushare.pro/document/2?doc_id=27",
 	}
-	return categories, apiURLs, nil
+	apiCategoryIDs := []*shared.ID{&catID, &catID}
+	return categories, apiURLs, apiCategoryIDs, nil
 }
 
 func (p *mockTushareParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
@@ -361,6 +363,18 @@ func (a *mockQuantDBAdapter) GetCheckpoint(ctx context.Context, ds *datastore.Qu
 func (a *mockQuantDBAdapter) SetCheckpoint(ctx context.Context, ds *datastore.QuantDataStore, tableName, checkpoint string) error {
 	a.checkpoint[tableName] = checkpoint
 	return nil
+}
+
+func (a *mockQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	names := make([]string, 0, len(a.tables))
+	for name := range a.tables {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func (a *mockQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
 }
 
 // ==================== 测试辅助函数 ====================
@@ -659,6 +673,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		metadataRepo,
 		nil, // parserFactory - not needed for tests (use workflow for metadata crawl)
 		workflowExecutor,
+		nil, // tokenValidator
 	)
 
 	// 10. 创建 WorkflowApplicationService
@@ -672,7 +687,9 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	datastoreAppService := impl.NewDataStoreApplicationService(
 		datastoreRepo,
 		dataSourceRepo,
+		syncPlanRepo,
 		workflowExecutor,
+		nil,
 	)
 
 	// 12. 创建 SyncApplicationService
@@ -685,10 +702,13 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		cronCalculator,
 		nil, // planScheduler - not needed for tests
 		dataSourceRepo,
+		datastoreRepo,
 		workflowExecutor,
 		dependencyResolver,
 		taskEngineAdapter,
 		uowImpl,
+		metadataRepo,
+		nil, // quantDBFactory
 	)
 
 	// 13. 有 QuantDB 时创建 Analysis 应用服务（含兜底），供 Analysis E2E 使用
@@ -1101,7 +1121,6 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		}
 
 		execReq := contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: targetDBPath,
 			StartDate:    startDate,
 			EndDate:      endDate,
 		}
@@ -1276,9 +1295,24 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 
 	t.Log("========== SyncPlan 生命周期 E2E 测试开始 ==========")
 
+	// 创建 DataStore（用于解析 target_db_path）
+	tmpDBFile, err := os.CreateTemp("", "e2e_lifecycle_*.duckdb")
+	require.NoError(t, err)
+	tmpDBFile.Close()
+	defer os.Remove(tmpDBFile.Name())
+
+	dsStore, err := testCtx.datastoreAppService.CreateDataStore(ctx, contracts.CreateDataStoreRequest{
+		Name:        "E2E Lifecycle DuckDB",
+		Description: "E2E 生命周期测试用 DuckDB 数据存储",
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: tmpDBFile.Name(),
+	})
+	require.NoError(t, err)
+	dataStoreID := dsStore.ID
+
 	// 创建数据源
 	ds := metadata.NewDataSource("Tushare", "Test Data Source", "http://api.tushare.pro", "https://tushare.pro/document/2")
-	err := testCtx.dataSourceRepo.Create(ds)
+	err = testCtx.dataSourceRepo.Create(ds)
 	require.NoError(t, err)
 	token := metadata.NewToken(ds.ID, "test-token", nil)
 	err = testCtx.dataSourceRepo.SetToken(token)
@@ -1297,6 +1331,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 			Name:         "Test Sync Plan (20 APIs)",
 			Description:  "测试同步计划 - 20 个 API",
 			DataSourceID: ds.ID,
+			DataStoreID:  dataStoreID,
 			SelectedAPIs: selectedAPIs,
 		}
 
@@ -1363,13 +1398,7 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 	// 6. 执行 SyncPlan
 	var executionID shared.ID
 	t.Run("Step6_ExecuteSyncPlan", func(t *testing.T) {
-		tmpDBFile, err := os.CreateTemp("", "e2e_lifecycle_*.duckdb")
-		require.NoError(t, err)
-		tmpDBFile.Close()
-		defer os.Remove(tmpDBFile.Name())
-
 		execReq := contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: tmpDBFile.Name(),
 			StartDate:    "20251201",
 			EndDate:      "20251215",
 		}
@@ -1860,7 +1889,6 @@ func TestE2E_DataSyncOnly(t *testing.T) {
 	t.Logf("  日期范围: %s ~ %s", startDate, endDate)
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: config.DuckDBPath,
 		StartDate:    startDate,
 		EndDate:      endDate,
 	})
@@ -2026,6 +2054,7 @@ func TestE2E_GGT_Top10(t *testing.T) {
 		Name:         "E2E Test - ggt_top10 Only",
 		Description:  "E2E 测试 - 专门测试 ggt_top10 API",
 		DataSourceID: dataSourceID,
+		DataStoreID:  dataStoreID,
 		SelectedAPIs: []string{"ggt_top10"},
 	}
 
@@ -2051,7 +2080,6 @@ func TestE2E_GGT_Top10(t *testing.T) {
 	endDate := time.Now().Format("20060102")                     // 今天
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: config.DuckDBPath,
 		StartDate:    startDate,
 		EndDate:      endDate,
 	})

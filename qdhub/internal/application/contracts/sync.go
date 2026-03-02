@@ -53,8 +53,20 @@ type SyncApplicationService interface {
 	// ListPlanExecutions lists all executions for a sync plan.
 	ListPlanExecutions(ctx context.Context, planID shared.ID) ([]*sync.SyncExecution, error)
 
+	// GetPlanSummary returns the latest execution summary for a sync plan (or nil if never executed).
+	GetPlanSummary(ctx context.Context, planID shared.ID) (*PlanSummary, error)
+
+	// ListPlanExecutionHistory returns paginated execution history for a sync plan.
+	ListPlanExecutionHistory(ctx context.Context, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error)
+
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
+
+	// PauseExecution pauses a running sync execution (workflow instance).
+	PauseExecution(ctx context.Context, executionID shared.ID) error
+
+	// ResumeExecution resumes a paused sync execution.
+	ResumeExecution(ctx context.Context, executionID shared.ID) error
 
 	// ==================== Scheduling ====================
 
@@ -86,38 +98,50 @@ type SyncApplicationService interface {
 	// GetPlanProgress retrieves aggregated progress for the latest execution of a sync plan.
 	// If the plan has never been executed, it returns a pending progress state.
 	GetPlanProgress(ctx context.Context, planID shared.ID) (*SyncExecutionProgress, error)
+
+	// RecordTaskResult 记录单次同步任务结果（由 DataSyncSuccess/DataSyncFailure Handler 调用），用于统计与明细。
+	RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error
+
+	// GetExecutionDetail 返回某次执行的统计与明细：每 API 总行数、错误率、详细错误信息。
+	GetExecutionDetail(ctx context.Context, executionID shared.ID) (*ExecutionDetail, error)
 }
 
 // ==================== Request/Response DTOs ====================
 
 // CreateSyncPlanRequest represents a request to create a sync plan.
 type CreateSyncPlanRequest struct {
-	Name                 string
-	Description          string
-	DataSourceID         shared.ID
-	DataStoreID          shared.ID
-	SelectedAPIs         []string
-	CronExpression       *string
-	DefaultExecuteParams *sync.ExecuteParams
+	Name                        string
+	Description                  string
+	DataSourceID                shared.ID
+	DataStoreID                 shared.ID
+	SelectedAPIs                []string
+	CronExpression              *string
+	DefaultExecuteParams        *sync.ExecuteParams
+	IncrementalMode             bool
+	IncrementalStartDateAPI     string // optional: API (table) name for MAX(column) in target DuckDB
+	IncrementalStartDateColumn  string // optional: column name for date, e.g. trade_date
 }
 
 // UpdateSyncPlanRequest represents a request to update a sync plan.
 type UpdateSyncPlanRequest struct {
-	Name                 *string
-	Description          *string
-	DataStoreID          *shared.ID
-	SelectedAPIs         *[]string
-	CronExpression       *string
-	DefaultExecuteParams *sync.ExecuteParams
+	Name                        *string
+	Description                  *string
+	DataStoreID                 *shared.ID
+	SelectedAPIs                *[]string
+	CronExpression              *string
+	DefaultExecuteParams        *sync.ExecuteParams
+	IncrementalMode             *bool
+	IncrementalStartDateAPI     *string
+	IncrementalStartDateColumn  *string
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.
+// TargetDBPath is resolved from the plan's associated data store; only date/time may be passed.
 type ExecuteSyncPlanRequest struct {
-	TargetDBPath string // 目标数据库路径（必填）
-	StartDate    string // 开始日期（必填，格式: "20251201"）
-	EndDate      string // 结束日期（必填，格式: "20251231"）
-	StartTime    string // 开始时间（可选，格式: "09:30:00"）
-	EndTime      string // 结束时间（可选，格式: "15:00:00"）
+	StartDate string // 开始日期（可选，格式: "20251201"，未传时用计划 default_execute_params）
+	EndDate   string // 结束日期（可选，格式: "20251231"）
+	StartTime string // 开始时间（可选，格式: "09:30:00"）
+	EndTime   string // 结束时间（可选，格式: "15:00:00"）
 }
 
 // ExecutionCallbackRequest represents a callback request from workflow engine.
@@ -156,4 +180,47 @@ type SyncExecutionProgress struct {
 	// Timeline
 	StartedAt  shared.Timestamp
 	FinishedAt *shared.Timestamp
+}
+
+// PlanSummary represents the latest execution summary for a sync plan.
+// Returned by GetPlanSummary; nil when the plan has no executions.
+type PlanSummary struct {
+	ExecutionID  shared.ID         `json:"execution_id"`
+	Status       sync.ExecStatus    `json:"status"`
+	StartedAt    shared.Timestamp  `json:"started_at"`
+	FinishedAt   *shared.Timestamp `json:"finished_at,omitempty"`
+	RecordCount  int64             `json:"record_count"`
+	ErrorMessage *string           `json:"error_message,omitempty"`
+	SyncedAPIs   []string          `json:"synced_apis,omitempty"`
+	SkippedAPIs  []string          `json:"skipped_apis,omitempty"`
+}
+
+// ExecutionDetail 某次同步执行的统计与明细（每 API 行数、错误率、详细错误）。
+type ExecutionDetail struct {
+	ExecutionID   shared.ID         `json:"execution_id"`
+	PlanID        shared.ID         `json:"plan_id"`
+	Status        sync.ExecStatus    `json:"status"`
+	RecordCount   int64             `json:"record_count"`
+	ErrorMessage  *string           `json:"error_message,omitempty"`
+	StartedAt     shared.Timestamp  `json:"started_at"`
+	FinishedAt    *shared.Timestamp `json:"finished_at,omitempty"`
+	TotalTasks    int               `json:"total_tasks"`
+	SuccessCount  int               `json:"success_count"`
+	FailedCount   int               `json:"failed_count"`
+	ErrorRate     float64           `json:"error_rate"` // 0~1, FailedCount/TotalTasks
+	ApiStats      []ApiSyncStat     `json:"api_stats"`  // 按 API 聚合：总行数、任务数、成功/失败数、错误率、错误信息
+	DetailRows    []*sync.SyncExecutionDetail `json:"detail_rows,omitempty"` // 原始明细（含每条错误信息）
+	// WorkflowErrorMessage 当执行被纠正为成功（工作流报失败但明细全成功）时，保留工作流原始错误信息，供前端展示警告、排查引擎问题
+	WorkflowErrorMessage *string `json:"workflow_error_message,omitempty"`
+}
+
+// ApiSyncStat 单个 API 在本轮执行中的统计。
+type ApiSyncStat struct {
+	APIName       string    `json:"api_name"`
+	TotalRows     int64     `json:"total_rows"`
+	TaskCount     int       `json:"task_count"`
+	SuccessCount  int       `json:"success_count"`
+	FailedCount   int       `json:"failed_count"`
+	ErrorRate     float64   `json:"error_rate"`
+	ErrorMessages []string  `json:"error_messages,omitempty"` // 该 API 下所有失败任务的错误信息
 }

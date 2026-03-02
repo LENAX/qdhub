@@ -1061,16 +1061,14 @@ func TestE2E_Server_WithRealTushareToken(t *testing.T) {
 			t.Skip("跳过：需要先创建同步计划")
 		}
 
-		// 设置同步日期范围（最近1年的交易日历）
-		endDate := time.Now().Format("20060102")
-		startDate := time.Now().AddDate(-1, 0, 0).Format("20060102")
-
+		// 可选：传 start_dt/end_dt（datetime）；不传则用计划 default_execute_params。target 从 plan 关联的 data store 解析。
+		startDt := time.Now().AddDate(-1, 0, 0).Format("2006-01-02")
+		endDt := time.Now().Format("2006-01-02")
 		triggerReq := map[string]string{
-			"target_db_path": ctx.DuckDBPath,
-			"start_date":     startDate,
-			"end_date":       endDate,
+			"start_dt": startDt,
+			"end_dt":   endDt,
 		}
-		resp, err := ctx.doRequestWithAuth("POST", "/api/v1/sync-plans/"+syncPlanID+"/trigger", triggerReq, token)
+		resp, err := ctx.doRequestWithAuth("POST", "/api/v1/sync-plans/"+syncPlanID+"/execute", triggerReq, token)
 		require.NoError(t, err)
 
 		if resp.StatusCode != http.StatusOK {
@@ -1550,11 +1548,10 @@ func TestE2E_DataSync_OneMonthHistorical(t *testing.T) {
 		}
 
 		triggerReq := map[string]string{
-			"target_db_path": ctx.DuckDBPath,
-			"start_date":     startDate,
-			"end_date":       endDate,
+			"start_dt": startDate[:4] + "-" + startDate[4:6] + "-" + startDate[6:8],
+			"end_dt":   endDate[:4] + "-" + endDate[4:6] + "-" + endDate[6:8],
 		}
-		resp, err := ctx.doRequestWithAuth("POST", "/api/v1/sync-plans/"+syncPlanID+"/trigger", triggerReq, token)
+		resp, err := ctx.doRequestWithAuth("POST", "/api/v1/sync-plans/"+syncPlanID+"/execute", triggerReq, token)
 		require.NoError(t, err)
 
 		if resp.StatusCode != http.StatusOK {
@@ -1831,7 +1828,6 @@ func TestE2E_Server_CronScheduleTrigger(t *testing.T) {
 			"selected_apis":   []string{"trade_cal", "stock_basic"}, // 仅同步这两个简单 API
 			"cron_expression": cronExpr,
 			"default_execute_params": map[string]string{
-				"target_db_path": ctx.DuckDBPath,
 				"start_date":     startDate,
 				"end_date":       endDate,
 			},

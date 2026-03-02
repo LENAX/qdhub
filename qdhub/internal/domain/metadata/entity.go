@@ -15,19 +15,23 @@ import (
 //   - Manage data source configuration
 //   - Manage API categories, metadata, and tokens
 type DataSource struct {
-	ID          shared.ID
-	Name        string
-	Description string
-	BaseURL     string
-	DocURL      string
-	Status      shared.Status
-	CreatedAt   shared.Timestamp
-	UpdatedAt   shared.Timestamp
+	ID          shared.ID        `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	BaseURL     string           `json:"base_url"`
+	DocURL      string           `json:"doc_url"`
+	Status      shared.Status    `json:"status"`
+	CreatedAt   shared.Timestamp `json:"created_at"`
+	UpdatedAt   shared.Timestamp `json:"updated_at"`
+
+	// CommonDataAPIs: API names treated as common data (e.g. trade_cal, stock_basic for tushare).
+	// Used for cache-first / DataStore-first reuse across workflows; persisted in data_sources.common_data_apis.
+	CommonDataAPIs []string `json:"common_data_apis,omitempty"`
 
 	// Aggregated entities (lazy loaded)
-	Categories []APICategory
-	APIs       []APIMetadata
-	Token      *Token
+	Categories []APICategory  `json:"categories,omitempty"`
+	APIs       []APIMetadata  `json:"apis,omitempty"`
+	Token      *Token         `json:"token,omitempty"`
 }
 
 // NewDataSource creates a new DataSource aggregate.
@@ -66,19 +70,46 @@ func (ds *DataSource) UpdateInfo(name, description, baseURL, docURL string) {
 	ds.UpdatedAt = shared.Now()
 }
 
+// SetCommonDataAPIs sets the list of API names treated as common data (reused across workflows).
+func (ds *DataSource) SetCommonDataAPIs(apis []string) {
+	ds.CommonDataAPIs = apis
+	ds.UpdatedAt = shared.Now()
+}
+
+// MarshalCommonDataAPIsJSON marshals CommonDataAPIs to JSON string.
+func (ds *DataSource) MarshalCommonDataAPIsJSON() (string, error) {
+	if len(ds.CommonDataAPIs) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(ds.CommonDataAPIs)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// UnmarshalCommonDataAPIsJSON unmarshals CommonDataAPIs from JSON string.
+func (ds *DataSource) UnmarshalCommonDataAPIsJSON(jsonStr string) error {
+	if jsonStr == "" {
+		ds.CommonDataAPIs = nil
+		return nil
+	}
+	return json.Unmarshal([]byte(jsonStr), &ds.CommonDataAPIs)
+}
+
 // ==================== 聚合内实体 ====================
 
 // APICategory represents an API category entity.
 // Belongs to: DataSource aggregate
 type APICategory struct {
-	ID           shared.ID
-	DataSourceID shared.ID
-	Name         string
-	Description  string
-	ParentID     *shared.ID
-	SortOrder    int
-	DocPath      string
-	CreatedAt    shared.Timestamp
+	ID           shared.ID        `json:"id"`
+	DataSourceID shared.ID        `json:"data_source_id"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	ParentID     *shared.ID       `json:"parent_id,omitempty"`
+	SortOrder    int              `json:"sort_order"`
+	DocPath      string           `json:"doc_path"`
+	CreatedAt    shared.Timestamp `json:"created_at"`
 }
 
 // NewAPICategory creates a new APICategory.
@@ -98,21 +129,21 @@ func NewAPICategory(dataSourceID shared.ID, name, description, docPath string, p
 // APIMetadata represents an API metadata entity.
 // Belongs to: DataSource aggregate
 type APIMetadata struct {
-	ID                shared.ID
-	DataSourceID      shared.ID
-	CategoryID        *shared.ID
-	Name              string
-	DisplayName       string
-	Description       string
-	Endpoint          string
-	RequestParams     []ParamMeta
-	ResponseFields    []FieldMeta
-	RateLimit         *RateLimit
-	Permission        string
-	Status            shared.Status
-	CreatedAt         shared.Timestamp
-	UpdatedAt         shared.Timestamp
-	ParamDependencies []ParamDependency // 参数依赖规则（用于自动解析 API 依赖）
+	ID                shared.ID        `json:"id"`
+	DataSourceID      shared.ID        `json:"data_source_id"`
+	CategoryID        *shared.ID      `json:"category_id,omitempty"`
+	Name              string           `json:"name"`
+	DisplayName       string           `json:"display_name"`
+	Description       string           `json:"description"`
+	Endpoint          string           `json:"endpoint"`
+	RequestParams     []ParamMeta      `json:"request_params,omitempty"`
+	ResponseFields    []FieldMeta      `json:"response_fields,omitempty"`
+	RateLimit         *RateLimit       `json:"rate_limit,omitempty"`
+	Permission        string           `json:"permission"`
+	Status            shared.Status    `json:"status"`
+	CreatedAt         shared.Timestamp `json:"created_at"`
+	UpdatedAt         shared.Timestamp `json:"updated_at"`
+	ParamDependencies []ParamDependency `json:"param_dependencies,omitempty"` // 参数依赖规则（用于自动解析 API 依赖）
 }
 
 // NewAPIMetadata creates a new APIMetadata.
@@ -243,11 +274,11 @@ func (api *APIMetadata) GetSourceAPIs() []string {
 // Token represents a token entity.
 // Belongs to: DataSource aggregate
 type Token struct {
-	ID           shared.ID
-	DataSourceID shared.ID
-	TokenValue   string // encrypted
-	ExpiresAt    *time.Time
-	CreatedAt    shared.Timestamp
+	ID           shared.ID        `json:"id"`
+	DataSourceID shared.ID        `json:"data_source_id"`
+	TokenValue   string           `json:"-"` // encrypted, never serialize
+	ExpiresAt    *time.Time       `json:"expires_at,omitempty"`
+	CreatedAt    shared.Timestamp `json:"created_at"`
 }
 
 // NewToken creates a new Token.
@@ -325,16 +356,16 @@ const (
 // 定义每个 API 的同步方式，用于工作流构建
 // Belongs to: DataSource aggregate (通过 data_source_id + api_name 关联)
 type APISyncStrategy struct {
-	ID               shared.ID        // 主键
-	DataSourceID     shared.ID        // 关联的数据源 ID
-	APIName          string           // API 名称（与 api_metadata.name 对应）
-	PreferredParam   SyncParamType    // 优先使用的参数类型
-	SupportDateRange bool             // 是否支持日期范围查询（start_date/end_date）
-	RequiredParams   []string         // 必需的参数（除了 PreferredParam 之外）
-	Dependencies     []string         // 依赖的上游任务名称
-	Description      string           // 策略说明
-	CreatedAt        shared.Timestamp // 创建时间
-	UpdatedAt        shared.Timestamp // 更新时间
+	ID               shared.ID        `json:"id"`
+	DataSourceID     shared.ID        `json:"data_source_id"`
+	APIName          string           `json:"api_name"`
+	PreferredParam   SyncParamType    `json:"preferred_param"`
+	SupportDateRange bool             `json:"support_date_range"`
+	RequiredParams   []string         `json:"required_params,omitempty"`
+	Dependencies     []string         `json:"dependencies,omitempty"`
+	Description      string           `json:"description"`
+	CreatedAt        shared.Timestamp `json:"created_at"`
+	UpdatedAt        shared.Timestamp `json:"updated_at"`
 }
 
 // NewAPISyncStrategy 创建新的 API 同步策略

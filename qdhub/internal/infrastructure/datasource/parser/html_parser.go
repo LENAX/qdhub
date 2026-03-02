@@ -62,11 +62,11 @@ func (p *HTMLParser) SupportedType() metadata.DocumentType {
 }
 
 // ParseCatalog parses the catalog structure from HTML content.
-// Returns: category list, API detail page URLs
-func (p *HTMLParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+// Returns: category list, API detail page URLs, category ID per URL (nil = no category).
+func (p *HTMLParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	var categories []metadata.APICategory
@@ -75,11 +75,10 @@ func (p *HTMLParser) ParseCatalog(content string) ([]metadata.APICategory, []str
 	// Find the catalog container
 	container := doc.Find(p.catalogSelector)
 	if container.Length() == 0 {
-		return nil, nil, fmt.Errorf("catalog container not found with selector: %s", p.catalogSelector)
+		return nil, nil, nil, fmt.Errorf("catalog container not found with selector: %s", p.catalogSelector)
 	}
 
-	// Parse categories and API URLs - this is a generic implementation
-	// Specific data source parsers should override this method
+	// Parse categories and API URLs - generic impl does not assign categories
 	container.Find("a").Each(func(i int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if exists && href != "" && !strings.HasPrefix(href, "#") {
@@ -87,7 +86,9 @@ func (p *HTMLParser) ParseCatalog(content string) ([]metadata.APICategory, []str
 		}
 	})
 
-	return categories, apiURLs, nil
+	// No category association in generic parser
+	apiCategoryIDs := make([]*shared.ID, len(apiURLs))
+	return categories, apiURLs, apiCategoryIDs, nil
 }
 
 // ParseAPIDetail parses API detail information from HTML content.

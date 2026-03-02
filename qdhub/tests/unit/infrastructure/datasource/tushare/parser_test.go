@@ -141,7 +141,7 @@ func TestParser_ParseCatalog_Basic(t *testing.T) {
 </html>
 `
 
-	categories, apiURLs, err := parser.ParseCatalog(html)
+	categories, apiURLs, _, err := parser.ParseCatalog(html)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

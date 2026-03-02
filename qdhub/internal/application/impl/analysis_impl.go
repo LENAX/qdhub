@@ -56,6 +56,9 @@ func (a *AnalysisApplicationServiceImpl) ListIndices(ctx context.Context, req an
 func (a *AnalysisApplicationServiceImpl) ListConcepts(ctx context.Context, req analysis.ConceptListRequest) ([]analysis.ConceptInfo, error) {
 	return a.svc.ListConcepts(ctx, req)
 }
+func (a *AnalysisApplicationServiceImpl) GetStockSnapshot(ctx context.Context, tradeDate string, adjustType analysis.AdjustType, tsCodes []string) ([]analysis.StockInfo, error) {
+	return a.svc.GetStockSnapshot(ctx, tradeDate, adjustType, tsCodes)
+}
 func (a *AnalysisApplicationServiceImpl) GetDragonTigerList(ctx context.Context, req analysis.DragonTigerRequest) ([]analysis.DragonTigerList, error) {
 	return a.svc.GetDragonTigerList(ctx, req)
 }
@@ -70,6 +73,9 @@ func (a *AnalysisApplicationServiceImpl) ListNews(ctx context.Context, req analy
 }
 func (a *AnalysisApplicationServiceImpl) GetLimitUpLadder(ctx context.Context, tradeDate string) ([]analysis.LimitUpLadder, error) {
 	return a.svc.GetLimitUpLadder(ctx, tradeDate)
+}
+func (a *AnalysisApplicationServiceImpl) GetFirstLimitUpStocks(ctx context.Context, tradeDate string) ([]analysis.LimitStock, error) {
+	return a.svc.GetFirstLimitUpStocks(ctx, tradeDate)
 }
 func (a *AnalysisApplicationServiceImpl) GetLimitUpComparison(ctx context.Context, todayDate string) (*analysis.LimitUpComparison, error) {
 	return a.svc.GetLimitUpComparison(ctx, todayDate)
@@ -92,9 +98,15 @@ func (a *AnalysisApplicationServiceImpl) GetStockBasicInfo(ctx context.Context, 
 func (a *AnalysisApplicationServiceImpl) GetFinancialIndicators(ctx context.Context, req analysis.FinancialIndicatorRequest) ([]analysis.FinancialIndicator, error) {
 	return a.svc.GetFinancialIndicators(ctx, req)
 }
-func (a *AnalysisApplicationServiceImpl) GetFinancialReports(ctx context.Context, req analysis.FinancialReportRequest) ([]analysis.FinancialReport, error) {
-	return a.svc.GetFinancialReports(ctx, req)
+func (a *AnalysisApplicationServiceImpl) GetFinancialTableData(ctx context.Context, table string, req analysis.FinancialReportRequest) ([]map[string]any, error) {
+	return a.svc.GetFinancialTableData(ctx, table, req)
 }
 func (a *AnalysisApplicationServiceImpl) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQueryRequest) (*analysis.CustomQueryResult, error) {
 	return a.svc.ExecuteReadOnlyQuery(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error) {
+	return a.svc.GetTradeCalendar(ctx, startDate, endDate)
+}
+func (a *AnalysisApplicationServiceImpl) GetTechnicalIndicators(ctx context.Context, req analysis.TechnicalIndicatorCalcRequest) ([]analysis.TechnicalIndicator, error) {
+	return a.svc.GetTechnicalIndicators(ctx, req)
 }
