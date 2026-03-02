@@ -797,14 +797,36 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 		"api_name": config.APIName,
 	})
 
+	// 构造请求参数：
+	// - 默认包含全局日期范围（start_date/end_date），使支持日期区间的 API 能按计划时间段执行
+	// - 若配置了 ExtraParams，则在其基础上叠加日期范围，调用方可通过 ExtraParams 显式覆盖同名字段
+	params := map[string]interface{}{}
+	if dateTimeParams != nil {
+		params = mergeParams(params, dateTimeParams)
+	}
+	if config.ExtraParams != nil {
+		params = mergeParams(params, config.ExtraParams)
+	}
+
+	// 特殊处理：Tushare/forecast 要求 ann_date 和 ts_code 至少填一个参数。
+	// 若调用方未显式指定 ann_date 或 ts_code，则使用 end_date 作为 ann_date，避免参数校验失败。
+	if config.APIName == "forecast" {
+		if _, hasAnn := params["ann_date"]; !hasAnn {
+			if _, hasTsCode := params["ts_code"]; !hasTsCode {
+				if end, ok := params["end_date"].(string); ok && end != "" {
+					params["ann_date"] = end
+				}
+			}
+		}
+	}
+
+	if len(params) > 0 {
+		jobParams["params"] = params
+	}
+
 	// 添加上游参数映射
 	if config.UpstreamParams != nil {
 		jobParams["upstream_params"] = config.UpstreamParams
-	}
-
-	// 添加额外参数
-	if config.ExtraParams != nil {
-		jobParams["params"] = config.ExtraParams
 	}
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
