@@ -157,9 +157,9 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	// 创建 application services
 	metadataRepo := repository.NewMetadataRepository(ctx.DB)
 	uowImpl := uow.NewUnitOfWork(ctx.DB)
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, parserFactory, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, jobScheduler, dataSourceRepo, dsRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// 创建认证相关组件
@@ -180,7 +180,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			Port: 0,
 			Mode: gin.TestMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = "" // Mock 模式不需要 BaseURL
@@ -204,7 +204,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			WriteTimeout: 30 * time.Second,
 			Mode:         gin.DebugMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)

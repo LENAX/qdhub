@@ -34,44 +34,50 @@ type limitUpComparisonReaderImpl struct{ *Readers }
 type sectorLimitStatsReaderImpl struct{ *Readers }
 type sectorLimitStocksReaderImpl struct{ *Readers }
 type limitUpBySectorReaderImpl struct{ *Readers }
+type FirstLimitUpReaderImpl struct{ *Readers }
 
 // Ensure 编译期检查
 var (
 	_ analysis.KLineReader                 = (*Readers)(nil)
 	_ analysis.LimitListReader             = (*Readers)(nil)
-	_ analysis.ConceptRotationReader      = (*Readers)(nil)
+	_ analysis.ConceptRotationReader       = (*Readers)(nil)
 	_ analysis.CustomQueryExecutor         = (*Readers)(nil)
 	_ analysis.LimitStatsReader            = (*Readers)(nil)
-	_ analysis.LimitStockListReader       = (*Readers)(nil)
-	_ analysis.LimitLadderReader          = (*limitLadderReaderImpl)(nil)
-	_ analysis.LimitComparisonReader      = (*limitComparisonReaderImpl)(nil)
-	_ analysis.SectorLimitStatsReader     = (*sectorLimitStatsReaderImpl)(nil)
-	_ analysis.SectorLimitStocksReader    = (*sectorLimitStocksReaderImpl)(nil)
-	_ analysis.ConceptHeatReader          = (*Readers)(nil)
+	_ analysis.LimitStockListReader        = (*Readers)(nil)
+	_ analysis.LimitLadderReader           = (*limitLadderReaderImpl)(nil)
+	_ analysis.LimitComparisonReader       = (*limitComparisonReaderImpl)(nil)
+	_ analysis.SectorLimitStatsReader      = (*sectorLimitStatsReaderImpl)(nil)
+	_ analysis.SectorLimitStocksReader     = (*sectorLimitStocksReaderImpl)(nil)
+	_ analysis.ConceptHeatReader           = (*Readers)(nil)
 	_ analysis.ConceptStocksReader         = (*Readers)(nil)
-	_ analysis.StockListReader            = (*stockListReaderImpl)(nil)
-	_ analysis.IndexListReader            = (*indexListReaderImpl)(nil)
-	_ analysis.ConceptListReader          = (*conceptListReaderImpl)(nil)
-	_ analysis.DragonTigerReader          = (*dragonTigerReaderImpl)(nil)
-	_ analysis.MoneyFlowReader            = (*Readers)(nil)
+	_ analysis.StockListReader             = (*stockListReaderImpl)(nil)
+	_ analysis.IndexListReader             = (*indexListReaderImpl)(nil)
+	_ analysis.ConceptListReader           = (*conceptListReaderImpl)(nil)
+	_ analysis.DragonTigerReader           = (*dragonTigerReaderImpl)(nil)
+	_ analysis.MoneyFlowReader             = (*Readers)(nil)
 	_ analysis.PopularityRankReader        = (*Readers)(nil)
 	_ analysis.NewsReader                  = (*newsReaderImpl)(nil)
-	_ analysis.LimitUpListReader          = (*limitUpListReaderImpl)(nil)
-	_ analysis.LimitUpLadderReader        = (*limitUpLadderReaderImpl)(nil)
-	_ analysis.LimitUpComparisonReader    = (*limitUpComparisonReaderImpl)(nil)
+	_ analysis.LimitUpListReader           = (*limitUpListReaderImpl)(nil)
+	_ analysis.LimitUpLadderReader         = (*limitUpLadderReaderImpl)(nil)
+	_ analysis.LimitUpComparisonReader     = (*limitUpComparisonReaderImpl)(nil)
 	_ analysis.LimitUpBySectorReader       = (*limitUpBySectorReaderImpl)(nil)
 	_ analysis.LimitUpStocksBySectorReader = (*Readers)(nil)
-	_ analysis.StockBasicReader           = (*Readers)(nil)
-	_ analysis.FinancialIndicatorReader   = (*Readers)(nil)
+	_ analysis.FirstLimitUpReader          = (*FirstLimitUpReaderImpl)(nil)
+	_ analysis.StockBasicReader            = (*Readers)(nil)
+	_ analysis.FinancialIndicatorReader    = (*Readers)(nil)
 	_ analysis.FinancialReportReader       = (*Readers)(nil)
+	_ analysis.TradeCalendarReader         = (*Readers)(nil)
+	_ analysis.StockSnapshotReader         = (*Readers)(nil)
 )
 
-// GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算
+// GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算。
+// 复权因子缺失时用 ffill（该日之前最近一日的 adj_factor），避免除权前日被填成除权后因子导致前复权出现 -99% 异常；无前值则用 1.0。
 func (r *Readers) GetDailyWithAdjFactor(ctx context.Context, tsCode, startDate, endDate string) ([]analysis.RawDailyRow, error) {
-	// 优先从 daily 与 adj_factor 联表查询；若 adj_factor 不存在则仅查 daily，adj_factor 填 1
 	sql := `
 SELECT d.trade_date, d.open, d.high, d.low, d.close, d.vol, d.amount, d.pre_close, d.change, d.pct_chg,
-       COALESCE(a.adj_factor, 1.0) AS adj_factor
+       COALESCE(a.adj_factor,
+                (SELECT a2.adj_factor FROM adj_factor a2 WHERE a2.ts_code = d.ts_code AND a2.trade_date < d.trade_date ORDER BY a2.trade_date DESC LIMIT 1),
+                1.0) AS adj_factor
 FROM daily d
 LEFT JOIN adj_factor a ON d.ts_code = a.ts_code AND d.trade_date = a.trade_date
 WHERE d.ts_code = ? AND d.trade_date >= ? AND d.trade_date <= ?
@@ -223,7 +229,97 @@ func (r *Readers) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQ
 }
 
 // GetLimitStats 涨跌停统计
+// 优先用 limit_list_d（limit 字段 U/D/Z）直接统计涨跌停与封板/打开数；
+// 有 limit_list_ths 时用 open_num 补充涨停封板/打开更准确数据。
+// 涨停数量兜底：当 limit 字段不匹配 U/Z 时，用 pct_chg>=9.8 统计，避免显示不全。
 func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
+	// 尝试从 limit_list_d 直接统计（U=涨停封板 D=跌停封板 Z=炸板）
+	if ldOk, _ := r.db.TableExists(ctx, "limit_list_d"); ldOk {
+		ldSQL := `
+SELECT trade_date,
+       COUNT(DISTINCT CASE WHEN "limit" = 'U' THEN ts_code END) AS limit_up_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'Z' THEN ts_code END) AS limit_up_opened,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z') THEN ts_code END) AS limit_up_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_from_pct,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('D') THEN ts_code END) AS limit_down_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
+FROM limit_list_d
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date ORDER BY trade_date`
+		ldRows, ldErr := r.db.Query(ctx, ldSQL, startDate, endDate)
+		if ldErr == nil && len(ldRows) > 0 {
+			out := make([]analysis.LimitStats, 0, len(ldRows))
+			for _, m := range ldRows {
+				sealed := int_(m, "limit_up_sealed")
+				opened := int_(m, "limit_up_opened")
+				upFromLimit := int_(m, "limit_up_from_limit")
+				upFromPct := int_(m, "limit_up_from_pct")
+				total := sealed + opened
+				if total < upFromPct {
+					total = upFromPct
+				}
+				if total < upFromLimit {
+					total = upFromLimit
+				}
+				if total > 0 && sealed == 0 && opened == 0 {
+					sealed = total
+				}
+				dSealed := int_(m, "limit_down_sealed")
+				dFromLimit := int_(m, "limit_down_from_limit")
+				dFromPct := int_(m, "limit_down_from_pct")
+				dCount := dSealed
+				if dCount < dFromPct {
+					dCount = dFromPct
+				}
+				if dCount < dFromLimit {
+					dCount = dFromLimit
+				}
+				dSealedVal := dSealed
+				if dSealedVal == 0 && dCount > 0 {
+					dSealedVal = dCount
+				}
+				out = append(out, analysis.LimitStats{
+					TradeDate:       str(m, "trade_date"),
+					LimitUpCount:    total,
+					LimitDownCount:  dCount,
+					LimitUpSealed:   sealed,
+					LimitUpOpened:   opened,
+					LimitDownSealed: dSealedVal,
+					LimitDownOpened: 0,
+				})
+			}
+			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数
+			if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+				thsSQL := `
+SELECT trade_date,
+       SUM(CASE WHEN COALESCE(open_num, 0) = 0 THEN 1 ELSE 0 END) AS limit_up_sealed,
+       SUM(CASE WHEN COALESCE(open_num, 0) > 0 THEN 1 ELSE 0 END) AS limit_up_opened
+FROM limit_list_ths
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date`
+				thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
+				if thsErr == nil {
+					byDate := make(map[string]*struct{ sealed, opened int })
+					for _, m := range thsRows {
+						byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
+							sealed: int_(m, "limit_up_sealed"),
+							opened: int_(m, "limit_up_opened"),
+						}
+					}
+					for i := range out {
+						if v, ok := byDate[out[i].TradeDate]; ok {
+							out[i].LimitUpSealed = v.sealed
+							out[i].LimitUpOpened = v.opened
+							out[i].LimitUpCount = v.sealed + v.opened
+						}
+					}
+				}
+			}
+			return out, nil
+		}
+	}
+	// 兜底：从 daily 表统计（无封板/打开区分）
 	sql := `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_count,
@@ -240,47 +336,91 @@ GROUP BY trade_date ORDER BY trade_date`
 	}
 	out := make([]analysis.LimitStats, 0, len(rows))
 	for _, m := range rows {
-		limitUp := int_(m, "limit_up_count")
 		out = append(out, analysis.LimitStats{
 			TradeDate:      str(m, "trade_date"),
-			LimitUpCount:   limitUp,
+			LimitUpCount:   int_(m, "limit_up_count"),
 			LimitDownCount: int_(m, "limit_down_count"),
 			UpCount:        int_(m, "up_count"),
 			DownCount:      int_(m, "down_count"),
 			FlatCount:      int_(m, "flat_count"),
-			LimitUpRatio:   float(m, "limit_up_ratio"),
 		})
 	}
 	return out, nil
 }
 
-// GetByDateAndType 涨跌停个股列表（limitType: up/down）
+// GetByDateAndType 涨跌停个股列表（limitType: up/down/z，对应 limit_list_d.limit 的 U/D/Z）
+// 涨停时若有 limit_list_ths 表则以其为主表；否则用 limit_list_d 按 limit 字段筛选。
 func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType string) ([]analysis.LimitStock, error) {
-	threshold := 9.8
-	if limitType == "down" {
-		threshold = -9.8
+	limitVal := strings.ToUpper(limitType)
+	switch limitVal {
+	case "UP":
+		limitVal = "U"
+	case "DOWN":
+		limitVal = "D"
+	case "Z":
+		// 炸板
+	default:
+		if limitVal != "U" && limitVal != "D" && limitVal != "Z" {
+			limitVal = "U"
+		}
 	}
+	// 默认用 limit_list_d 查询，包含 open_times/last_time（炸板列表需要）
 	sql := `
-SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name, COALESCE(l.first_time, '') AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason,
-       l.close, l.pct_chg, COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(s.industry, l.industry, '') AS industry
+SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name,
+       COALESCE(l.first_time, '') AS limit_time,
+       COALESCE(l.last_time, '') AS last_limit_time,
+       '' AS limit_reason,
+       l.close, l.pct_chg,
+       COALESCE(l.turnover_ratio, 0) AS turnover_rate,
+       COALESCE(l.amount, 0) AS amount,
+       COALESCE(l.float_mv, 0) AS float_cap,
+       COALESCE(l.open_times, 0) AS open_times,
+       COALESCE(s.industry, l.industry, '') AS industry
 FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
-WHERE l.trade_date = ? AND l.pct_chg >= ?
+WHERE l.trade_date = ? AND l.limit = ?
 ORDER BY l.first_time`
-	rows, err := r.db.Query(ctx, sql, tradeDate, threshold)
+	args := []interface{}{tradeDate, limitVal}
+	if limitType == "up" || limitType == "U" {
+		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+			// 以 limit_list_ths 为主表，保证涨停原因来自 lu_desc；缺字段时用 limit_list_d 补
+			sql = `
+SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name,
+       COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
+       COALESCE(ths.last_lu_time, l.last_time, '') AS last_limit_time,
+       COALESCE(NULLIF(TRIM(ths.lu_desc), ''), '') AS limit_reason,
+       COALESCE(ths.price, l.close, 0) AS close,
+       COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
+       COALESCE(ths.turnover_rate, l.turnover_ratio, 0) AS turnover_rate,
+       COALESCE(ths.turnover, l.amount, 0) AS amount,
+       COALESCE(ths.free_float, l.float_mv, 0) AS float_cap,
+       COALESCE(ths.open_num, l.open_times, 0) AS open_times,
+       COALESCE(s.industry, l.industry, '') AS industry
+FROM limit_list_ths ths
+LEFT JOIN limit_list_d l ON l.ts_code = ths.ts_code AND l.trade_date = ths.trade_date AND l.limit = 'U'
+LEFT JOIN stock_basic s ON s.ts_code = ths.ts_code
+WHERE ths.trade_date = ?
+ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
+			args = []interface{}{tradeDate}
+		}
+	}
+	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]analysis.LimitStock, 0, len(rows))
 	for _, m := range rows {
 		out = append(out, analysis.LimitStock{
-			TsCode:        str(m, "ts_code"),
-			Name:          str(m, "name"),
-			LimitTime:     str(m, "limit_time"),
-			LimitReason:   str(m, "limit_reason"),
+			TsCode:          str(m, "ts_code"),
+			Name:            str(m, "name"),
+			LimitTime:       str(m, "limit_time"),
+			LastLimitTime:   str(m, "last_limit_time"),
+			LimitReason:     str(m, "limit_reason"),
+			OpenTimes:       int_(m, "open_times"),
 			ConsecutiveDays: 0, FirstLimitDate: tradeDate,
 			Close: float(m, "close"), PctChg: float(m, "pct_chg"),
 			TurnoverRate: float(m, "turnover_rate"), Amount: float(m, "amount"),
+			FloatCap: float(m, "float_cap"),
 			Industry: str(m, "industry"), Concepts: nil,
 		})
 	}
@@ -470,6 +610,49 @@ ORDER BY d.consecutive_days DESC, l.first_time`
 	return &analysis.LimitLadderStats{
 		TradeDate: tradeDate, TotalLimitUp: totalCount, Ladders: ladders, MaxConsecutive: maxConsecutive,
 	}, nil
+}
+
+// GetFirstLimitUpStocksByDate 首板：当日 limit_list_d 涨停且不在 limit_step 中的股票（差集）
+func (r *Readers) GetFirstLimitUpStocksByDate(ctx context.Context, tradeDate string) ([]analysis.LimitStock, error) {
+	sql := `
+SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name, COALESCE(l.first_time, '') AS limit_time, COALESCE(l.up_stat, l.limit, '') AS limit_reason,
+       l.close, l.pct_chg, COALESCE(l.turnover_ratio, 0) AS turnover_rate, COALESCE(l.amount, 0) AS amount, COALESCE(l.float_mv, 0) AS float_cap, COALESCE(s.industry, l.industry, '') AS industry
+FROM limit_list_d l
+LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
+WHERE l.trade_date = ? AND (l.pct_chg >= 9.8 OR l.limit = 'U')`
+	args := []interface{}{tradeDate}
+	if stepOk, _ := r.db.TableExists(ctx, "limit_step"); stepOk {
+		sql += ` AND l.ts_code NOT IN (SELECT ts_code FROM limit_step WHERE trade_date = ?)`
+		args = append(args, tradeDate)
+	}
+	sql += ` ORDER BY l.first_time`
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.LimitStock, 0, len(rows))
+	for _, m := range rows {
+		name := str(m, "name")
+		if isSTStock(name) {
+			continue
+		}
+		out = append(out, analysis.LimitStock{
+			TsCode:          str(m, "ts_code"),
+			Name:            name,
+			LimitTime:       str(m, "limit_time"),
+			LimitReason:     str(m, "limit_reason"),
+			ConsecutiveDays: 1,
+			FirstLimitDate:  tradeDate,
+			Close:           float(m, "close"),
+			PctChg:          float(m, "pct_chg"),
+			TurnoverRate:    float(m, "turnover_rate"),
+			Amount:          float(m, "amount"),
+			FloatCap:        float(m, "float_cap"),
+			Industry:        str(m, "industry"),
+			Concepts:        nil,
+		})
+	}
+	return out, nil
 }
 
 // GetLimitComparisonByDate LimitComparisonReader：今日 vs 昨日
@@ -662,6 +845,88 @@ ORDER BY s.ts_code`
 	return out, nil
 }
 
+// GetSnapshot StockSnapshotReader：按交易日与 ts_code 列表返回价格、涨跌幅等
+func (r *Readers) GetSnapshot(ctx context.Context, tradeDate string, tsCodes []string) ([]analysis.StockInfo, error) {
+	if len(tsCodes) == 0 {
+		return nil, nil
+	}
+	// 构造 IN (?, ?, ...) 占位符
+	placeholders := make([]string, 0, len(tsCodes))
+	args := make([]any, 0, len(tsCodes)+1)
+	args = append(args, tradeDate)
+	for _, code := range tsCodes {
+		if strings.TrimSpace(code) == "" {
+			continue
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, code)
+	}
+	if len(placeholders) == 0 {
+		return nil, nil
+	}
+	sql := `
+SELECT d.ts_code,
+       COALESCE(s.symbol, '') AS symbol,
+       COALESCE(s.name, '')   AS name,
+       COALESCE(s.area, '')   AS area,
+       COALESCE(s.industry, '') AS industry,
+       COALESCE(s.market, '') AS market,
+       COALESCE(s.list_date, '') AS list_date,
+       COALESCE(s.is_hs, '')  AS is_hs,
+       d.close  AS price,
+       d.pct_chg AS pct_chg,
+       d.change  AS change,
+       d.vol     AS volume,
+       d.amount  AS amount
+FROM daily d
+JOIN (
+    SELECT ts_code, MAX(trade_date) AS last_trade_date
+    FROM daily
+    WHERE trade_date <= ? AND ts_code IN (` + strings.Join(placeholders, ",") + `)
+    GROUP BY ts_code
+) t ON d.ts_code = t.ts_code AND d.trade_date = t.last_trade_date
+LEFT JOIN stock_basic s ON d.ts_code = s.ts_code`
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.StockInfo, 0, len(rows))
+	for _, m := range rows {
+		info := analysis.StockInfo{
+			TsCode:   str(m, "ts_code"),
+			Symbol:   str(m, "symbol"),
+			Name:     str(m, "name"),
+			Area:     str(m, "area"),
+			Industry: str(m, "industry"),
+			Market:   str(m, "market"),
+			ListDate: str(m, "list_date"),
+			IsHS:     str(m, "is_hs"),
+		}
+		if v, ok := m["price"]; ok && v != nil {
+			f := float(m, "price")
+			info.Price = &f
+		}
+		if v, ok := m["pct_chg"]; ok && v != nil {
+			f := float(m, "pct_chg")
+			info.PctChg = &f
+		}
+		if v, ok := m["change"]; ok && v != nil {
+			f := float(m, "change")
+			info.Change = &f
+		}
+		if v, ok := m["volume"]; ok && v != nil {
+			f := float(m, "volume")
+			info.Volume = &f
+		}
+		if v, ok := m["amount"]; ok && v != nil {
+			f := float(m, "amount")
+			info.Amount = &f
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 // ListStocks StockListReader.List
 func (r *Readers) ListStocks(ctx context.Context, req analysis.StockListRequest) ([]analysis.StockInfo, error) {
 	sql := `SELECT ts_code, symbol, name, area, industry, market, list_date, is_hs FROM stock_basic WHERE 1=1`
@@ -677,6 +942,11 @@ func (r *Readers) ListStocks(ctx context.Context, req analysis.StockListRequest)
 	if req.ListStatus != nil && *req.ListStatus != "" {
 		sql += " AND list_status = ?"
 		args = append(args, *req.ListStatus)
+	}
+	if req.Query != nil && strings.TrimSpace(*req.Query) != "" {
+		q := "%" + strings.TrimSpace(*req.Query) + "%"
+		sql += " AND (name LIKE ? OR ts_code LIKE ? OR symbol LIKE ?)"
+		args = append(args, q, q, q)
 	}
 	sql += " ORDER BY ts_code LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
@@ -956,6 +1226,11 @@ func (l *limitUpLadderReaderImpl) GetByDate(ctx context.Context, tradeDate strin
 	return l.GetLimitUpLadderByDate(ctx, tradeDate)
 }
 
+// GetByDate FirstLimitUpReaderImpl
+func (f *FirstLimitUpReaderImpl) GetByDate(ctx context.Context, tradeDate string) ([]analysis.LimitStock, error) {
+	return f.GetFirstLimitUpStocksByDate(ctx, tradeDate)
+}
+
 // GetComparison limitUpComparisonReaderImpl
 func (l *limitUpComparisonReaderImpl) GetComparison(ctx context.Context, todayDate string) (*analysis.LimitUpComparison, error) {
 	return l.GetLimitUpComparisonByDate(ctx, todayDate)
@@ -982,7 +1257,7 @@ func (r *Readers) GetLimitUpBySectorByDate(ctx context.Context, tradeDate, secto
 		}
 		out = append(out, analysis.LimitUpBySector{
 			SectorCode: s.SectorCode, SectorName: s.SectorName, SectorType: s.SectorType,
-			StockCount: s.LimitUpCount, TotalStockCount: s.TotalStocks,
+			StockCount: s.LimitUpCount, LimitUpCount: s.LimitUpCount, TotalStockCount: s.TotalStocks,
 			LimitUpRatio: s.LimitUpRatio, AvgPctChg: s.AvgPctChg, Stocks: stkList,
 		})
 	}
@@ -1064,12 +1339,9 @@ FROM stock_basic WHERE ts_code = ?`
 }
 
 // GetIndicators FinancialIndicatorReader
+// fina_indicator 表由 Tushare 元数据动态建表，列名因版本/接口而异，用 SELECT * 避免 Binder 报错，映射时按 key 取存在的字段即可
 func (r *Readers) GetIndicators(ctx context.Context, req analysis.FinancialIndicatorRequest) ([]analysis.FinancialIndicator, error) {
-	sql := `SELECT ts_code, ann_date, end_date, report_type, comp_type, roe, roe_avg, roe_diluted, roa,
-       gross_profit_margin, net_profit_margin, total_asset_turnover, current_asset_turnover, fixed_asset_turnover,
-       current_ratio, quick_ratio, cash_ratio, debt_to_asset, equity_to_asset,
-       revenue_yoy, profit_yoy, total_asset_yoy, equity_yoy, eps, bps, cps, pe, pb, ps
-FROM fina_indicator WHERE ts_code = ?`
+	sql := `SELECT * FROM fina_indicator WHERE ts_code = ?`
 	args := []any{req.TsCode}
 	if req.EndDate != nil && *req.EndDate != "" {
 		sql += " AND end_date <= ?"
@@ -1096,13 +1368,19 @@ FROM fina_indicator WHERE ts_code = ?`
 	return out, nil
 }
 
-// GetReports FinancialReportReader
-func (r *Readers) GetReports(ctx context.Context, req analysis.FinancialReportRequest) ([]analysis.FinancialReport, error) {
-	sql := `SELECT ts_code, ann_date, f_ann_date, end_date, report_type, comp_type,
-       total_assets, total_liab, total_equity, fixed_assets, current_assets, current_liab,
-       revenue, operating_profit, total_profit, net_profit, net_profit_after,
-       operating_cash_flow, investing_cash_flow, financing_cash_flow, net_cash_flow
-FROM fina_mainbz WHERE ts_code = ?`
+// allowedFinancialTables 白名单，防止 SQL 注入
+var allowedFinancialTables = map[string]bool{
+	"income":       true,
+	"balancesheet": true,
+	"cashflow":     true,
+}
+
+// GetTableData FinancialReportReader — 按表名查 income / balancesheet / cashflow
+func (r *Readers) GetTableData(ctx context.Context, table string, req analysis.FinancialReportRequest) ([]map[string]any, error) {
+	if !allowedFinancialTables[table] {
+		return nil, fmt.Errorf("invalid financial table: %s", table)
+	}
+	sql := "SELECT * FROM " + table + " WHERE ts_code = ?"
 	args := []any{req.TsCode}
 	if req.EndDate != nil && *req.EndDate != "" {
 		sql += " AND end_date <= ?"
@@ -1111,6 +1389,10 @@ FROM fina_mainbz WHERE ts_code = ?`
 	if req.StartDate != nil && *req.StartDate != "" {
 		sql += " AND end_date >= ?"
 		args = append(args, *req.StartDate)
+	}
+	if req.ReportType != nil && *req.ReportType != "" {
+		sql += " AND report_type = ?"
+		args = append(args, *req.ReportType)
 	}
 	sql += " ORDER BY end_date DESC LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
@@ -1122,9 +1404,32 @@ FROM fina_mainbz WHERE ts_code = ?`
 	if err != nil {
 		return nil, err
 	}
-	out := make([]analysis.FinancialReport, 0, len(rows))
-	for _, m := range rows {
-		out = append(out, rowToFinancialReport(m))
+	return rows, nil
+}
+
+// GetTradingDates TradeCalendarReader：从 trade_cal 表取 is_open=1 的日期（cal_date 或 cal_trade + is_open）
+func (r *Readers) GetTradingDates(ctx context.Context, startDate, endDate string) ([]string, error) {
+	runQuery := func(dateCol string) ([]string, error) {
+		sql := "SELECT " + dateCol + " AS d FROM trade_cal WHERE (is_open = 1 OR is_open = '1') AND " + dateCol + " >= ? AND " + dateCol + " <= ? ORDER BY " + dateCol
+		rows, err := r.db.Query(ctx, sql, startDate, endDate)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, 0, len(rows))
+		for _, m := range rows {
+			d := str(m, "d")
+			if d != "" {
+				out = append(out, strings.TrimSpace(d))
+			}
+		}
+		return out, nil
+	}
+	out, err := runQuery("cal_date")
+	if err != nil && (strings.Contains(err.Error(), "cal_date") || strings.Contains(err.Error(), "column") || strings.Contains(err.Error(), "CAL_DATE")) {
+		out, err = runQuery("cal_trade")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("trade_cal query: %w", err)
 	}
 	return out, nil
 }
@@ -1195,8 +1500,17 @@ func rowToFinancialReport(m map[string]any) analysis.FinancialReport {
 	setFloatPtr(&f.TotalAssets, m, "total_assets")
 	setFloatPtr(&f.TotalLiab, m, "total_liab")
 	setFloatPtr(&f.TotalEquity, m, "total_equity")
+	setFloatPtr(&f.FixedAssets, m, "fixed_assets")
+	setFloatPtr(&f.CurrentAssets, m, "current_assets")
+	setFloatPtr(&f.CurrentLiab, m, "current_liab")
 	setFloatPtr(&f.Revenue, m, "revenue")
+	setFloatPtr(&f.OperatingProfit, m, "operating_profit")
+	setFloatPtr(&f.TotalProfit, m, "total_profit")
 	setFloatPtr(&f.NetProfit, m, "net_profit")
+	setFloatPtr(&f.NetProfitAfter, m, "net_profit_after")
 	setFloatPtr(&f.OperatingCashFlow, m, "operating_cash_flow")
+	setFloatPtr(&f.InvestingCashFlow, m, "investing_cash_flow")
+	setFloatPtr(&f.FinancingCashFlow, m, "financing_cash_flow")
+	setFloatPtr(&f.NetCashFlow, m, "net_cash_flow")
 	return f
 }

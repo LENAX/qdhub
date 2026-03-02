@@ -37,6 +37,8 @@ func setupSyncRepoTestDB(t *testing.T) (*persistence.DB, func()) {
 			execution_graph TEXT,
 			cron_expression VARCHAR(128),
 			default_execute_params TEXT,
+			incremental_mode BOOLEAN DEFAULT 0,
+			last_successful_end_date VARCHAR(32),
 			status VARCHAR(32) DEFAULT 'draft',
 			last_executed_at TIMESTAMP,
 			next_execute_at TIMESTAMP,
@@ -69,10 +71,25 @@ func setupSyncRepoTestDB(t *testing.T) (*persistence.DB, func()) {
 			finished_at TIMESTAMP,
 			record_count INTEGER DEFAULT 0,
 			error_message TEXT,
+			workflow_error_message TEXT,
 			execute_params TEXT,
 			synced_apis TEXT,
 			skipped_apis TEXT,
 			FOREIGN KEY (sync_plan_id) REFERENCES sync_plan(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS sync_execution_detail (
+			id VARCHAR(64) PRIMARY KEY,
+			execution_id VARCHAR(64) NOT NULL,
+			task_id VARCHAR(64) NOT NULL,
+			api_name VARCHAR(128) NOT NULL,
+			record_count INTEGER DEFAULT 0,
+			status VARCHAR(32) NOT NULL,
+			error_message TEXT,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (execution_id) REFERENCES sync_execution(id) ON DELETE CASCADE
 		);
 	`)
 	if err != nil {

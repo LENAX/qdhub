@@ -411,6 +411,21 @@
                 }
             }
         },
+        "/analysis/financial/balancesheet": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/analysis/financial/cashflow": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/analysis/financial/income": {
+            "get": {
+                "responses": {}
+            }
+        },
         "/analysis/financial/indicators": {
             "get": {
                 "security": [
@@ -429,81 +444,6 @@
                     "Analysis"
                 ],
                 "summary": "Get financial indicators",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Stock code",
-                        "name": "ts_code",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Start date YYYYMMDD",
-                        "name": "start_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "End date YYYYMMDD",
-                        "name": "end_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Limit",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Offset",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/http.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/analysis/financial/reports": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get financial reports for a stock",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Analysis"
-                ],
-                "summary": "Get financial reports",
                 "parameters": [
                     {
                         "type": "string",
@@ -1298,7 +1238,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "List stocks with optional market/industry/list_status filter",
+                "description": "List stocks with optional market/industry/list_status/query filter. query searches by name, ts_code, symbol.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1329,6 +1269,12 @@
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Search by name or code (fuzzy)",
+                        "name": "query",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "default": 100,
                         "description": "Limit",
@@ -1346,6 +1292,153 @@
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/stocks/indicators": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Calculate MA/RSI/MACD indicators for given stock and date range, with same adjust type \u0026 period as K line",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get technical indicators for a stock",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Stock code (e.g. 000001.SZ)",
+                        "name": "ts_code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "qfq",
+                        "description": "Adjust type: none, qfq, hfq",
+                        "name": "adjust_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "D",
+                        "description": "Period: D, W, M",
+                        "name": "period",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma separated indicator names, e.g. MA5,MA10,MA20,RSI,MACD",
+                        "name": "indicators",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/stocks/snapshot": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get latest adjusted close price and change for given stocks on a trade date",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get stock snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trade date YYYYMMDD",
+                        "name": "trade_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "qfq",
+                        "description": "Adjust type: none, qfq, hfq",
+                        "name": "adjust_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma separated ts_code list",
+                        "name": "ts_codes",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/http.Response"
                         }
@@ -1383,6 +1476,62 @@
                         "description": "Stock code (e.g. 000001.SZ)",
                         "name": "ts_code",
                         "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/trade-cal": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns list of trading dates (cal_date where is_open=1) from trade_cal table for the given range",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "Get trading calendar",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
                         "required": true
                     }
                 ],
@@ -1942,6 +2091,297 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a data source and cascade to api_metadata, api_sync_strategies, api_categories, token. Admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Delete a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden (non-admin)",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/api-categories": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get API categories. When has_apis_only=true, only categories that have at least one api_metadata are returned (for catalog dropdown).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "List API categories for a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "If true, only return categories that have at least one API",
+                        "name": "has_apis_only",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: []APICategory",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/api-metadata": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a paginated list of API metadata. Each item includes category_id. Optional filters: api_metadata_id, name, category_id.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "List API metadata for a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-based)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size (max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by API metadata ID (exact)",
+                        "name": "api_metadata_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by name (contains)",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by API category ID (exact)",
+                        "name": "category_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: API metadata list with category_id; total, page, size",
+                        "schema": {
+                            "$ref": "#/definitions/http.PagedResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Data source not found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/api-metadata/{meta_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a single API metadata by ID. Admin only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Delete API metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "API metadata ID",
+                        "name": "meta_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden (non-admin)",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/api-names": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get all API names for the data source (e.g. for common-data-apis checkbox form).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "List API names for a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.ListAPINamesResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
             }
         },
         "/datasources/{id}/api-sync-strategies": {
@@ -2036,6 +2476,119 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/common-data-apis": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Set the list of API names treated as common data (e.g. trade_cal, stock_basic for tushare). Used for cache/DataStore reuse across workflows.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Update common data APIs for a data source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "common_data_apis array",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateDataSourceCommonDataAPIsReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datasources/{id}/config": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns api_url and token for pre-filling the configure modal. Token is only included when present.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Get data source config for edit",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "api_url, token (optional)",
                         "schema": {
                             "$ref": "#/definitions/http.Response"
                         }
@@ -2229,6 +2782,55 @@
                 }
             }
         },
+        "/datasources/{id}/token/validate": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Check if data source has a token and validate it via adapter test request. No token returns unauthenticated; with token runs a test request and returns success or error detail.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSources"
+                ],
+                "summary": "Validate data source token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "has_token, valid, message",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/datastores": {
             "get": {
                 "security": [
@@ -2359,6 +2961,112 @@
                         }
                     }
                 }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update name, description, type, dsn, or storage_path of a data store",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Update a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateDataStoreReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a data store. Fails if any sync plan references it.",
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Delete a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
             }
         },
         "/datastores/{id}/create-tables": {
@@ -2406,6 +3114,177 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/tables": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns table names in the data store's database (e.g. main schema)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "List tables in a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: []string",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/tables/{tableName}/data": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Get paginated table data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Table name",
+                        "name": "tableName",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size (max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search term (ILIKE)",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Column to search in (omit for all)",
+                        "name": "search_column",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: rows, total: count",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/datastores/{id}/validate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Check whether the data store's database actually exists and is reachable",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataStores"
+                ],
+                "summary": "Validate a data store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Valid: true/false, Message when invalid",
                         "schema": {
                             "$ref": "#/definitions/http.Response"
                         }
@@ -2492,6 +3371,153 @@
                     "SyncPlans"
                 ],
                 "summary": "Cancel sync execution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}/detail": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get per-API stats and task-level error details for a sync execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Get sync execution detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}/pause": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Pause a running sync execution (workflow instance)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Pause sync execution",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/executions/{id}/resume": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resume a paused sync execution",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Resume sync execution",
                 "parameters": [
                     {
                         "type": "string",
@@ -3159,6 +4185,64 @@
                 }
             }
         },
+        "/sync-plans/{id}/execute": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Manually trigger execution of a sync plan. Target DB path is resolved from the sync plan's associated data store. Request body may be empty; start_dt/end_dt are optional.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Execute a sync plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Execution parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ExecuteSyncPlanReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/sync-plans/{id}/executions": {
             "get": {
                 "security": [
@@ -3184,6 +4268,68 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/sync-plans/{id}/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns paginated execution history for the plan. Query: limit (default 20), offset (default 0).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SyncPlans"
+                ],
+                "summary": "Get sync plan execution history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sync plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3355,14 +4501,14 @@
                 }
             }
         },
-        "/sync-plans/{id}/trigger": {
-            "post": {
+        "/sync-plans/{id}/summary": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "Manually trigger execution of a sync plan",
+                "description": "Returns the latest execution summary for the plan (status, record_count, synced_apis, skipped_apis). Null when the plan has never been executed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3372,7 +4518,7 @@
                 "tags": [
                     "SyncPlans"
                 ],
-                "summary": "Trigger a sync plan",
+                "summary": "Get sync plan execution summary",
                 "parameters": [
                     {
                         "type": "string",
@@ -3380,15 +4526,6 @@
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "Execution parameters",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/http.TriggerSyncPlanReq"
-                        }
                     }
                 ],
                 "responses": {
@@ -3621,6 +4758,15 @@
                 "description": {
                     "type": "string"
                 },
+                "incremental_mode": {
+                    "type": "boolean"
+                },
+                "incremental_start_date_api": {
+                    "type": "string"
+                },
+                "incremental_start_date_column": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -3646,6 +4792,19 @@
                 }
             }
         },
+        "http.ExecuteSyncPlanReq": {
+            "type": "object",
+            "properties": {
+                "end_dt": {
+                    "description": "optional, datetime",
+                    "type": "string"
+                },
+                "start_dt": {
+                    "description": "optional, datetime (RFC3339 or 2006-01-02)",
+                    "type": "string"
+                }
+            }
+        },
         "http.ExecutionCallbackReq": {
             "type": "object",
             "required": [
@@ -3663,6 +4822,38 @@
                 },
                 "success": {
                     "type": "boolean"
+                }
+            }
+        },
+        "http.ListAPINamesResp": {
+            "type": "object",
+            "properties": {
+                "api_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "http.PagedResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {},
+                "message": {
+                    "type": "string"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -3710,31 +4901,6 @@
                 }
             }
         },
-        "http.TriggerSyncPlanReq": {
-            "type": "object",
-            "required": [
-                "end_date",
-                "start_date",
-                "target_db_path"
-            ],
-            "properties": {
-                "end_date": {
-                    "type": "string"
-                },
-                "end_time": {
-                    "type": "string"
-                },
-                "start_date": {
-                    "type": "string"
-                },
-                "start_time": {
-                    "type": "string"
-                },
-                "target_db_path": {
-                    "type": "string"
-                }
-            }
-        },
         "http.UpdateAPISyncStrategyReq": {
             "type": "object",
             "properties": {
@@ -3761,6 +4927,38 @@
                 }
             }
         },
+        "http.UpdateDataSourceCommonDataAPIsReq": {
+            "type": "object",
+            "properties": {
+                "common_data_apis": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "http.UpdateDataStoreReq": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "dsn": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "storage_path": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "duckdb, clickhouse, postgresql",
+                    "type": "string"
+                }
+            }
+        },
         "http.UpdateSyncPlanReq": {
             "type": "object",
             "properties": {
@@ -3774,6 +4972,15 @@
                     "$ref": "#/definitions/sync.ExecuteParams"
                 },
                 "description": {
+                    "type": "string"
+                },
+                "incremental_mode": {
+                    "type": "boolean"
+                },
+                "incremental_start_date_api": {
+                    "type": "string"
+                },
+                "incremental_start_date_column": {
                     "type": "string"
                 },
                 "name": {

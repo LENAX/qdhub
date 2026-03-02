@@ -152,10 +152,10 @@ SELECT
     ds.id,
     'daily_basic',
     'trade_date',
-    1,
+    0,
     NULL,
     '["FetchTradeCal"]',
-    '每日指标 - trade_date 或 start_date+end_date'
+    '每日指标 - 按 trade_date 逐日拉取（Tushare 单次最多6000条，需逐日才能覆盖日期范围）'
 FROM data_sources ds WHERE LOWER(ds.name) = 'tushare';
 
 INSERT OR REPLACE INTO api_sync_strategies (id, data_source_id, api_name, preferred_param, support_date_range, required_params, dependencies, description)

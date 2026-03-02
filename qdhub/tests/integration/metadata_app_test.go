@@ -59,10 +59,10 @@ func (m *MockIntegrationDocumentParserFactory) RegisterParser(parser metadata.Do
 // MockIntegrationDocumentParser is a mock parser for integration testing.
 type MockIntegrationDocumentParser struct{}
 
-func (m *MockIntegrationDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+func (m *MockIntegrationDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	return []metadata.APICategory{
 		{ID: shared.NewID(), Name: "股票数据", Description: "股票相关数据"},
-	}, []string{"/api/daily"}, nil
+	}, []string{"/api/daily"}, nil, nil
 }
 
 func (m *MockIntegrationDocumentParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
@@ -87,7 +87,7 @@ func TestMetadataApplicationService_Integration_CreateAndGetDataSource(t *testin
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create data source
 	req := contracts.CreateDataSourceRequest{
@@ -126,7 +126,7 @@ func TestMetadataApplicationService_Integration_ListDataSources(t *testing.T) {
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create multiple data sources
 	for i := 0; i < 3; i++ {
@@ -162,7 +162,7 @@ func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -217,7 +217,7 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata(t *testin
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
@@ -257,7 +257,7 @@ func TestMetadataApplicationService_Integration_ParseAndImportMetadata_DataSourc
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Try to parse with non-existent data source
 	_, err := svc.ParseAndImportMetadata(ctx, contracts.ParseMetadataRequest{
@@ -281,7 +281,7 @@ func TestMetadataApplicationService_Integration_APISyncStrategy(t *testing.T) {
 	parserFactory := NewMockIntegrationDocumentParserFactory()
 	workflowExecutor := &MockMetadataWorkflowExecutor{}
 
-	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor)
+	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create data source first
 	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{

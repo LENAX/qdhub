@@ -129,6 +129,29 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 	return count > 0, nil
 }
 
+// ListTables returns table names in the main schema.
+func (a *Adapter) ListTables(ctx context.Context) ([]string, error) {
+	query := `SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name`
+	rows, err := a.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan table name: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+	return names, nil
+}
+
 // GetTableStats returns statistics for a table.
 func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datastore.TableStats, error) {
 	// Get row count
@@ -195,6 +218,18 @@ func (a *Adapter) tableHasPrimaryKeyFallback(ctx context.Context, tableName stri
 }
 
 // ==================== Data Operations ====================
+
+// isConflictError 判断是否为唯一约束冲突/更新冲突（可重试为 update 或跳过）
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "Conflict") ||
+		strings.Contains(s, "UNIQUE constraint") ||
+		strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "Duplicate")
+}
 
 // getTableColumns returns the column names of a table.
 // This is used to filter out unknown columns when inserting data.
@@ -311,9 +346,19 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 			args[i] = row[col]
 		}
 
-		result, err := stmt.ExecContext(ctx, args...)
-		if err != nil {
-			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
+		result, execErr := stmt.ExecContext(ctx, args...)
+		if execErr != nil {
+			if isConflictError(execErr) {
+				_ = tx.Rollback()
+				// 冲突时改为逐行 INSERT OR REPLACE / INSERT，失败则跳过
+				n, fallbackErr := a.bulkInsertRowByRow(ctx, tableName, data, columns, hasPK)
+				if fallbackErr != nil {
+					return n, fallbackErr
+				}
+				return n, nil
+			}
+			err = execErr
+			return totalInserted, fmt.Errorf("failed to insert row: %w", execErr)
 		}
 
 		affected, _ := result.RowsAffected()
@@ -328,18 +373,63 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 	return totalInserted, nil
 }
 
+// bulkInsertRowByRow 无事务逐行插入，冲突时用 INSERT OR REPLACE 尝试更新，仍失败则跳过该行。
+func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data []map[string]any, columns []string, useReplace bool) (int64, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(columns))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	verb := "INSERT"
+	if useReplace {
+		verb = "INSERT OR REPLACE"
+	}
+	insertSQL := fmt.Sprintf("%s INTO %s (%s) VALUES (%s)",
+		verb,
+		quoteIdentifier(tableName),
+		quoteIdentifiers(columns),
+		strings.Join(placeholders, ", "))
+
+	var totalInserted int64
+	for _, row := range data {
+		args := make([]any, len(columns))
+		for i, col := range columns {
+			args[i] = row[col]
+		}
+		result, err := a.db.ExecContext(ctx, insertSQL, args...)
+		if err != nil {
+			if isConflictError(err) {
+				// 已用 OR REPLACE 仍冲突则跳过
+				continue
+			}
+			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
+		}
+		affected, _ := result.RowsAffected()
+		totalInserted += affected
+	}
+	return totalInserted, nil
+}
+
 // BulkInsertWithBatchID inserts multiple rows with a sync batch ID for rollback support.
+// Copies data internally so the caller's slice is not mutated.
 func (a *Adapter) BulkInsertWithBatchID(ctx context.Context, tableName string, data []map[string]any, syncBatchID string) (int64, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
 
-	// Add sync_batch_id to each row
-	for i := range data {
-		data[i]["sync_batch_id"] = syncBatchID
+	// Copy rows and add sync_batch_id to avoid mutating caller's data (e.g. result.Data used later for cache/extractKeyFields).
+	dataCopy := make([]map[string]any, len(data))
+	for i, row := range data {
+		rowCopy := make(map[string]any, len(row)+1)
+		for k, v := range row {
+			rowCopy[k] = v
+		}
+		rowCopy["sync_batch_id"] = syncBatchID
+		dataCopy[i] = rowCopy
 	}
-
-	return a.BulkInsert(ctx, tableName, data)
+	return a.BulkInsert(ctx, tableName, dataCopy)
 }
 
 // DeleteBySyncBatchID deletes all rows with the given sync batch ID.
@@ -529,6 +619,10 @@ func (t *duckDBTx) BulkInsert(ctx context.Context, tableName string, data []map[
 
 		result, err := stmt.ExecContext(ctx, args...)
 		if err != nil {
+			if isConflictError(err) {
+				// 冲突时跳过该行
+				continue
+			}
 			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
 		}
 

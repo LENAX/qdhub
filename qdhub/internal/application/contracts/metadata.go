@@ -26,7 +26,26 @@ type MetadataApplicationService interface {
 	// ListDataSources lists all data sources.
 	ListDataSources(ctx context.Context) ([]*metadata.DataSource, error)
 
+	// DeleteDataSource deletes a data source and cascades to api_metadata, api_sync_strategies, api_categories, token. Admin only.
+	DeleteDataSource(ctx context.Context, id shared.ID) error
+
+	// UpdateDataSourceCommonDataAPIs updates the list of API names treated as common data for a data source (e.g. trade_cal, stock_basic for tushare).
+	UpdateDataSourceCommonDataAPIs(ctx context.Context, id shared.ID, req UpdateDataSourceCommonDataAPIsRequest) error
+
 	// ==================== API Metadata Management ====================
+
+	// ListAPIMetadata returns a paginated list of API metadata for a data source, with optional filter by id, name and category.
+	ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req ListAPIMetadataRequest) (*ListAPIMetadataResponse, error)
+
+	// ListAPINames returns all API names for a data source (e.g. for common-data-apis checkbox form).
+	ListAPINames(ctx context.Context, dataSourceID shared.ID) ([]string, error)
+
+	// ListAPICategories returns all API categories for a data source (for filter dropdown).
+	// When hasAPIsOnly is true, returns only categories that have at least one api_metadata.
+	ListAPICategories(ctx context.Context, dataSourceID shared.ID, hasAPIsOnly bool) ([]metadata.APICategory, error)
+
+	// DeleteAPIMetadata deletes a single API metadata by ID. Admin only.
+	DeleteAPIMetadata(ctx context.Context, id shared.ID) error
 
 	// ParseAndImportMetadata parses documentation and imports metadata.
 	// This method uses the built-in metadata_crawl workflow to perform the operation.
@@ -41,6 +60,14 @@ type MetadataApplicationService interface {
 	// GetToken retrieves a token for a data source.
 	// The token value will be decrypted before return.
 	GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error)
+
+	// ValidateDataSourceToken checks if the data source has a token and if it is valid.
+	// If no token: hasToken=false, message="未认证". If has token: uses the data source adapter to send a test request;
+	// success -> valid=true, failure -> valid=false and message set to the concrete error.
+	ValidateDataSourceToken(ctx context.Context, dataSourceID shared.ID) (hasToken bool, valid bool, message string, err error)
+
+	// GetDataSourceConfig returns api_url and token for the config form (e.g. when opening configure modal). Token is only set if present.
+	GetDataSourceConfig(ctx context.Context, dataSourceID shared.ID) (apiURL string, token string, err error)
 
 	// ==================== API Sync Strategy Management ====================
 
@@ -60,6 +87,12 @@ type MetadataApplicationService interface {
 	ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error)
 }
 
+// DataSourceTokenValidator validates a data source token by making a test request with the data source adapter.
+// Implemented in infrastructure (e.g. datasource adapter layer).
+type DataSourceTokenValidator interface {
+	Validate(ctx context.Context, dataSourceName, baseURL, token string) (valid bool, message string, err error)
+}
+
 // ==================== Request/Response DTOs ====================
 
 // CreateDataSourceRequest represents a request to create a data source.
@@ -68,6 +101,11 @@ type CreateDataSourceRequest struct {
 	Description string
 	BaseURL     string
 	DocURL      string
+}
+
+// UpdateDataSourceCommonDataAPIsRequest represents a request to update common data APIs for a data source.
+type UpdateDataSourceCommonDataAPIsRequest struct {
+	CommonDataAPIs []string // e.g. ["trade_cal", "stock_basic"] for tushare
 }
 
 // ParseMetadataRequest represents a request to parse and import metadata.
@@ -119,4 +157,19 @@ type UpdateAPISyncStrategyRequest struct {
 	RequiredParams   *[]string
 	Dependencies     *[]string
 	Description      *string
+}
+
+// ListAPIMetadataRequest represents query params for listing API metadata (paginated, filter by id/name/category).
+type ListAPIMetadataRequest struct {
+	Page       int         // 1-based
+	PageSize   int         // default 20, max 100
+	ID         *shared.ID  // optional exact match
+	Name       string      // optional, name contains (LIKE %name%)
+	CategoryID *shared.ID  // optional, filter by API category
+}
+
+// ListAPIMetadataResponse is the paginated response for ListAPIMetadata.
+type ListAPIMetadataResponse struct {
+	Items []*metadata.APIMetadata
+	Total int64
 }

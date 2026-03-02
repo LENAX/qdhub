@@ -120,10 +120,14 @@ func extractResourceAndAction(c *gin.Context) (string, string) {
 	// Extract resource from path
 	// Examples:
 	// /sync-plans -> sync-plans
-	// /sync-plans/:id -> sync-plans
-	// /datasources -> datasources
+	// /executions/:id/cancel -> executions (then mapped to sync-plans)
 	parts := strings.Split(path, "/")
 	resource := parts[0]
+
+	// executions 属于同步计划执行，复用 sync-plans 的权限策略
+	if resource == "executions" {
+		resource = "sync-plans"
+	}
 
 	// Map HTTP method to action
 	var action string
@@ -131,9 +135,10 @@ func extractResourceAndAction(c *gin.Context) (string, string) {
 	case http.MethodGet:
 		action = "read"
 	case http.MethodPost:
-		// Check if it's an execute action (trigger, enable, disable, etc.)
+		// 执行类操作：触发、启用/禁用、取消/暂停/恢复
 		if strings.Contains(path, "trigger") || strings.Contains(path, "enable") ||
-			strings.Contains(path, "disable") || strings.Contains(path, "execute") {
+			strings.Contains(path, "disable") || strings.Contains(path, "execute") ||
+			strings.Contains(path, "cancel") || strings.Contains(path, "pause") || strings.Contains(path, "resume") {
 			action = "execute"
 		} else {
 			action = "write"

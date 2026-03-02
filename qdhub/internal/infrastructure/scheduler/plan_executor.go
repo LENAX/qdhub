@@ -58,18 +58,30 @@ func (e *ScheduledPlanExecutor) ExecuteScheduledJob(ctx context.Context, jobID s
 	return nil
 }
 
-// buildExecuteRequest builds ExecuteSyncPlanRequest from plan.DefaultExecuteParams.
-// Returns nil if DefaultExecuteParams is missing or incomplete (no TargetDBPath/StartDate/EndDate).
+// buildExecuteRequest builds ExecuteSyncPlanRequest for scheduled run.
+// 增量模式：传空 StartDate/EndDate，由 ExecuteSyncPlan 内部统一计算（min(上次成功结束日, 数据最新日期) -> 今天）。
+// 非增量：使用 DefaultExecuteParams 的日期范围。Returns nil if no valid request can be built.
 func (e *ScheduledPlanExecutor) buildExecuteRequest(plan *sync.SyncPlan) *contracts.ExecuteSyncPlanRequest {
 	if plan.DefaultExecuteParams == nil {
 		return nil
 	}
 	p := plan.DefaultExecuteParams
-	if p.TargetDBPath == "" || p.StartDate == "" || p.EndDate == "" {
+
+	// 增量模式：不在此处构造日期，交给 ExecuteSyncPlan 内部按 min(LastSuccessfulEndDate, 数据最新日期) -> 今天 计算
+	if plan.IncrementalMode {
+		return &contracts.ExecuteSyncPlanRequest{
+			StartDate: "",
+			EndDate:   "",
+			StartTime: p.StartTime,
+			EndTime:   p.EndTime,
+		}
+	}
+
+	// 非增量：使用默认日期范围
+	if p.StartDate == "" || p.EndDate == "" {
 		return nil
 	}
 	return &contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: p.TargetDBPath,
 		StartDate:    p.StartDate,
 		EndDate:      p.EndDate,
 		StartTime:    p.StartTime,

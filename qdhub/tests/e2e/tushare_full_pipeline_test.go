@@ -337,7 +337,7 @@ tasks:
 
 	// 手动触发同步（如果系统支持）
 	// 注意：触发同步可能会执行实际的数据获取，在 mock 模式下可能不会真正执行
-	resp, err = ctx.doRequest("POST", "/api/v1/sync-jobs/"+syncJobID+"/trigger", nil)
+	resp, err = ctx.doRequest("POST", "/api/v1/sync-jobs/"+syncJobID+"/execute", nil)
 	if err == nil && resp.StatusCode == http.StatusOK {
 		t.Logf("✅ 同步任务触发成功")
 		// 获取执行记录

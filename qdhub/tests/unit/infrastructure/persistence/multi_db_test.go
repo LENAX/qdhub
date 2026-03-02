@@ -98,7 +98,8 @@ func getTestCases(t *testing.T) []dbTestCase {
 			doc_url VARCHAR(512),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			common_data_apis TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS api_categories (
 			id VARCHAR(64) PRIMARY KEY,
@@ -146,7 +147,8 @@ func getTestCases(t *testing.T) []dbTestCase {
 			doc_url VARCHAR(512),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			common_data_apis TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS api_categories (
 			id VARCHAR(64) PRIMARY KEY,

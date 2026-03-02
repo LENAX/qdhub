@@ -9,19 +9,25 @@ import (
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/shared"
-	"qdhub/internal/infrastructure/quantdb/duckdb"
 )
 
 // QuantDBAdapterImpl implements impl.QuantDBAdapter interface.
 // It manages multiple QuantDB connections, one per DataStore.
+// For DuckDB, it delegates to a shared QuantDBFactory so that Task Engine jobs
+// and application-level queries share the same underlying connection (avoiding
+// the "invisible tables" problem caused by independent DuckDB engine instances).
 type QuantDBAdapterImpl struct {
+	factory     datastore.QuantDBFactory // shared factory (required for DuckDB)
 	connections map[shared.ID]datastore.QuantDB
 	mu          sync.RWMutex
 }
 
 // NewQuantDBAdapter creates a new QuantDBAdapter implementation.
-func NewQuantDBAdapter() *QuantDBAdapterImpl {
+// factory is the shared QuantDBFactory (typically duckdb.Factory) used by Task Engine;
+// passing the same instance ensures both code paths share cached connections.
+func NewQuantDBAdapter(factory datastore.QuantDBFactory) *QuantDBAdapterImpl {
 	return &QuantDBAdapterImpl{
+		factory:     factory,
 		connections: make(map[shared.ID]datastore.QuantDB),
 	}
 }
@@ -66,7 +72,9 @@ func (a *QuantDBAdapterImpl) getOrCreateConnection(ctx context.Context, ds *data
 }
 
 // createConnection creates a new QuantDB connection based on DataStore configuration.
-func (a *QuantDBAdapterImpl) createConnection(ctx context.Context, ds *datastore.QuantDataStore) (datastore.QuantDB, error) {
+// For DuckDB, it delegates to the shared Factory so that Task Engine and application
+// queries use the same cached connection.
+func (a *QuantDBAdapterImpl) createConnection(_ context.Context, ds *datastore.QuantDataStore) (datastore.QuantDB, error) {
 	switch ds.Type {
 	case datastore.DataStoreTypeDuckDB:
 		storagePath := ds.StoragePath
@@ -77,11 +85,10 @@ func (a *QuantDBAdapterImpl) createConnection(ctx context.Context, ds *datastore
 			return nil, fmt.Errorf("DuckDB requires StoragePath or DSN")
 		}
 
-		adapter := duckdb.NewAdapter(storagePath)
-		if err := adapter.Connect(ctx); err != nil {
-			return nil, fmt.Errorf("failed to connect to DuckDB: %w", err)
-		}
-		return adapter, nil
+		return a.factory.Create(datastore.QuantDBConfig{
+			Type:        datastore.DataStoreTypeDuckDB,
+			StoragePath: storagePath,
+		})
 
 	case datastore.DataStoreTypeClickHouse:
 		return nil, fmt.Errorf("ClickHouse adapter not implemented yet")
@@ -124,6 +131,44 @@ func (a *QuantDBAdapterImpl) TableExists(ctx context.Context, ds *datastore.Quan
 		return false, err
 	}
 	return conn.TableExists(ctx, tableName)
+}
+
+// ListTables returns table names in the data store's database.
+func (a *QuantDBAdapterImpl) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+	return conn.ListTables(ctx)
+}
+
+// Query executes a SQL query on the data store and returns the results.
+func (a *QuantDBAdapterImpl) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return nil, err
+	}
+	return conn.Query(ctx, sql, args...)
+}
+
+// Execute executes a SQL statement (INSERT, UPDATE, DELETE) and returns affected rows.
+func (a *QuantDBAdapterImpl) Execute(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) (int64, error) {
+	conn, err := a.getOrCreateConnection(ctx, ds)
+	if err != nil {
+		return 0, err
+	}
+	return conn.Execute(ctx, sql, args...)
+}
+
+// InvalidateConnection drops the cached connection for the given data store ID.
+func (a *QuantDBAdapterImpl) InvalidateConnection(id shared.ID) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if conn, exists := a.connections[id]; exists {
+		_ = conn.Close()
+		delete(a.connections, id)
+	}
 }
 
 // Close closes all managed connections.

@@ -18,6 +18,7 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		r,
 		r,
 		&stockListReaderImpl{r},
+		r,
 		&indexListReaderImpl{r},
 		&conceptListReaderImpl{r},
 		&dragonTigerReaderImpl{r},
@@ -28,10 +29,12 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		&limitUpLadderReaderImpl{r},
 		&limitUpComparisonReaderImpl{r},
 		&limitUpBySectorReaderImpl{r},
+		&FirstLimitUpReaderImpl{r},
 		r,
 		r,
 		r,
 		r,
 		r,
+		r, // TradeCalendarReader
 	)
 }

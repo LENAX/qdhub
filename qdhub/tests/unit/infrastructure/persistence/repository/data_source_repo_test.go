@@ -24,6 +24,9 @@ func setupDataSourceTestDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to create database: %v", err)
 	}
 
+	// Drop and create tables so schema is up to date
+	_, _ = db.Exec(`DROP TABLE IF EXISTS tokens; DROP TABLE IF EXISTS api_metadata; DROP TABLE IF EXISTS api_categories; DROP TABLE IF EXISTS data_sources`)
+
 	// Create tables for DataSource aggregate
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS data_sources (
@@ -34,7 +37,8 @@ func setupDataSourceTestDB(t *testing.T) (*persistence.DB, func()) {
 			doc_url VARCHAR(512),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			common_data_apis TEXT
 		);
 		
 		CREATE TABLE IF NOT EXISTS api_categories (

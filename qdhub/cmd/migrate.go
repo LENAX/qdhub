@@ -56,6 +56,38 @@ func init() {
 	migrateCmd.PersistentFlags().StringVar(&migrationsDir, "migrations-dir", "./migrations", "directory containing migration files")
 }
 
+// filterMigrationsByDriver keeps only migration files that match the current driver.
+// Files without .sqlite. / .postgres. / .mysql. in the name are shared and always kept.
+func filterMigrationsByDriver(files []string, driver string) []string {
+	if driver == "" {
+		driver = "sqlite"
+	}
+	var out []string
+	for _, f := range files {
+		base := filepath.Base(f)
+		if strings.Contains(base, ".sqlite.") {
+			if driver == "sqlite" {
+				out = append(out, f)
+			}
+			continue
+		}
+		if strings.Contains(base, ".postgres.") {
+			if driver == "postgres" {
+				out = append(out, f)
+			}
+			continue
+		}
+		if strings.Contains(base, ".mysql.") {
+			if driver == "mysql" {
+				out = append(out, f)
+			}
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 func runMigrateUp(cmd *cobra.Command, args []string) error {
 	db, err := openDatabase()
 	if err != nil {
@@ -63,11 +95,18 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Get all migration files
+	driver := viper.GetString("database.driver")
+	if driver == "" {
+		driver = "sqlite"
+	}
+	logrus.Infof("Database driver: %s", driver)
+
+	// Get all migration files and filter by driver
 	upFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
 		return fmt.Errorf("failed to find migration files: %w", err)
 	}
+	upFiles = filterMigrationsByDriver(upFiles, driver)
 
 	if len(upFiles) == 0 {
 		logrus.Info("No migration files found")
@@ -88,9 +127,14 @@ func runMigrateUp(cmd *cobra.Command, args []string) error {
 		logrus.Infof("Applying migration: %s", filepath.Base(file))
 
 		if _, err := db.Exec(string(migrationSQL)); err != nil {
-			// Check if it's a "table already exists" error (migration already applied)
+			// Already applied
 			if strings.Contains(err.Error(), "already exists") {
-				logrus.Infof("  Skipped (already applied)")
+				logrus.Infof("  Skip (already applied)")
+				continue
+			}
+			// Idempotent column add (e.g. 009)
+			if strings.Contains(err.Error(), "duplicate column") || strings.Contains(err.Error(), "Duplicate column") {
+				logrus.Infof("  Skip (column already exists)")
 				continue
 			}
 			return fmt.Errorf("failed to apply migration %s: %w", file, err)
@@ -116,11 +160,16 @@ func runMigrateDown(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Get all down migration files
+	driver := viper.GetString("database.driver")
+	if driver == "" {
+		driver = "sqlite"
+	}
+
 	downFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.down.sql"))
 	if err != nil {
 		return fmt.Errorf("failed to find migration files: %w", err)
 	}
+	downFiles = filterMigrationsByDriver(downFiles, driver)
 
 	if len(downFiles) == 0 {
 		logrus.Info("No down migration files found")
@@ -154,11 +203,16 @@ func runMigrateStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Get all migration files
+	driver := viper.GetString("database.driver")
+	if driver == "" {
+		driver = "sqlite"
+	}
+
 	upFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
 		return fmt.Errorf("failed to find migration files: %w", err)
 	}
+	upFiles = filterMigrationsByDriver(upFiles, driver)
 
 	if len(upFiles) == 0 {
 		fmt.Println("No migration files found")

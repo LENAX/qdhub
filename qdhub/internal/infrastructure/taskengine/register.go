@@ -10,6 +10,7 @@ import (
 
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/taskengine/handlers"
 	"qdhub/internal/infrastructure/taskengine/jobs"
@@ -24,12 +25,15 @@ type Dependencies struct {
 	MetadataRepo metadata.Repository
 	// DataStoreRepo is the data store repository (required for table creation jobs).
 	DataStoreRepo datastore.QuantDataStoreRepository
-	// QuantDB is the quant database adapter (required for table creation jobs).
-	// This interface provides methods to create tables in the target database (DuckDB, ClickHouse, etc.)
+	// QuantDB is the quant database adapter (optional, deprecated: use QuantDBFactory + target_db_path).
 	QuantDB datastore.QuantDB
+	// QuantDBFactory creates QuantDB by path; sync/table jobs use this with target_db_path from data store.
+	QuantDBFactory datastore.QuantDBFactory
 	// SyncCallbackInvoker 可选；DataSyncCompleteHandler 用于触发 execution 回调（Plan.MarkCompleted）。
 	// 需实现 HandleExecutionCallbackByWorkflowInstance(ctx, workflowInstID, success, recordCount, errMsg).
 	SyncCallbackInvoker interface{}
+	// CommonDataCache 可选；SyncAPIDataJob 用于公共数据 Cache→DuckDB→API 复用，未设置则不走缓存。
+	CommonDataCache sync.CommonDataCache
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -167,14 +171,23 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 		registry.RegisterDependencyWithKey("DataStoreRepo", deps.DataStoreRepo)
 	}
 
-	// Register QuantDB adapter as dependency (required for table creation jobs)
+	// Register QuantDB adapter as dependency (optional, backward compat)
 	if deps.QuantDB != nil {
 		registry.RegisterDependencyWithKey("QuantDB", deps.QuantDB)
+	}
+	// Register QuantDBFactory (sync/table jobs use this with target_db_path from data store)
+	if deps.QuantDBFactory != nil {
+		registry.RegisterDependencyWithKey("QuantDBFactory", deps.QuantDBFactory)
 	}
 
 	// Register SyncCallbackInvoker (optional; for DataSyncCompleteHandler → execution callback)
 	if deps.SyncCallbackInvoker != nil {
 		registry.RegisterDependencyWithKey("SyncCallbackInvoker", deps.SyncCallbackInvoker)
+	}
+
+	// Register CommonDataCache (optional; SyncAPIDataJob uses for cache-first reuse)
+	if deps.CommonDataCache != nil {
+		registry.RegisterDependencyWithKey("CommonDataCache", deps.CommonDataCache)
 	}
 
 	// Register engine itself as dependency (for template tasks)

@@ -28,9 +28,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
 		selected_apis, resolved_apis, execution_graph, cron_expression, default_execute_params,
+		incremental_mode, last_successful_end_date, incremental_start_date_api, incremental_start_date_column,
 		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
 		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :default_execute_params,
+		:incremental_mode, :last_successful_end_date, :incremental_start_date_api, :incremental_start_date_column,
 		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
@@ -69,6 +71,8 @@ func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 		selected_apis = :selected_apis, resolved_apis = :resolved_apis,
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
 		default_execute_params = :default_execute_params,
+		incremental_mode = :incremental_mode, last_successful_end_date = :last_successful_end_date,
+		incremental_start_date_api = :incremental_start_date_api, incremental_start_date_column = :incremental_start_date_column,
 		status = :status, last_executed_at = :last_executed_at,
 		next_execute_at = :next_execute_at, updated_at = :updated_at
 		WHERE id = :id`
@@ -140,6 +144,30 @@ func (d *SyncPlanDAO) GetByDataSource(tx *sqlx.Tx, dataSourceID shared.ID) ([]*s
 	return entities, nil
 }
 
+// GetByDataStore retrieves sync plans by data store ID.
+func (d *SyncPlanDAO) GetByDataStore(tx *sqlx.Tx, dataStoreID shared.ID) ([]*sync.SyncPlan, error) {
+	query := `SELECT * FROM sync_plan WHERE data_store_id = ?`
+	var rows []SyncPlanRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, dataStoreID.String())
+	} else {
+		err = d.DB().Select(&rows, query, dataStoreID.String())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync plans by data store: %w", err)
+	}
+	entities := make([]*sync.SyncPlan, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(&row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
 // GetByStatus retrieves sync plans by status.
 func (d *SyncPlanDAO) GetByStatus(tx *sqlx.Tx, status sync.PlanStatus) ([]*sync.SyncPlan, error) {
 	query := `SELECT * FROM sync_plan WHERE status = ?`
@@ -156,6 +184,31 @@ func (d *SyncPlanDAO) GetByStatus(tx *sqlx.Tx, status sync.PlanStatus) ([]*sync.
 		return nil, fmt.Errorf("failed to get sync plans by status: %w", err)
 	}
 
+	entities := make([]*sync.SyncPlan, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(&row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+// GetSchedulablePlans returns plans that have a cron expression and are not disabled
+// (status in draft, resolved, enabled, running). Used to restore cron schedules on startup.
+func (d *SyncPlanDAO) GetSchedulablePlans(tx *sqlx.Tx) ([]*sync.SyncPlan, error) {
+	query := `SELECT * FROM sync_plan WHERE status != ? AND cron_expression IS NOT NULL AND cron_expression != ''`
+	var rows []SyncPlanRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, sync.PlanStatusDisabled.String())
+	} else {
+		err = d.DB().Select(&rows, query, sync.PlanStatusDisabled.String())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schedulable plans: %w", err)
+	}
 	entities := make([]*sync.SyncPlan, 0, len(rows))
 	for _, row := range rows {
 		entity, err := d.toEntity(&row)
@@ -190,17 +243,21 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	}
 
 	row := &SyncPlanRow{
-		ID:                   entity.ID.String(),
-		Name:                 entity.Name,
-		Description:          entity.Description,
-		DataSourceID:         entity.DataSourceID.String(),
-		SelectedAPIs:         selectedAPIs,
-		ResolvedAPIs:         resolvedAPIs,
-		ExecutionGraph:       executionGraph,
-		DefaultExecuteParams: defaultExecuteParams,
-		Status:               entity.Status.String(),
-		CreatedAt:            entity.CreatedAt.ToTime(),
-		UpdatedAt:            entity.UpdatedAt.ToTime(),
+		ID:                     entity.ID.String(),
+		Name:                   entity.Name,
+		Description:            entity.Description,
+		DataSourceID:           entity.DataSourceID.String(),
+		SelectedAPIs:           selectedAPIs,
+		ResolvedAPIs:           resolvedAPIs,
+		ExecutionGraph:         executionGraph,
+		DefaultExecuteParams:   defaultExecuteParams,
+		IncrementalMode:        entity.IncrementalMode,
+		Status:                 entity.Status.String(),
+		CreatedAt:              entity.CreatedAt.ToTime(),
+		UpdatedAt:              entity.UpdatedAt.ToTime(),
+	}
+	if entity.LastSuccessfulEndDate != nil {
+		row.LastSuccessfulEndDate = sql.NullString{String: *entity.LastSuccessfulEndDate, Valid: true}
 	}
 
 	if entity.DataStoreID != "" {
@@ -217,6 +274,13 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 
 	if entity.NextExecuteAt != nil {
 		row.NextExecuteAt = sql.NullTime{Time: *entity.NextExecuteAt, Valid: true}
+	}
+
+	if entity.IncrementalStartDateAPI != nil {
+		row.IncrementalStartDateAPI = sql.NullString{String: *entity.IncrementalStartDateAPI, Valid: true}
+	}
+	if entity.IncrementalStartDateColumn != nil {
+		row.IncrementalStartDateColumn = sql.NullString{String: *entity.IncrementalStartDateColumn, Valid: true}
 	}
 
 	return row, nil
@@ -270,6 +334,17 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal default execute params: %w", err)
 		}
+	}
+
+	entity.IncrementalMode = row.IncrementalMode
+	if row.LastSuccessfulEndDate.Valid {
+		entity.LastSuccessfulEndDate = &row.LastSuccessfulEndDate.String
+	}
+	if row.IncrementalStartDateAPI.Valid {
+		entity.IncrementalStartDateAPI = &row.IncrementalStartDateAPI.String
+	}
+	if row.IncrementalStartDateColumn.Valid {
+		entity.IncrementalStartDateColumn = &row.IncrementalStartDateColumn.String
 	}
 
 	return entity, nil
@@ -477,9 +552,9 @@ func NewSyncExecutionDAO(db *sqlx.DB) *SyncExecutionDAO {
 // Create inserts a new sync execution record.
 func (d *SyncExecutionDAO) Create(tx *sqlx.Tx, entity *sync.SyncExecution) error {
 	query := `INSERT INTO sync_execution (id, sync_plan_id, workflow_inst_id, status,
-		started_at, finished_at, record_count, error_message, execute_params, synced_apis, skipped_apis)
+		started_at, finished_at, record_count, error_message, workflow_error_message, execute_params, synced_apis, skipped_apis)
 		VALUES (:id, :sync_plan_id, :workflow_inst_id, :status,
-		:started_at, :finished_at, :record_count, :error_message, :execute_params, :synced_apis, :skipped_apis)`
+		:started_at, :finished_at, :record_count, :error_message, :workflow_error_message, :execute_params, :synced_apis, :skipped_apis)`
 
 	row, err := d.toRow(entity)
 	if err != nil {
@@ -514,7 +589,7 @@ func (d *SyncExecutionDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*sync.SyncExecuti
 func (d *SyncExecutionDAO) Update(tx *sqlx.Tx, entity *sync.SyncExecution) error {
 	query := `UPDATE sync_execution SET
 		status = :status, finished_at = :finished_at, record_count = :record_count,
-		error_message = :error_message
+		error_message = :error_message, workflow_error_message = :workflow_error_message
 		WHERE id = :id`
 
 	row, err := d.toRow(entity)
@@ -582,6 +657,51 @@ func (d *SyncExecutionDAO) GetByWorkflowInstID(tx *sqlx.Tx, workflowInstID strin
 	return d.toEntity(&row)
 }
 
+// GetByPlanIDPaged retrieves sync executions for a plan with limit and offset, ordered by started_at DESC.
+func (d *SyncExecutionDAO) GetByPlanIDPaged(tx *sqlx.Tx, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, error) {
+	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?`
+	var rows []SyncExecutionRow
+
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, planID.String(), limit, offset)
+	} else {
+		err = d.DB().Select(&rows, query, planID.String(), limit, offset)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync executions by plan paged: %w", err)
+	}
+
+	entities := make([]*sync.SyncExecution, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(&row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+// CountByPlanID returns the total number of sync executions for a plan.
+func (d *SyncExecutionDAO) CountByPlanID(tx *sqlx.Tx, planID shared.ID) (int, error) {
+	query := `SELECT COUNT(*) FROM sync_execution WHERE sync_plan_id = ?`
+	var count int
+
+	var err error
+	if tx != nil {
+		err = tx.Get(&count, query, planID.String())
+	} else {
+		err = d.DB().Get(&count, query, planID.String())
+	}
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count sync executions by plan: %w", err)
+	}
+	return count, nil
+}
+
 // toRow converts domain entity to database row.
 func (d *SyncExecutionDAO) toRow(entity *sync.SyncExecution) (*SyncExecutionRow, error) {
 	executeParams, err := entity.MarshalExecuteParamsJSON()
@@ -618,6 +738,9 @@ func (d *SyncExecutionDAO) toRow(entity *sync.SyncExecution) (*SyncExecutionRow,
 	if entity.ErrorMessage != nil {
 		row.ErrorMessage = sql.NullString{String: *entity.ErrorMessage, Valid: true}
 	}
+	if entity.WorkflowErrorMessage != nil {
+		row.WorkflowErrorMessage = sql.NullString{String: *entity.WorkflowErrorMessage, Valid: true}
+	}
 
 	return row, nil
 }
@@ -641,6 +764,9 @@ func (d *SyncExecutionDAO) toEntity(row *SyncExecutionRow) (*sync.SyncExecution,
 	if row.ErrorMessage.Valid {
 		entity.ErrorMessage = &row.ErrorMessage.String
 	}
+	if row.WorkflowErrorMessage.Valid {
+		entity.WorkflowErrorMessage = &row.WorkflowErrorMessage.String
+	}
 
 	if err := entity.UnmarshalExecuteParamsJSON(row.ExecuteParams); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal execute params: %w", err)
@@ -655,4 +781,99 @@ func (d *SyncExecutionDAO) toEntity(row *SyncExecutionRow) (*sync.SyncExecution,
 	}
 
 	return entity, nil
+}
+
+// ==================== SyncExecutionDetail DAO ====================
+
+// SyncExecutionDetailDAO provides data access for sync_execution_detail.
+type SyncExecutionDetailDAO struct {
+	*SQLBaseDAO[SyncExecutionDetailRow]
+}
+
+// NewSyncExecutionDetailDAO creates a new SyncExecutionDetailDAO.
+func NewSyncExecutionDetailDAO(db *sqlx.DB) *SyncExecutionDetailDAO {
+	return &SyncExecutionDetailDAO{
+		SQLBaseDAO: NewSQLBaseDAO[SyncExecutionDetailRow](db, "sync_execution_detail", "id"),
+	}
+}
+
+// Create inserts a sync execution detail record.
+func (d *SyncExecutionDetailDAO) Create(tx *sqlx.Tx, entity *sync.SyncExecutionDetail) error {
+	query := `INSERT INTO sync_execution_detail (id, execution_id, task_id, api_name, record_count, status, error_message, started_at, finished_at)
+		VALUES (:id, :execution_id, :task_id, :api_name, :record_count, :status, :error_message, :started_at, :finished_at)`
+	row := d.detailToRow(entity)
+	var err error
+	if tx != nil {
+		_, err = tx.NamedExec(query, row)
+	} else {
+		_, err = d.DB().NamedExec(query, row)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to create sync execution detail: %w", err)
+	}
+	return nil
+}
+
+// GetByExecutionID returns all details for an execution.
+func (d *SyncExecutionDetailDAO) GetByExecutionID(tx *sqlx.Tx, executionID shared.ID) ([]*sync.SyncExecutionDetail, error) {
+	query := `SELECT * FROM sync_execution_detail WHERE execution_id = ? ORDER BY created_at ASC`
+	var rows []SyncExecutionDetailRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, executionID.String())
+	} else {
+		err = d.DB().Select(&rows, query, executionID.String())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get execution details: %w", err)
+	}
+	out := make([]*sync.SyncExecutionDetail, 0, len(rows))
+	for i := range rows {
+		out = append(out, d.detailRowToEntity(&rows[i]))
+	}
+	return out, nil
+}
+
+func (d *SyncExecutionDetailDAO) detailToRow(entity *sync.SyncExecutionDetail) *SyncExecutionDetailRow {
+	row := &SyncExecutionDetailRow{
+		ID:          entity.ID.String(),
+		ExecutionID: entity.ExecutionID.String(),
+		TaskID:      entity.TaskID,
+		APIName:     entity.APIName,
+		RecordCount: entity.RecordCount,
+		Status:      entity.Status,
+	}
+	if entity.ErrorMessage != nil {
+		row.ErrorMessage = sql.NullString{String: *entity.ErrorMessage, Valid: true}
+	}
+	if entity.StartedAt != nil {
+		row.StartedAt = sql.NullTime{Time: entity.StartedAt.ToTime(), Valid: true}
+	}
+	if entity.FinishedAt != nil {
+		row.FinishedAt = sql.NullTime{Time: entity.FinishedAt.ToTime(), Valid: true}
+	}
+	return row
+}
+
+func (d *SyncExecutionDetailDAO) detailRowToEntity(row *SyncExecutionDetailRow) *sync.SyncExecutionDetail {
+	entity := &sync.SyncExecutionDetail{
+		ID:          shared.ID(row.ID),
+		ExecutionID: shared.ID(row.ExecutionID),
+		TaskID:      row.TaskID,
+		APIName:     row.APIName,
+		RecordCount: row.RecordCount,
+		Status:      row.Status,
+	}
+	if row.ErrorMessage.Valid {
+		entity.ErrorMessage = &row.ErrorMessage.String
+	}
+	if row.StartedAt.Valid {
+		ts := shared.Timestamp(row.StartedAt.Time)
+		entity.StartedAt = &ts
+	}
+	if row.FinishedAt.Valid {
+		ts := shared.Timestamp(row.FinishedAt.Time)
+		entity.FinishedAt = &ts
+	}
+	return entity
 }

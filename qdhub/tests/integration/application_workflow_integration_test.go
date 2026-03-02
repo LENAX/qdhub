@@ -52,6 +52,7 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// Create adapters
@@ -67,8 +68,8 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
 
 	// Create application services with WorkflowExecutor
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, workflowExecutor)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
 
 	// ==================== MetadataApplicationService Tests ====================
 
@@ -186,4 +187,12 @@ func (m *mockQuantDBAdapter) ExecuteDDL(ctx context.Context, ds *datastore.Quant
 
 func (m *mockQuantDBAdapter) TableExists(ctx context.Context, ds *datastore.QuantDataStore, tableName string) (bool, error) {
 	return false, nil
+}
+
+func (m *mockQuantDBAdapter) ListTables(ctx context.Context, ds *datastore.QuantDataStore) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockQuantDBAdapter) Query(ctx context.Context, ds *datastore.QuantDataStore, sql string, args ...any) ([]map[string]any, error) {
+	return nil, nil
 }

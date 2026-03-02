@@ -108,6 +108,19 @@ func (r *MetadataRepositoryImpl) ListCategoriesByDataSource(ctx context.Context,
 	return result, nil
 }
 
+// ListCategoriesByDataSourceWithAPIs returns only categories that have at least one api_metadata.
+func (r *MetadataRepositoryImpl) ListCategoriesByDataSourceWithAPIs(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) {
+	categories, err := r.categoryDAO.ListByDataSourceWithAPIs(r.tx, dataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]metadata.APICategory, len(categories))
+	for i, cat := range categories {
+		result[i] = *cat
+	}
+	return result, nil
+}
+
 // ==================== API Metadata 操作 ====================
 
 // SaveAPIMetadata saves a single API metadata.
@@ -193,6 +206,33 @@ func (r *MetadataRepositoryImpl) ListAPIMetadataByDataSource(ctx context.Context
 		result[i] = *api
 	}
 	return result, nil
+}
+
+// ListAPIMetadataByDataSourcePaginated returns a paginated list of API metadata for a data source with optional filters.
+func (r *MetadataRepositoryImpl) ListAPIMetadataByDataSourcePaginated(ctx context.Context, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, page, pageSize int) ([]metadata.APIMetadata, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	offset := (page - 1) * pageSize
+	apis, err := r.apiMetadataDAO.ListByDataSourceFiltered(r.tx, dataSourceID, idFilter, nameFilter, categoryIDFilter, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := r.apiMetadataDAO.CountByDataSourceFiltered(r.tx, dataSourceID, idFilter, nameFilter, categoryIDFilter)
+	if err != nil {
+		return nil, 0, err
+	}
+	result := make([]metadata.APIMetadata, len(apis))
+	for i, api := range apis {
+		result[i] = *api
+	}
+	return result, total, nil
 }
 
 // ==================== 查询操作 ====================

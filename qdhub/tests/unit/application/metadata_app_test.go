@@ -268,11 +268,11 @@ type MockDocumentParser struct {
 	parseErr   error
 }
 
-func (m *MockDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, error) {
+func (m *MockDocumentParser) ParseCatalog(content string) ([]metadata.APICategory, []string, []*shared.ID, error) {
 	if m.parseErr != nil {
-		return nil, nil, m.parseErr
+		return nil, nil, nil, m.parseErr
 	}
-	return m.categories, m.apiURLs, nil
+	return m.categories, m.apiURLs, nil, nil
 }
 
 func (m *MockDocumentParser) ParseAPIDetail(content string) (*metadata.APIMetadata, error) {
@@ -373,7 +373,11 @@ func (m *MockMetadataRepository) GetDataSourceByName(ctx context.Context, name s
 func (m *MockMetadataRepository) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) { return nil, nil }
 func (m *MockMetadataRepository) GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error) { return nil, nil }
 func (m *MockMetadataRepository) ListCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) { return nil, nil }
+func (m *MockMetadataRepository) ListCategoriesByDataSourceWithAPIs(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) { return nil, nil }
 func (m *MockMetadataRepository) ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APIMetadata, error) { return nil, nil }
+func (m *MockMetadataRepository) ListAPIMetadataByDataSourcePaginated(ctx context.Context, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, page, pageSize int) ([]metadata.APIMetadata, int64, error) {
+	return nil, 0, nil
+}
 
 // ==================== Test Cases ====================
 
@@ -385,7 +389,7 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 		parserFactory := NewMockDocumentParserFactory()
 
 		metadataRepo := NewMockMetadataRepository()
-		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor())
+		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor(), nil)
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -412,7 +416,7 @@ func TestMetadataApplicationService_CreateDataSource(t *testing.T) {
 		parserFactory := NewMockDocumentParserFactory()
 
 		metadataRepo := NewMockMetadataRepository()
-		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor())
+		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor(), nil)
 
 		req := contracts.CreateDataSourceRequest{
 			Name:        "Tushare",
@@ -439,7 +443,7 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 		dsRepo.Create(ds)
 
 		metadataRepo := NewMockMetadataRepository()
-		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor())
+		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor(), nil)
 
 		result, err := svc.GetDataSource(ctx, ds.ID)
 		if err != nil {
@@ -455,7 +459,7 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 		parserFactory := NewMockDocumentParserFactory()
 
 		metadataRepo := NewMockMetadataRepository()
-		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor())
+		svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, NewMockMetaWorkflowExecutor(), nil)
 
 		_, err := svc.GetDataSource(ctx, shared.NewID())
 		if err == nil {

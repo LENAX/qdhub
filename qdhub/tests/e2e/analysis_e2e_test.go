@@ -126,7 +126,8 @@ func TestE2E_Analysis_SyncThenKLine(t *testing.T) {
 		require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 
 		executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+			StartDate: startDate,
+			EndDate:   endDate,
 		})
 		require.NoError(t, err)
 		execution, err := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -238,7 +239,8 @@ func TestE2E_Analysis_SyncThenLimitStats(t *testing.T) {
 		}
 		require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 		executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-			TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+			StartDate: startDate,
+			EndDate:   endDate,
 		})
 		require.NoError(t, err)
 		execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -766,7 +768,8 @@ func runLimitListThsSync(ctx context.Context, t *testing.T, testCtx *builtinWork
 	}
 	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err)
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -843,7 +846,8 @@ func runLimitListSync(ctx context.Context, t *testing.T, testCtx *builtinWorkflo
 	}
 	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err)
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -928,7 +932,8 @@ func runDailySyncForFallback(ctx context.Context, t *testing.T, testCtx *builtin
 	}
 	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err)
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -1000,7 +1005,8 @@ func runIndexAndConceptSync(ctx context.Context, t *testing.T, testCtx *builtinW
 	}
 	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err)
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)
@@ -1073,7 +1079,8 @@ func runDragonTigerMoneyFlowSync(ctx context.Context, t *testing.T, testCtx *bui
 	}
 	require.NoError(t, testCtx.syncAppService.ResolveSyncPlan(ctx, plan.ID))
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: targetDBPath, StartDate: startDate, EndDate: endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err)
 	execution, _ := testCtx.syncAppService.GetSyncExecution(ctx, executionID)

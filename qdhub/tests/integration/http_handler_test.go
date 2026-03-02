@@ -219,9 +219,9 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 	uowImpl := uow.NewUnitOfWork(db)
 
 	// Create application services
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dsRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dsRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// Create HTTP server with auth
@@ -230,7 +230,7 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
 
 	return &httpTestContext{
 		db:             db,

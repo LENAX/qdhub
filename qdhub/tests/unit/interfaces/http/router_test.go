@@ -45,6 +45,15 @@ func (m *FullMockMetadataService) SaveToken(ctx context.Context, req contracts.S
 func (m *FullMockMetadataService) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) {
 	return nil, nil
 }
+func (m *FullMockMetadataService) ValidateDataSourceToken(ctx context.Context, dataSourceID shared.ID) (hasToken bool, valid bool, message string, err error) {
+	return false, false, "not implemented", nil
+}
+func (m *FullMockMetadataService) GetDataSourceConfig(ctx context.Context, dataSourceID shared.ID) (apiURL string, token string, err error) {
+	return "", "", nil
+}
+func (m *FullMockMetadataService) UpdateDataSourceCommonDataAPIs(ctx context.Context, dataSourceID shared.ID, req contracts.UpdateDataSourceCommonDataAPIsRequest) error {
+	return nil
+}
 func (m *FullMockMetadataService) CreateAPISyncStrategy(ctx context.Context, req contracts.CreateAPISyncStrategyRequest) (*metadata.APISyncStrategy, error) {
 	return nil, nil
 }
@@ -60,6 +69,21 @@ func (m *FullMockMetadataService) DeleteAPISyncStrategy(ctx context.Context, id 
 func (m *FullMockMetadataService) ListAPISyncStrategies(ctx context.Context, dataSourceID shared.ID) ([]*metadata.APISyncStrategy, error) {
 	return nil, nil
 }
+func (m *FullMockMetadataService) ListAPIMetadata(ctx context.Context, dataSourceID shared.ID, req contracts.ListAPIMetadataRequest) (*contracts.ListAPIMetadataResponse, error) {
+	return &contracts.ListAPIMetadataResponse{Items: nil, Total: 0}, nil
+}
+func (m *FullMockMetadataService) ListAPICategories(ctx context.Context, dataSourceID shared.ID, hasAPIsOnly bool) ([]metadata.APICategory, error) {
+	return []metadata.APICategory{}, nil
+}
+func (m *FullMockMetadataService) ListAPINames(ctx context.Context, dataSourceID shared.ID) ([]string, error) {
+	return []string{}, nil
+}
+func (m *FullMockMetadataService) DeleteDataSource(ctx context.Context, id shared.ID) error {
+	return nil
+}
+func (m *FullMockMetadataService) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+	return nil
+}
 
 // FullMockDataStoreService implements DataStoreApplicationService.
 type FullMockDataStoreService struct{}
@@ -73,8 +97,23 @@ func (m *FullMockDataStoreService) GetDataStore(ctx context.Context, id shared.I
 func (m *FullMockDataStoreService) ListDataStores(ctx context.Context) ([]*datastore.QuantDataStore, error) {
 	return nil, nil
 }
+func (m *FullMockDataStoreService) UpdateDataStore(ctx context.Context, id shared.ID, req contracts.UpdateDataStoreRequest) (*datastore.QuantDataStore, error) {
+	return nil, nil
+}
+func (m *FullMockDataStoreService) DeleteDataStore(ctx context.Context, id shared.ID) error {
+	return nil
+}
+func (m *FullMockDataStoreService) ValidateDataStore(ctx context.Context, id shared.ID) (*contracts.ValidateDataStoreResult, error) {
+	return &contracts.ValidateDataStoreResult{Valid: true}, nil
+}
 func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context, req contracts.CreateTablesForDatasourceRequest) (shared.ID, error) {
 	return "", nil
+}
+func (m *FullMockDataStoreService) ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error) {
+	return nil, nil
+}
+func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) ([]map[string]any, int64, error) {
+	return nil, 0, nil
 }
 
 // FullMockSyncService implements SyncApplicationService.
@@ -105,9 +144,17 @@ func (m *FullMockSyncService) GetSyncExecution(ctx context.Context, id shared.ID
 func (m *FullMockSyncService) ListPlanExecutions(ctx context.Context, planID shared.ID) ([]*sync.SyncExecution, error) {
 	return nil, nil
 }
+func (m *FullMockSyncService) GetPlanSummary(ctx context.Context, planID shared.ID) (*contracts.PlanSummary, error) {
+	return nil, nil
+}
+func (m *FullMockSyncService) ListPlanExecutionHistory(ctx context.Context, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, int, error) {
+	return nil, 0, nil
+}
 func (m *FullMockSyncService) CancelExecution(ctx context.Context, executionID shared.ID) error {
 	return nil
 }
+func (m *FullMockSyncService) PauseExecution(ctx context.Context, executionID shared.ID) error { return nil }
+func (m *FullMockSyncService) ResumeExecution(ctx context.Context, executionID shared.ID) error { return nil }
 func (m *FullMockSyncService) EnablePlan(ctx context.Context, planID shared.ID) error  { return nil }
 func (m *FullMockSyncService) DisablePlan(ctx context.Context, planID shared.ID) error { return nil }
 func (m *FullMockSyncService) UpdatePlanSchedule(ctx context.Context, planID shared.ID, cronExpression string) error {
@@ -126,6 +173,13 @@ func (m *FullMockSyncService) GetExecutionProgress(ctx context.Context, executio
 
 func (m *FullMockSyncService) GetPlanProgress(ctx context.Context, planID shared.ID) (*contracts.SyncExecutionProgress, error) {
 	return &contracts.SyncExecutionProgress{}, nil
+}
+
+func (m *FullMockSyncService) RecordTaskResult(ctx context.Context, workflowInstID, apiName, taskID string, recordCount int64, success bool, errorMessage string) error {
+	return nil
+}
+func (m *FullMockSyncService) GetExecutionDetail(ctx context.Context, executionID shared.ID) (*contracts.ExecutionDetail, error) {
+	return &contracts.ExecutionDetail{}, nil
 }
 
 // FullMockWorkflowService implements WorkflowApplicationService.
@@ -155,6 +209,7 @@ func TestNewServer(t *testing.T) {
 		config,
 		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
+		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
 		nil, nil, nil, "",
@@ -172,6 +227,7 @@ func TestHealthCheck(t *testing.T) {
 		config,
 		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
+		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
 		nil, nil, nil, "",
@@ -194,6 +250,7 @@ func TestServerShutdown(t *testing.T) {
 		config,
 		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
+		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
 		nil, nil, nil, "",
@@ -213,7 +270,7 @@ func TestDefaultServerConfig(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", config.Host)
 	assert.Equal(t, 8080, config.Port)
 	assert.Equal(t, 30*time.Second, config.ReadTimeout)
-	assert.Equal(t, 30*time.Second, config.WriteTimeout)
+	assert.Equal(t, time.Duration(0), config.WriteTimeout, "WriteTimeout 0 for SSE long-lived streams")
 }
 
 func TestAPIRoutes(t *testing.T) {
@@ -224,6 +281,7 @@ func TestAPIRoutes(t *testing.T) {
 		config,
 		nil, &FullMockMetadataService{},
 		&FullMockDataStoreService{},
+		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
 		nil, nil, nil, "",

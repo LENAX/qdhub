@@ -1,6 +1,8 @@
 // Package metadata contains the metadata domain services.
 package metadata
 
+import "qdhub/internal/domain/shared"
+
 // ==================== 领域服务接口（纯业务逻辑）====================
 
 // MetadataValidator defines domain service for metadata validation.
@@ -22,8 +24,8 @@ type MetadataValidator interface {
 // Implementation: infrastructure/datasource/parser/
 type DocumentParser interface {
 	// ParseCatalog parses the catalog structure.
-	// Returns: category list, API detail page URLs
-	ParseCatalog(content string) ([]APICategory, []string, error)
+	// Returns: category list, API detail page URLs, and category ID per URL (same length as URLs; nil = no category).
+	ParseCatalog(content string) ([]APICategory, []string, []*shared.ID, error)
 
 	// ParseAPIDetail parses API detail information.
 	ParseAPIDetail(content string) (*APIMetadata, error)

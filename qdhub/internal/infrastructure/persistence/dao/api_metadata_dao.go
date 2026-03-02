@@ -158,6 +158,85 @@ func (d *APIMetadataDAO) DeleteByDataSource(tx *sqlx.Tx, dataSourceID shared.ID)
 	return nil
 }
 
+// ListByDataSourceFiltered returns a paginated list of API metadata for a data source with optional filters.
+// idFilter: exact match on id when non-nil; nameFilter: LIKE %nameFilter%; categoryIDFilter: exact match on category_id when non-nil.
+func (d *APIMetadataDAO) ListByDataSourceFiltered(tx *sqlx.Tx, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, limit, offset int) ([]*metadata.APIMetadata, error) {
+	query, args := d.buildListByDataSourceFilteredQuery(dataSourceID, idFilter, nameFilter, categoryIDFilter, limit, offset)
+	var rows []*APIMetadataRow
+	var err error
+	if tx != nil {
+		err = tx.Select(&rows, query, args...)
+	} else {
+		err = d.DB().Select(&rows, query, args...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list api metadata: %w", err)
+	}
+	entities := make([]*metadata.APIMetadata, 0, len(rows))
+	for _, row := range rows {
+		entity, err := d.toEntity(row)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+// CountByDataSourceFiltered returns the total count of API metadata for a data source with the same filters as ListByDataSourceFiltered.
+func (d *APIMetadataDAO) CountByDataSourceFiltered(tx *sqlx.Tx, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID) (int64, error) {
+	query, args := d.buildCountByDataSourceFilteredQuery(dataSourceID, idFilter, nameFilter, categoryIDFilter)
+	var count int64
+	var err error
+	if tx != nil {
+		err = tx.Get(&count, query, args...)
+	} else {
+		err = d.DB().Get(&count, query, args...)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to count api metadata: %w", err)
+	}
+	return count, nil
+}
+
+func (d *APIMetadataDAO) buildListByDataSourceFilteredQuery(dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, limit, offset int) (string, []interface{}) {
+	base := `SELECT * FROM api_metadata WHERE data_source_id = ?`
+	args := []interface{}{dataSourceID.String()}
+	if idFilter != nil {
+		base += ` AND id = ?`
+		args = append(args, idFilter.String())
+	}
+	if nameFilter != "" {
+		base += ` AND name LIKE ?`
+		args = append(args, "%"+nameFilter+"%")
+	}
+	if categoryIDFilter != nil {
+		base += ` AND category_id = ?`
+		args = append(args, categoryIDFilter.String())
+	}
+	base += ` ORDER BY name LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	return d.DB().Rebind(base), args
+}
+
+func (d *APIMetadataDAO) buildCountByDataSourceFilteredQuery(dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID) (string, []interface{}) {
+	base := `SELECT COUNT(*) FROM api_metadata WHERE data_source_id = ?`
+	args := []interface{}{dataSourceID.String()}
+	if idFilter != nil {
+		base += ` AND id = ?`
+		args = append(args, idFilter.String())
+	}
+	if nameFilter != "" {
+		base += ` AND name LIKE ?`
+		args = append(args, "%"+nameFilter+"%")
+	}
+	if categoryIDFilter != nil {
+		base += ` AND category_id = ?`
+		args = append(args, categoryIDFilter.String())
+	}
+	return d.DB().Rebind(base), args
+}
+
 // GetByDataSourceAndName retrieves an API metadata by data source ID and name.
 // This is used to check for duplicates before insert (unique constraint: data_source_id, name).
 func (d *APIMetadataDAO) GetByDataSourceAndName(tx *sqlx.Tx, dataSourceID shared.ID, name string) (*metadata.APIMetadata, error) {

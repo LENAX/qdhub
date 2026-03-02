@@ -73,9 +73,9 @@ func setupE2EApplicationServices(t *testing.T, db *persistence.DB, taskEngine *e
 
 	// 创建应用服务
 	uowImpl := uow.NewUnitOfWork(db)
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	cleanup := func() {

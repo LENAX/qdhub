@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +36,7 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 	// Plan control
 	rg.POST("/sync-plans/:id/resolve", h.ResolveSyncPlan)
-	rg.POST("/sync-plans/:id/trigger", h.TriggerSyncPlan)
+	rg.POST("/sync-plans/:id/execute", h.ExecuteSyncPlan)
 	rg.POST("/sync-plans/:id/enable", h.EnablePlan)
 	rg.POST("/sync-plans/:id/disable", h.DisablePlan)
 
@@ -43,10 +44,17 @@ func (h *SyncHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/sync-plans/:id/progress", h.GetPlanProgress)
 	rg.GET("/sync-plans/:id/progress-stream", h.StreamPlanProgress)
 
+	// Plan summary and history
+	rg.GET("/sync-plans/:id/summary", h.GetPlanSummary)
+	rg.GET("/sync-plans/:id/history", h.GetPlanHistory)
+
 	// Execution management
 	rg.GET("/sync-plans/:id/executions", h.ListExecutions)
 	rg.GET("/executions/:id", h.GetExecution)
+	rg.GET("/executions/:id/detail", h.GetExecutionDetail)
 	rg.POST("/executions/:id/cancel", h.CancelExecution)
+	rg.POST("/executions/:id/pause", h.PauseExecution)
+	rg.POST("/executions/:id/resume", h.ResumeExecution)
 
 	// Callback (for internal use by workflow engine)
 	rg.POST("/sync/callback", h.HandleCallback)
@@ -74,13 +82,16 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 	}
 
 	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
-		Name:                 req.Name,
-		Description:          req.Description,
-		DataSourceID:         shared.ID(req.DataSourceID),
-		DataStoreID:          shared.ID(req.DataStoreID),
-		SelectedAPIs:         req.SelectedAPIs,
-		CronExpression:       req.CronExpression,
-		DefaultExecuteParams: req.DefaultExecuteParams,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		DataSourceID:                shared.ID(req.DataSourceID),
+		DataStoreID:                 shared.ID(req.DataStoreID),
+		SelectedAPIs:                req.SelectedAPIs,
+		CronExpression:              req.CronExpression,
+		DefaultExecuteParams:        req.DefaultExecuteParams,
+		IncrementalMode:             req.IncrementalMode,
+		IncrementalStartDateAPI:     req.IncrementalStartDateAPI,
+		IncrementalStartDateColumn:  req.IncrementalStartDateColumn,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -160,13 +171,25 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		dataStoreID = &id
 	}
 
+	var incrAPI, incrCol *string
+	if req.IncrementalStartDateAPI != nil {
+		s := *req.IncrementalStartDateAPI
+		incrAPI = &s
+	}
+	if req.IncrementalStartDateColumn != nil {
+		s := *req.IncrementalStartDateColumn
+		incrCol = &s
+	}
 	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
-		Name:                 req.Name,
-		Description:          req.Description,
-		DataStoreID:          dataStoreID,
-		SelectedAPIs:         req.SelectedAPIs,
-		CronExpression:       req.CronExpression,
-		DefaultExecuteParams: req.DefaultExecuteParams,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		DataStoreID:                dataStoreID,
+		SelectedAPIs:               req.SelectedAPIs,
+		CronExpression:             req.CronExpression,
+		DefaultExecuteParams:       req.DefaultExecuteParams,
+		IncrementalMode:            req.IncrementalMode,
+		IncrementalStartDateAPI:    incrAPI,
+		IncrementalStartDateColumn: incrCol,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -223,34 +246,29 @@ func (h *SyncHandler) ResolveSyncPlan(c *gin.Context) {
 	Success(c, gin.H{"status": "resolved"})
 }
 
-// TriggerSyncPlan handles POST /api/v1/sync-plans/:id/trigger
-// @Summary      Trigger a sync plan
-// @Description  Manually trigger execution of a sync plan
+// ExecuteSyncPlan handles POST /api/v1/sync-plans/:id/execute
+// @Summary      Execute a sync plan
+// @Description  Manually trigger execution of a sync plan. Target DB path is resolved from the sync plan's associated data store. Request body may be empty; start_dt/end_dt are optional.
 // @Tags         SyncPlans
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string            true  "Sync plan ID"
-// @Param        request  body      TriggerSyncPlanReq  true  "Execution parameters"
+// @Param        request  body      ExecuteSyncPlanReq  true  "Execution parameters"
 // @Success      200  {object}  Response
 // @Failure      404  {object}  Response
 // @Failure      500  {object}  Response
 // @Security     BearerAuth
-// @Router       /sync-plans/{id}/trigger [post]
-func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
+// @Router       /sync-plans/{id}/execute [post]
+func (h *SyncHandler) ExecuteSyncPlan(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 
-	var req TriggerSyncPlanReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request body: "+err.Error())
-		return
-	}
+	var req ExecuteSyncPlanReq
+	_ = c.ShouldBindJSON(&req) // 允许空 body，未传则使用计划默认参数
 
+	startDate, endDate := parseOptionalDatetimeToDate(req.StartDt, req.EndDt)
 	executionID, err := h.syncSvc.ExecuteSyncPlan(c.Request.Context(), id, contracts.ExecuteSyncPlanRequest{
-		TargetDBPath: req.TargetDBPath,
-		StartDate:    req.StartDate,
-		EndDate:      req.EndDate,
-		StartTime:    req.StartTime,
-		EndTime:      req.EndTime,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -260,6 +278,29 @@ func (h *SyncHandler) TriggerSyncPlan(c *gin.Context) {
 		"execution_id": executionID,
 		"status":       "triggered",
 	})
+}
+
+// parseOptionalDatetimeToDate parses optional start_dt/end_dt (RFC3339 or 2006-01-02) to "20060102".
+// Returns empty strings if input is empty.
+func parseOptionalDatetimeToDate(startDt, endDt string) (startDate, endDate string) {
+	const dateOnly = "20060102"
+	for _, s := range []struct{ in *string; out *string }{
+		{&startDt, &startDate},
+		{&endDt, &endDate},
+	} {
+		if *s.in == "" {
+			continue
+		}
+		var t time.Time
+		var err error
+		if t, err = time.Parse(time.RFC3339, *s.in); err != nil {
+			t, err = time.Parse("2006-01-02", *s.in)
+		}
+		if err == nil {
+			*s.out = t.Format(dateOnly)
+		}
+	}
+	return startDate, endDate
 }
 
 // EnablePlan handles POST /api/v1/sync-plans/:id/enable
@@ -310,6 +351,67 @@ func (h *SyncHandler) DisablePlan(c *gin.Context) {
 
 // ==================== Execution Endpoints ====================
 
+// GetPlanSummary handles GET /api/v1/sync-plans/:id/summary
+// @Summary      Get sync plan execution summary
+// @Description  Returns the latest execution summary for the plan (status, record_count, synced_apis, skipped_apis). Null when the plan has never been executed.
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Sync plan ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /sync-plans/{id}/summary [get]
+func (h *SyncHandler) GetPlanSummary(c *gin.Context) {
+	planID := shared.ID(c.Param("id"))
+
+	summary, err := h.syncSvc.GetPlanSummary(c.Request.Context(), planID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, summary)
+}
+
+// GetPlanHistory handles GET /api/v1/sync-plans/:id/history
+// @Summary      Get sync plan execution history
+// @Description  Returns paginated execution history for the plan. Query: limit (default 20), offset (default 0).
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string  true   "Sync plan ID"
+// @Param        limit   query     int     false  "Page size"   default(20)
+// @Param        offset  query     int     false  "Offset"
+// @Success      200     {object}  Response
+// @Failure      404     {object}  Response
+// @Failure      500     {object}  Response
+// @Security     BearerAuth
+// @Router       /sync-plans/{id}/history [get]
+func (h *SyncHandler) GetPlanHistory(c *gin.Context) {
+	planID := shared.ID(c.Param("id"))
+
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	items, total, err := h.syncSvc.ListPlanExecutionHistory(c.Request.Context(), planID, limit, offset)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"items": items, "total": total})
+}
+
 // ListExecutions handles GET /api/v1/sync-plans/:id/executions
 // @Summary      List sync executions
 // @Description  Get a list of all executions for a sync plan
@@ -356,6 +458,29 @@ func (h *SyncHandler) GetExecution(c *gin.Context) {
 	Success(c, exec)
 }
 
+// GetExecutionDetail handles GET /api/v1/executions/:id/detail
+// @Summary      Get sync execution detail
+// @Description  Get per-API stats and task-level error details for a sync execution
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /executions/{id}/detail [get]
+func (h *SyncHandler) GetExecutionDetail(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	detail, err := h.syncSvc.GetExecutionDetail(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, detail)
+}
+
 // CancelExecution handles POST /api/v1/executions/:id/cancel
 // @Summary      Cancel sync execution
 // @Description  Cancel a running sync execution
@@ -377,6 +502,52 @@ func (h *SyncHandler) CancelExecution(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"status": "cancelled"})
+}
+
+// PauseExecution handles POST /api/v1/executions/:id/pause
+// @Summary      Pause sync execution
+// @Description  Pause a running sync execution (workflow instance)
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /executions/{id}/pause [post]
+func (h *SyncHandler) PauseExecution(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	err := h.syncSvc.PauseExecution(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"status": "paused"})
+}
+
+// ResumeExecution handles POST /api/v1/executions/:id/resume
+// @Summary      Resume sync execution
+// @Description  Resume a paused sync execution
+// @Tags         SyncPlans
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "Execution ID"
+// @Success      200  {object}  Response
+// @Failure      404  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /executions/{id}/resume [post]
+func (h *SyncHandler) ResumeExecution(c *gin.Context) {
+	id := shared.ID(c.Param("id"))
+
+	err := h.syncSvc.ResumeExecution(c.Request.Context(), id)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"status": "resumed"})
 }
 
 // ==================== Callback Endpoint ====================
@@ -423,7 +594,10 @@ type CreateSyncPlanReq struct {
 	DataStoreID          string              `json:"data_store_id"`
 	SelectedAPIs         []string            `json:"selected_apis" binding:"required"`
 	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
+	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode             bool                `json:"incremental_mode"`
+	IncrementalStartDateAPI     string              `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn  string              `json:"incremental_start_date_column"`
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
@@ -433,16 +607,18 @@ type UpdateSyncPlanReq struct {
 	DataStoreID          *string             `json:"data_store_id"`
 	SelectedAPIs         *[]string           `json:"selected_apis"`
 	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams *sync.ExecuteParams `json:"default_execute_params"`
+	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode             *bool               `json:"incremental_mode"`
+	IncrementalStartDateAPI     *string             `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn  *string             `json:"incremental_start_date_column"`
 }
 
-// TriggerSyncPlanReq represents the request body for triggering a sync plan.
-type TriggerSyncPlanReq struct {
-	TargetDBPath string `json:"target_db_path" binding:"required"`
-	StartDate    string `json:"start_date" binding:"required"`
-	EndDate      string `json:"end_date" binding:"required"`
-	StartTime    string `json:"start_time"`
-	EndTime      string `json:"end_time"`
+// ExecuteSyncPlanReq represents the request body for triggering a sync plan.
+// Only start_dt and end_dt are accepted (datetime, e.g. RFC3339 or YYYY-MM-DD).
+// Target DB path is resolved from the plan's associated data store.
+type ExecuteSyncPlanReq struct {
+	StartDt string `json:"start_dt"` // optional, datetime (RFC3339 or 2006-01-02)
+	EndDt   string `json:"end_dt"`   // optional, datetime
 }
 
 // ExecutionCallbackReq represents the request body for execution callback.
@@ -464,8 +640,8 @@ type SyncPlanProgressResponse struct {
 	TaskCount          int        `json:"task_count"`
 	CompletedTask      int        `json:"completed_task"`
 	FailedTask         int        `json:"failed_task"`
-	RunningCount       int        `json:"running_count"`   // 正在运行的任务数（0 时也返回，与内部一致）
-	PendingCount       int        `json:"pending_count"`   // 挂起的任务数（0 时也返回）
+	RunningCount       int        `json:"running_count"`              // 正在运行的任务数（0 时也返回，与内部一致）
+	PendingCount       int        `json:"pending_count"`              // 挂起的任务数（0 时也返回）
 	RunningTaskIDs     []string   `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
 	PendingTaskIDs     []string   `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
 	RecordCount        int64      `json:"record_count"`
@@ -568,6 +744,10 @@ func (h *SyncHandler) StreamPlanProgress(c *gin.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			// 先发 keepalive 注释，避免代理/负载均衡因长时间无输出断开连接
+			c.Writer.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+
 			progress, err := h.syncSvc.GetPlanProgress(ctx, id)
 			if err != nil {
 				c.Writer.Write([]byte("event: error\n"))

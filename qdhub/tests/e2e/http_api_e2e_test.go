@@ -72,9 +72,9 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 
 	// 创建应用服务
 	uowImpl := uow.NewUnitOfWork(db)
-	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor)
-	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, workflowExecutor)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl)
+	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
+	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// 创建认证相关组件
@@ -90,7 +90,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	// 创建HTTP服务器
 	config := httpapi.DefaultServerConfig()
 	config.Mode = gin.TestMode
-	server := httpapi.NewServer(config, authSvc, metadataSvc, dataStoreSvc, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+	server := httpapi.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
 
 	// 创建测试服务器
 	ts := httptest.NewServer(server.Engine())

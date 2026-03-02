@@ -10,14 +10,15 @@ import (
 
 // DataSourceRow represents data_sources table row.
 type DataSourceRow struct {
-	ID          string    `db:"id"`
-	Name        string    `db:"name"`
-	Description string    `db:"description"`
-	BaseURL     string    `db:"base_url"`
-	DocURL      string    `db:"doc_url"`
-	Status      string    `db:"status"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID               string    `db:"id"`
+	Name             string    `db:"name"`
+	Description      string    `db:"description"`
+	BaseURL          string    `db:"base_url"`
+	DocURL           string    `db:"doc_url"`
+	Status           string         `db:"status"`
+	CommonDataAPIs   sql.NullString `db:"common_data_apis"` // JSON array of API names, NULL when empty
+	CreatedAt        time.Time      `db:"created_at"`
+	UpdatedAt        time.Time `db:"updated_at"`
 }
 
 // APICategoryRow represents api_categories table row.
@@ -130,9 +131,10 @@ type SyncExecutionRow struct {
 	Status         string         `db:"status"`
 	StartedAt      time.Time      `db:"started_at"`
 	FinishedAt     sql.NullTime   `db:"finished_at"`
-	RecordCount    int64          `db:"record_count"`
-	ErrorMessage   sql.NullString `db:"error_message"`
-	ExecuteParams  string         `db:"execute_params"`
+	RecordCount           int64          `db:"record_count"`
+	ErrorMessage          sql.NullString `db:"error_message"`
+	WorkflowErrorMessage  sql.NullString `db:"workflow_error_message"`
+	ExecuteParams         string         `db:"execute_params"`
 	SyncedAPIs     string         `db:"synced_apis"`
 	SkippedAPIs    string         `db:"skipped_apis"`
 }
@@ -148,12 +150,30 @@ type SyncPlanRow struct {
 	ResolvedAPIs         string         `db:"resolved_apis"`
 	ExecutionGraph       string         `db:"execution_graph"`
 	CronExpression       sql.NullString `db:"cron_expression"`
-	DefaultExecuteParams string         `db:"default_execute_params"` // JSON: ExecuteParams
-	Status               string         `db:"status"`
-	LastExecutedAt       sql.NullTime   `db:"last_executed_at"`
-	NextExecuteAt        sql.NullTime   `db:"next_execute_at"`
-	CreatedAt            time.Time      `db:"created_at"`
-	UpdatedAt            time.Time      `db:"updated_at"`
+	DefaultExecuteParams           string         `db:"default_execute_params"` // JSON: ExecuteParams
+	IncrementalMode                bool           `db:"incremental_mode"`
+	LastSuccessfulEndDate          sql.NullString `db:"last_successful_end_date"`
+	IncrementalStartDateAPI        sql.NullString `db:"incremental_start_date_api"`
+	IncrementalStartDateColumn     sql.NullString `db:"incremental_start_date_column"`
+	Status                         string         `db:"status"`
+	LastExecutedAt             sql.NullTime   `db:"last_executed_at"`
+	NextExecuteAt              sql.NullTime   `db:"next_execute_at"`
+	CreatedAt                  time.Time      `db:"created_at"`
+	UpdatedAt                  time.Time      `db:"updated_at"`
+}
+
+// SyncExecutionDetailRow represents sync_execution_detail table row.
+type SyncExecutionDetailRow struct {
+	ID           string         `db:"id"`
+	ExecutionID  string         `db:"execution_id"`
+	TaskID       string         `db:"task_id"`
+	APIName      string         `db:"api_name"`
+	RecordCount  int64          `db:"record_count"`
+	Status       string         `db:"status"`
+	ErrorMessage sql.NullString `db:"error_message"`
+	StartedAt    sql.NullTime   `db:"started_at"`
+	FinishedAt   sql.NullTime   `db:"finished_at"`
+	CreatedAt    time.Time      `db:"created_at"`
 }
 
 // SyncTaskRow represents sync_task table row.

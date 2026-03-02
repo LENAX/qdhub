@@ -28,12 +28,13 @@ type ServerConfig struct {
 }
 
 // DefaultServerConfig returns the default server configuration.
+// WriteTimeout 0 表示不限制，以支持 SSE 等长连接。
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
 		Host:         "0.0.0.0",
 		Port:         8080,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0,
 		Mode:         gin.ReleaseMode,
 	}
 }
@@ -68,6 +69,7 @@ func NewServer(
 	authSvc contracts.AuthApplicationService,
 	metadataSvc contracts.MetadataApplicationService,
 	dataStoreSvc contracts.DataStoreApplicationService,
+	dataQualitySvc contracts.DataQualityApplicationService,
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
 	analysisSvc contracts.AnalysisApplicationService,
@@ -87,7 +89,7 @@ func NewServer(
 		engine:           engine,
 		authHandler:      NewAuthHandler(authSvc),
 		metadataHandler:  NewMetadataHandler(metadataSvc),
-		dataStoreHandler: NewDataStoreHandler(dataStoreSvc),
+		dataStoreHandler: NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
 		syncHandler:      NewSyncHandler(syncSvc),
 		workflowHandler:  NewWorkflowHandler(workflowSvc),
 		jwtManager:       jwtManager,

@@ -87,6 +87,7 @@ type BatchDataSyncRequest struct {
 	APINames       []string          // 需要同步的 API 列表（与 APIConfigs 二选一）
 	APIConfigs     []APISyncConfig   // API 同步配置（与 APINames 二选一，优先使用）
 	MaxStocks      int               // 最大股票数量（可选，0表示不限制）
+	CommonDataAPIs []string          // 公共数据 API 名列表（如 trade_cal, stock_basic），SyncAPIDataJob 走 Cache→DuckDB→API
 }
 
 // RealtimeDataSyncRequest 实时同步请求参数

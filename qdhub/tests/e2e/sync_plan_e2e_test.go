@@ -309,10 +309,8 @@ func TestExecuteSyncPlanRequest_Params(t *testing.T) {
 		EndDate:      "20240131",
 		StartTime:    "09:30:00",
 		EndTime:      "15:00:00",
-		TargetDBPath: "/data/test.db",
 	}
 
 	assert.Equal(t, "20240101", req.StartDate)
 	assert.Equal(t, "20240131", req.EndDate)
-	assert.Equal(t, "/data/test.db", req.TargetDBPath)
 }

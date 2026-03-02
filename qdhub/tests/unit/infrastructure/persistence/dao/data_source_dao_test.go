@@ -35,7 +35,8 @@ func setupDAOTestDB(t *testing.T) (*persistence.DB, func()) {
 			doc_url VARCHAR(512),
 			status VARCHAR(32) DEFAULT 'active',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			common_data_apis TEXT
 		);
 		
 		CREATE TABLE IF NOT EXISTS api_categories (
@@ -183,6 +184,41 @@ func TestDataSourceDAO_Update(t *testing.T) {
 
 	if got.Name != "Updated Name" {
 		t.Errorf("Update() Name = %s, want Updated Name", got.Name)
+	}
+}
+
+func TestDataSourceDAO_CommonDataAPIs(t *testing.T) {
+	db, cleanup := setupDAOTestDB(t)
+	defer cleanup()
+
+	dao := dao.NewDataSourceDAO(db.DB)
+	ds := metadata.NewDataSource("CommonData Test", "Desc", "https://api.com", "https://doc.com")
+	ds.SetCommonDataAPIs([]string{"trade_cal", "stock_basic"})
+
+	err := dao.Create(nil, ds)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got, err := dao.GetByID(nil, ds.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(got.CommonDataAPIs) != 2 || got.CommonDataAPIs[0] != "trade_cal" || got.CommonDataAPIs[1] != "stock_basic" {
+		t.Errorf("GetByID() CommonDataAPIs = %v, want [trade_cal stock_basic]", got.CommonDataAPIs)
+	}
+
+	got.SetCommonDataAPIs([]string{"trade_cal"})
+	err = dao.Update(nil, got)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got2, err := dao.GetByID(nil, ds.ID)
+	if err != nil {
+		t.Fatalf("GetByID() after Update error = %v", err)
+	}
+	if len(got2.CommonDataAPIs) != 1 || got2.CommonDataAPIs[0] != "trade_cal" {
+		t.Errorf("After Update CommonDataAPIs = %v, want [trade_cal]", got2.CommonDataAPIs)
 	}
 }
 
