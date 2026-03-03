@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
+	"golang.org/x/crypto/bcrypt"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
 	"github.com/casbin/casbin/v2"
 	"github.com/sirupsen/logrus"
@@ -187,9 +188,11 @@ type Config struct {
 	DBDSN    string
 
 	// Server
-	ServerHost string
-	ServerPort int
-	ServerMode string
+	ServerHost     string
+	ServerPort     int
+	ServerMode     string
+	EnableSwagger  bool   // 生产环境建议 false，关闭 /swagger、/docs
+	AdminPassword  string // 可选：覆盖默认 admin 密码（生产环境设强密码，如通过 QDHUB_AUTH_ADMIN_PASSWORD）
 
 	// Task Engine
 	TaskEngineMaxConcurrency int
@@ -216,6 +219,7 @@ func DefaultConfig() Config {
 		ServerHost:               "0.0.0.0",
 		ServerPort:               8080,
 		ServerMode:               "release",
+		EnableSwagger:            true, // 开发默认开启；生产请设 false 或 QDHUB_SERVER_ENABLE_SWAGGER=false
 		TaskEngineMaxConcurrency: 100,
 		TaskEngineTimeout:        120, // 单任务执行超时（秒），元数据爬取等可能较慢
 		MigrationPath:            "./migrations/001_init_schema.up.sql",
@@ -480,6 +484,10 @@ func (c *Container) runMigrations() error {
 	if err := c.runDefaultAdminSeed(); err != nil {
 		return fmt.Errorf("failed to seed default admin: %w", err)
 	}
+	// 可选：用配置的强密码覆盖默认 admin 密码（生产环境建议设置 QDHUB_AUTH_ADMIN_PASSWORD）
+	if err := c.applyAdminPasswordOverride(); err != nil {
+		return fmt.Errorf("failed to apply admin password override: %w", err)
+	}
 
 	// 007_daily_adj_factor_trade_date_expand
 	if err := c.runMigrationFile("./migrations/007_daily_adj_factor_trade_date_expand.up.sql"); err != nil {
@@ -611,6 +619,33 @@ func (c *Container) runDefaultAdminSeed() error {
 	return nil
 }
 
+// applyAdminPasswordOverride 若配置了 AdminPassword，则更新默认 admin 用户的密码哈希（生产环境强密码）。
+func (c *Container) applyAdminPasswordOverride() error {
+	if c.config.AdminPassword == "" {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(c.config.AdminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt admin password: %w", err)
+	}
+	var query string
+	switch c.config.DBDriver {
+	case "postgres":
+		query = "UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE username = $2"
+	default:
+		query = "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?"
+	}
+	res, err := c.DB.Exec(query, string(hash), "admin")
+	if err != nil {
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected > 0 {
+		logrus.Info("Admin password override applied (strong password from config/env)")
+	}
+	return nil
+}
+
 // runGuestSeed runs the guest user (viewer role) seed migration based on database type.
 func (c *Container) runGuestSeed() error {
 	var migrationFile string
@@ -680,7 +715,6 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create task engine: %w", err)
 	}
-	eng.SetInstanceManagerVersion(engine.InstanceManagerV3)
 
 	// Start Task Engine
 	if err := eng.Start(ctx); err != nil {
@@ -918,11 +952,12 @@ func (c *Container) initBuiltInWorkflows(ctx context.Context) error {
 func (c *Container) initHTTPServer() error {
 	// WriteTimeout 设为 0 以支持长连接（如 progress-stream SSE），否则约 30s 后连接会被断开
 	serverConfig := httpserver.ServerConfig{
-		Host:         c.config.ServerHost,
-		Port:         c.config.ServerPort,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0,
-		Mode:         c.config.ServerMode,
+		Host:          c.config.ServerHost,
+		Port:          c.config.ServerPort,
+		ReadTimeout:   30 * time.Second,
+		WriteTimeout:  0,
+		Mode:          c.config.ServerMode,
+		EnableSwagger: c.config.EnableSwagger,
 	}
 
 	// 分析服务数据源：优先用默认 QuantDB；否则从 DataStore 中取第一个有效的 DuckDB 并连接

@@ -1,16 +1,23 @@
 # QDHub Configuration
 # Environment: development
+# 生产环境建议：server.enable_swagger: false，并设置 auth.admin_password 强密码（或使用环境变量 QDHUB_AUTH_ADMIN_PASSWORD）
 
 server:
   host: "0.0.0.0"
   port: 8080
+  # enable_swagger: true   # 默认 true；生产环境设为 false 关闭 /swagger、/docs（或 QDHUB_SERVER_ENABLE_SWAGGER=false）
 
 database:
   driver: "sqlite"  # sqlite | postgres
   dsn: "./data/qdhub.db"
 
+# auth.admin_password: ""  # 可选：覆盖默认 admin 密码（生产环境设强密码；或环境变量 QDHUB_AUTH_ADMIN_PASSWORD）
+
+quantdb:
+  duckdb_path: "./data/qdhub.duckdb"
+
 task_engine:
-  worker_count: 100
+  worker_count: 32  # 降低以避免 taskStatsChan 打满、影响进度上报等（Docker 等环境可调小）
   task_timeout: 60  # seconds
 
 datasources:

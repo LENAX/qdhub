@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,6 +30,11 @@ func NewAdapter(storagePath string) *Adapter {
 	}
 }
 
+// ensureDir creates the directory and any parent directories if they do not exist.
+func ensureDir(dir string) error {
+	return os.MkdirAll(dir, 0755)
+}
+
 // ==================== Connection Management ====================
 
 // Connect establishes connection to the DuckDB database.
@@ -37,6 +44,13 @@ func (a *Adapter) Connect(ctx context.Context) error {
 
 	if a.connected {
 		return nil
+	}
+
+	// 确保存储路径所在目录存在，否则 DuckDB 打开会报 "No such file or directory"
+	if dir := filepath.Dir(a.storagePath); dir != "." {
+		if err := ensureDir(dir); err != nil {
+			return fmt.Errorf("failed to create data dir %s: %w", dir, err)
+		}
 	}
 
 	db, err := sql.Open("duckdb", a.storagePath)

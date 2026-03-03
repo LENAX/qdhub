@@ -20,11 +20,12 @@ import (
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Host         string
-	Port         int
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	Mode         string // debug, release, test
+	Host          string
+	Port          int
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	Mode          string // debug, release, test
+	EnableSwagger bool   // 生产环境建议设为 false，关闭 /swagger、/docs
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -124,13 +125,14 @@ func (s *Server) setupRoutes() {
 	// 临时 debug：根路径也注册，便于 e2e 访问（子进程可能未正确加载 /api/v1 路由）
 	s.engine.GET("/debug/database", s.debugDatabase)
 
-	// Swagger documentation
-	s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	// Alias for /docs -> /swagger/index.html
-	s.engine.GET("/docs", func(c *gin.Context) {
-		c.Redirect(302, "/swagger/index.html")
-	})
-	s.engine.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger documentation（生产环境可通过 server.enable_swagger=false 或 QDHUB_SERVER_ENABLE_SWAGGER=false 关闭）
+	if s.config.EnableSwagger {
+		s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+		s.engine.GET("/docs", func(c *gin.Context) {
+			c.Redirect(302, "/swagger/index.html")
+		})
+		s.engine.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")

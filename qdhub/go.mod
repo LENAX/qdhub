@@ -105,4 +105,4 @@ require (
 )
 
 // 本地调试 task-engine 时使用，提交前请删除或注释
-replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine
+// replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine

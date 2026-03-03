@@ -166,6 +166,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if taskEngineWorkerCount > 0 {
 		config.TaskEngineMaxConcurrency = taskEngineWorkerCount
 	}
+	if viper.IsSet("server.enable_swagger") {
+		config.EnableSwagger = viper.GetBool("server.enable_swagger")
+	}
+	config.AdminPassword = viper.GetString("auth.admin_password")
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)
