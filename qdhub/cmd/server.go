@@ -170,6 +170,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		config.EnableSwagger = viper.GetBool("server.enable_swagger")
 	}
 	config.AdminPassword = viper.GetString("auth.admin_password")
+	config.GuestPassword = viper.GetString("auth.guest_password")
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)

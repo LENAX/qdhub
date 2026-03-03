@@ -1,7 +1,10 @@
 # QDHub - base compose (production or default)
 # Dev with hot reload: use docker-compose.override.yml (auto-merged when present)
+# 发布镜像：本地 build 后 push；阿里云上只 pull + up，无需源码（见 DEPLOY.md）
+# 版本号：与代码库 tag 一致，如 IMAGE_TAG=v0.1.0-beta.2
 services:
   backend:
+    image: ${DOCKER_REGISTRY:-}qdhub-backend:${IMAGE_TAG:-latest}
     build:
       context: ./qdhub
       dockerfile: Dockerfile
@@ -22,11 +25,12 @@ services:
       start_period: 10s
 
   frontend:
+    image: ${DOCKER_REGISTRY:-}qdhub-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./qdhub-frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"   # 阿里云部署版：宿主机 80，容器内 Nginx 80
+      - "3001:80"   # 宿主机 3001，由 ECS 上 Nginx 反代 80/443 → 3001
     depends_on:
       backend:
         condition: service_healthy

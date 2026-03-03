@@ -193,6 +193,7 @@ type Config struct {
 	ServerMode     string
 	EnableSwagger  bool   // 生产环境建议 false，关闭 /swagger、/docs
 	AdminPassword  string // 可选：覆盖默认 admin 密码（生产环境设强密码，如通过 QDHUB_AUTH_ADMIN_PASSWORD）
+	GuestPassword  string // 可选：覆盖默认 guest 密码（生产环境设强密码，如通过 QDHUB_AUTH_GUEST_PASSWORD）
 
 	// Task Engine
 	TaskEngineMaxConcurrency int
@@ -219,7 +220,7 @@ func DefaultConfig() Config {
 		ServerHost:               "0.0.0.0",
 		ServerPort:               8080,
 		ServerMode:               "release",
-		EnableSwagger:            true, // 开发默认开启；生产请设 false 或 QDHUB_SERVER_ENABLE_SWAGGER=false
+		EnableSwagger:            false, // 默认关闭；开发环境可通过 server.enable_swagger=true 或 QDHUB_SERVER_ENABLE_SWAGGER=true 开启
 		TaskEngineMaxConcurrency: 100,
 		TaskEngineTimeout:        120, // 单任务执行超时（秒），元数据爬取等可能较慢
 		MigrationPath:            "./migrations/001_init_schema.up.sql",
@@ -530,6 +531,10 @@ func (c *Container) runMigrations() error {
 	if err := c.runGuestSeed(); err != nil {
 		return fmt.Errorf("failed to seed guest user: %w", err)
 	}
+	// 可选：用配置的强密码覆盖默认 guest 密码（生产环境建议设置 QDHUB_AUTH_GUEST_PASSWORD）
+	if err := c.applyGuestPasswordOverride(); err != nil {
+		return fmt.Errorf("failed to apply guest password override: %w", err)
+	}
 
 	logrus.Info("Database migrations applied successfully")
 	return nil
@@ -642,6 +647,33 @@ func (c *Container) applyAdminPasswordOverride() error {
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
 		logrus.Info("Admin password override applied (strong password from config/env)")
+	}
+	return nil
+}
+
+// applyGuestPasswordOverride 若配置了 GuestPassword，则更新默认 guest 用户的密码哈希（生产环境强密码）。
+func (c *Container) applyGuestPasswordOverride() error {
+	if c.config.GuestPassword == "" {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(c.config.GuestPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt guest password: %w", err)
+	}
+	var query string
+	switch c.config.DBDriver {
+	case "postgres":
+		query = "UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE username = $2"
+	default:
+		query = "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE username = ?"
+	}
+	res, err := c.DB.Exec(query, string(hash), "guest")
+	if err != nil {
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected > 0 {
+		logrus.Info("Guest password override applied (viewer-only account from config/env)")
 	}
 	return nil
 }
