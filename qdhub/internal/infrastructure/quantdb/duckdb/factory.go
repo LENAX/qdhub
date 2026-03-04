@@ -44,31 +44,19 @@ func (f *Factory) Create(config datastore.QuantDBConfig) (datastore.QuantDB, err
 		path = abs
 	}
 
+	// Fast path: 尝试从缓存中直接返回已存在的适配器，不做额外 Ping/Close，
+	// 连接健康性由 Adapter.ensureConnected 在实际使用时负责。
 	f.mu.RLock()
 	if adapter, ok := f.cache[path]; ok {
 		f.mu.RUnlock()
-		if err := adapter.Ping(context.Background()); err == nil {
-			return adapter, nil
-		}
-		// Stale, will recreate below with write lock
-		f.mu.Lock()
-		if a, ok := f.cache[path]; ok {
-			_ = a.Close()
-			delete(f.cache, path)
-		}
-		f.mu.Unlock()
-	} else {
-		f.mu.RUnlock()
+		return adapter, nil
 	}
+	f.mu.RUnlock()
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if adapter, ok := f.cache[path]; ok {
-		if err := adapter.Ping(context.Background()); err == nil {
-			return adapter, nil
-		}
-		_ = adapter.Close()
-		delete(f.cache, path)
+		return adapter, nil
 	}
 
 	adapter := NewAdapter(path)

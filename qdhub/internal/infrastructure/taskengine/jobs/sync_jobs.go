@@ -166,6 +166,20 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		client.SetToken(token)
 	}
 
+	// stk_mins：补全默认 freq=1min，并将 start_date/end_date 规范化为 yyyy-mm-dd HH:MM:SS
+	if apiName == "stk_mins" {
+		if _, ok := params["freq"]; !ok || params["freq"] == nil || params["freq"] == "" {
+			params["freq"] = "1min"
+			logrus.Printf("📡 [SyncAPIData] stk_mins 使用默认 freq=1min")
+		}
+		if sd, ok := params["start_date"].(string); ok && sd != "" {
+			params["start_date"] = normalizeDateTimeToStkMinsFormat(sd, "09:30:00")
+		}
+		if ed, ok := params["end_date"].(string); ok && ed != "" {
+			params["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
+		}
+	}
+
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
 		logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
@@ -417,12 +431,25 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		// 仅当按 ts_code 等非日期拆分子任务时，将 start_date/end_date 传给 API（用于日期范围查询）。
 		// 按 trade_date 拆分的 API（如 adj_factor、daily）每个子任务只查单日，传 start_date/end_date 会导致
 		// Tushare 同时收到 trade_date 与日期范围，可能返回 0 条或行为异常，故不传。
+		paramsMap := subTaskParams["params"].(map[string]interface{})
+		if apiName == "stk_mins" {
+			if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
+				paramsMap["freq"] = "1min"
+			}
+		}
 		if paramKey != "trade_date" {
 			if sd := tc.GetParamString("start_date"); sd != "" {
-				paramsMap := subTaskParams["params"].(map[string]interface{})
-				paramsMap["start_date"] = sd
+				if apiName == "stk_mins" {
+					paramsMap["start_date"] = normalizeDateTimeToStkMinsFormat(sd, "09:30:00")
+				} else {
+					paramsMap["start_date"] = sd
+				}
 				if ed := tc.GetParamString("end_date"); ed != "" {
-					paramsMap["end_date"] = ed
+					if apiName == "stk_mins" {
+						paramsMap["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
+					} else {
+						paramsMap["end_date"] = ed
+					}
 				}
 			}
 		}
@@ -1252,6 +1279,36 @@ func normalizeDateForFilter(s string) string {
 	for _, layout := range dateLayoutsForFilter {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.Format("20060102")
+		}
+	}
+	return ""
+}
+
+// dateTimeLayoutsForStkMins 供 stk_mins 使用的日期时间解析格式（输出为 yyyy-mm-dd HH:MM:SS）
+var dateTimeLayoutsForStkMins = []string{
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04",
+	"2006-01-02",
+	"2006/01/02 15:04:05",
+	"2006/01/02",
+	"20060102 150405",
+	"20060102",
+}
+
+// normalizeDateTimeToStkMinsFormat 将日期/日期时间规范化为 "yyyy-mm-dd HH:MM:SS"，供 stk_mins 等 API 使用。
+// defaultTime 在仅解析出日期时使用，如 "09:30:00"（start_date）、"15:00:00"（end_date）。
+func normalizeDateTimeToStkMinsFormat(s, defaultTime string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, layout := range dateTimeLayoutsForStkMins {
+		if t, err := time.Parse(layout, s); err == nil {
+			if strings.Contains(layout, "15:04") || strings.Contains(layout, "150405") {
+				return t.Format("2006-01-02 15:04:05")
+			}
+			return t.Format("2006-01-02") + " " + defaultTime
 		}
 	}
 	return ""

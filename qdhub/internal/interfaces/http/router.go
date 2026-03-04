@@ -83,6 +83,8 @@ func NewServer(
 
 	// Create gin engine
 	engine := gin.New()
+	// 允许去重连续斜杠，例如 /api/v1//sync-plans -> /api/v1/sync-plans
+	engine.RemoveExtraSlash = true
 
 	// Create handlers
 	server := &Server{

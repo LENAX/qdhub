@@ -176,6 +176,9 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	"cashflow":       {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
 	"fina_indicator": {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
 	"fina_mainbz":    {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+
+	// stk_mins：历史分钟数据，必填 ts_code + freq，支持 start_date/end_date（格式 yyyy-mm-dd HH:MM:SS），freq 默认 1min 在 job 内注入
+	"stk_mins": {PreferredParam: "ts_code", SupportDateRange: true, RequiredParams: []string{"freq"}, Dependencies: []string{"FetchStockBasic"}},
 }
 
 // GetAPISyncStrategy 获取 API 的同步策略（使用默认配置）
@@ -659,7 +662,8 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				// 必须提供 ts_code 的 API：使用 template 模式，按股票代码生成子任务
 				// 这类 API 不支持按日期查询全市场，必须按股票拆分
 				// 检查是否有其他必填参数（如 index_daily 需要 ts_code，index_weight 需要 index_code）
-				if len(strategy.RequiredParams) > 0 {
+				// stk_mins 的 freq 在 GenerateDataSyncSubTasks/SyncAPIData 中默认注入为 1min，故不跳过
+				if len(strategy.RequiredParams) > 0 && apiName != "stk_mins" {
 					// 有必填参数但当前无法自动提供，跳过并记录警告
 					// 这类 API 需要用户通过 WithAPIConfigs 明确指定参数
 					continue

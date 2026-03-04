@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"runtime/debug"
 )
 
 // Recovery returns a middleware that recovers from panics.
@@ -13,7 +14,19 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				logrus.Errorf("[PANIC] %v", err)
+				// 记录请求方法和路径，便于将 panic 与具体接口对应
+				method := ""
+				path := ""
+				query := ""
+				if c.Request != nil {
+					method = c.Request.Method
+					if c.Request.URL != nil {
+						path = c.Request.URL.Path
+						query = c.Request.URL.RawQuery
+					}
+				}
+				// 打印完整调用栈，便于精确定位 panic 源头
+				logrus.Errorf("[PANIC] %v | method=%s path=%s?%s\n%s", err, method, path, query, debug.Stack())
 				c.JSON(http.StatusInternalServerError, Response{
 					Code:    500,
 					Message: "internal server error",

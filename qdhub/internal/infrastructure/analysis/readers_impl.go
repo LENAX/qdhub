@@ -717,7 +717,7 @@ WHERE s.industry IS NOT NULL
 GROUP BY %s
 HAVING limit_up_count > 0
 ORDER BY limit_up_count DESC`, dim, dim, dim)
-	rows, err := r.db.Query(ctx, sql, sectorType, tradeDate, tradeDate, sectorType)
+	rows, err := r.db.Query(ctx, sql, sectorType, tradeDate, tradeDate)
 	if err != nil {
 		return nil, err
 	}
@@ -1238,6 +1238,53 @@ func (l *limitUpComparisonReaderImpl) GetComparison(ctx context.Context, todayDa
 
 // GetLimitUpBySectorByDate 内部实现，供 LimitUpBySectorReader 包装
 func (r *Readers) GetLimitUpBySectorByDate(ctx context.Context, tradeDate, sectorType string) ([]analysis.LimitUpBySector, error) {
+	// 优先使用 limit_cpt_list 作为涨停板块排名主表
+	if ok, _ := r.db.TableExists(ctx, "limit_cpt_list"); ok {
+		sql := `
+SELECT
+  ts_code    AS sector_code,
+  name       AS sector_name,
+  ?          AS sector_type,
+  up_nums    AS stock_count,
+  up_nums    AS limit_up_count,
+  up_nums    AS total_stock_count,
+  0.0        AS limit_up_ratio,
+  pct_chg    AS avg_pct_chg,
+  days,
+  up_stat,
+  cons_nums,
+  up_nums,
+  rank
+FROM limit_cpt_list
+WHERE trade_date = ?
+ORDER BY CAST(rank AS INTEGER)`
+		rows, err := r.db.Query(ctx, sql, sectorType, tradeDate)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]analysis.LimitUpBySector, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, analysis.LimitUpBySector{
+				SectorCode:      str(m, "sector_code"),
+				SectorName:      str(m, "sector_name"),
+				SectorType:      str(m, "sector_type"),
+				StockCount:      int_(m, "stock_count"),
+				LimitUpCount:    int_(m, "limit_up_count"),
+				TotalStockCount: int_(m, "total_stock_count"),
+				LimitUpRatio:    0,
+				AvgPctChg:       float(m, "avg_pct_chg"),
+				Stocks:          nil,
+				Days:            int_(m, "days"),
+				UpStat:          str(m, "up_stat"),
+				ConsNums:        int_(m, "cons_nums"),
+				UpNums:          int_(m, "up_nums"),
+				Rank:            str(m, "rank"),
+			})
+		}
+		return out, nil
+	}
+
+	// 兜底：若无 limit_cpt_list 表或无数据，退回旧实现（基于行业统计）
 	stats, err := r.GetSectorLimitStatsByDate(ctx, tradeDate, sectorType)
 	if err != nil {
 		return nil, err
@@ -1249,16 +1296,32 @@ func (r *Readers) GetLimitUpBySectorByDate(ctx context.Context, tradeDate, secto
 		if stocks != nil {
 			for _, st := range stocks.Stocks {
 				stkList = append(stkList, analysis.LimitUpStock{
-					TsCode: st.TsCode, Name: st.Name, TradeDate: tradeDate, LimitTime: st.LimitTime, Reason: st.LimitReason,
-					ConsecutiveDays: st.ConsecutiveDays, Close: st.Close, PctChg: st.PctChg,
-					Volume: 0, Amount: st.Amount, TurnoverRate: st.TurnoverRate, Industry: st.Industry, Concepts: st.Concepts,
+					TsCode:          st.TsCode,
+					Name:            st.Name,
+					TradeDate:       tradeDate,
+					LimitTime:       st.LimitTime,
+					Reason:          st.LimitReason,
+					ConsecutiveDays: st.ConsecutiveDays,
+					Close:           st.Close,
+					PctChg:          st.PctChg,
+					Volume:          0,
+					Amount:          st.Amount,
+					TurnoverRate:    st.TurnoverRate,
+					Industry:        st.Industry,
+					Concepts:        st.Concepts,
 				})
 			}
 		}
 		out = append(out, analysis.LimitUpBySector{
-			SectorCode: s.SectorCode, SectorName: s.SectorName, SectorType: s.SectorType,
-			StockCount: s.LimitUpCount, LimitUpCount: s.LimitUpCount, TotalStockCount: s.TotalStocks,
-			LimitUpRatio: s.LimitUpRatio, AvgPctChg: s.AvgPctChg, Stocks: stkList,
+			SectorCode:      s.SectorCode,
+			SectorName:      s.SectorName,
+			SectorType:      s.SectorType,
+			StockCount:      s.LimitUpCount,
+			LimitUpCount:    s.LimitUpCount,
+			TotalStockCount: s.TotalStocks,
+			LimitUpRatio:    0,
+			AvgPctChg:       s.AvgPctChg,
+			Stocks:          stkList,
 		})
 	}
 	return out, nil
