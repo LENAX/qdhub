@@ -611,7 +611,7 @@ func (d *SyncExecutionDAO) Update(tx *sqlx.Tx, entity *sync.SyncExecution) error
 
 // GetByPlanID retrieves all sync executions for a plan.
 func (d *SyncExecutionDAO) GetByPlanID(tx *sqlx.Tx, planID shared.ID) ([]*sync.SyncExecution, error) {
-	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY started_at DESC`
+	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY rowid DESC`
 	var rows []SyncExecutionRow
 
 	var err error
@@ -659,7 +659,7 @@ func (d *SyncExecutionDAO) GetByWorkflowInstID(tx *sqlx.Tx, workflowInstID strin
 
 // GetByPlanIDPaged retrieves sync executions for a plan with limit and offset, ordered by started_at DESC.
 func (d *SyncExecutionDAO) GetByPlanIDPaged(tx *sqlx.Tx, planID shared.ID, limit, offset int) ([]*sync.SyncExecution, error) {
-	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?`
 	var rows []SyncExecutionRow
 
 	var err error

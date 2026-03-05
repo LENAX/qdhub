@@ -30,9 +30,13 @@ type JobHandler interface {
 
 // NewCronScheduler creates a new CronScheduler.
 func NewCronScheduler(handler JobHandler) *CronScheduler {
-	// Create cron with seconds field support and recover from panics
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.Local
+	}
 	c := cron.New(
 		cron.WithSeconds(),
+		cron.WithLocation(loc),
 		cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		),

@@ -8,7 +8,8 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /qdhub .
 
 FROM debian:12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget tzdata && rm -rf /var/lib/apt/lists/*
+ENV TZ=Asia/Shanghai
 WORKDIR /app
 COPY --from=builder /qdhub .
 # Default config can be overridden by volume or env

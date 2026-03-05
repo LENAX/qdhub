@@ -281,6 +281,13 @@ func (c *Container) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize application services: %w", err)
 	}
 
+	// Step 6.2: Reconcile running sync executions from workflow engine state (startup self-healing)
+	if svcImpl, ok := c.SyncSvc.(*impl.SyncApplicationServiceImpl); ok {
+		if err := svcImpl.ReconcileRunningExecutions(ctx); err != nil {
+			logrus.Warnf("Warning: failed to reconcile running sync executions: %v", err)
+		}
+	}
+
 	// Step 6.5: Restore enabled plans to scheduler (after restart)
 	if err := c.restoreScheduledPlans(ctx); err != nil {
 		logrus.Warnf("Warning: failed to restore scheduled plans: %v", err)
