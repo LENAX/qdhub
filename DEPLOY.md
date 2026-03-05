@@ -5,6 +5,8 @@
 - **本地/CI**：构建镜像 → 推送到镜像仓库（如阿里云 ACR）。
 - **阿里云 ECS**：只保留 `docker-compose.image.yml` 和 `.env.aliyun`，`pull` 后 `up`，**无需任何源代码**。
 
+**命令区分**：开发机若安装的是独立命令 **`docker-compose`**（带连字符），文档中「一、本地」用 `docker-compose`；服务器若为 Docker 插件 **`docker compose`**（空格），文档中「二、ECS」及故障排查在 ECS 上的步骤用 `docker compose`。按你当前环境替换即可。
+
 ---
 
 ## 一、本地：构建并推送镜像
@@ -27,16 +29,28 @@ docker login crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com -u linxe
 
 在项目根目录（有 `docker-compose.yml` 的目录）：
 
+- **若在 Mac ARM（M1/M2）上构建、且要部署到阿里云 ECS（x86/amd64）**：必须先按**目标平台 amd64** 构建，否则 ECS 会报 `image's platform (linux/arm64) does not match the detected host platform (linux/amd64)`。见下方“仅 ECS 用”或“多架构”两种方式。
+
+**仅 ECS 用（单架构 amd64，推荐在 Mac 上为 ECS 构建时用）：**
+
+```bash
+export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
+export IMAGE_TAG=v0.1.0-beta.3
+
+# 指定目标平台为 linux/amd64（ECS 常见架构）；开发机为 docker-compose 时用 docker-compose
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker-compose -f docker-compose.yml build
+docker-compose -f docker-compose.yml push
+```
+
+**本机与 ECS 同架构时（或本机为 x86）：**
+
 ```bash
 # 仓库地址（结尾带 /）；版本号与代码库 tag 一致
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-beta.2
+export IMAGE_TAG=v0.1.0-beta.3
 
-# 构建（会打上上述 registry + qdhub-backend/qdhub-frontend + IMAGE_TAG）
-docker compose -f docker-compose.yml build
-
-# 推送
-docker compose -f docker-compose.yml push
+docker-compose -f docker-compose.yml build
+docker-compose -f docker-compose.yml push
 ```
 
 若使用其他 ACR 或 Docker Hub，只需改 `DOCKER_REGISTRY`，例如：
@@ -44,9 +58,32 @@ docker compose -f docker-compose.yml push
 ```bash
 export DOCKER_REGISTRY=registry.cn-hangzhou.aliyuncs.com/你的命名空间/
 export IMAGE_TAG=v0.1.0-beta.2
-docker compose -f docker-compose.yml build
-docker compose -f docker-compose.yml push
+docker-compose -f docker-compose.yml build
+docker-compose -f docker-compose.yml push
 ```
+
+### 4. 多架构构建（同时支持 linux/amd64 与 linux/arm64）
+
+在 Mac ARM64 上若希望**一次构建并推送**两个架构（ECS 常用 amd64，本机为 arm64），使用 buildx 多平台构建，同一 tag 下会包含两个架构，拉取时自动匹配宿主机架构：
+
+```bash
+export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
+export IMAGE_TAG=v0.1.0-beta.4
+
+# 确保使用支持多平台的 builder
+docker buildx create --name multiarch --use 2>/dev/null || true
+docker buildx use multiarch
+docker buildx inspect --bootstrap
+
+# 构建并推送（直接 push，不 --load）
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t "${DOCKER_REGISTRY}qdhub-backend:${IMAGE_TAG}" --push ./qdhub
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t "${DOCKER_REGISTRY}qdhub-frontend:${IMAGE_TAG}" --push ./qdhub-frontend
+```
+
+- **仅构建单架构**：本机 arm64 用 `docker-compose -f docker-compose.yml build`；仅要 amd64 时用  
+  `DOCKER_DEFAULT_PLATFORM=linux/amd64 docker-compose -f docker-compose.yml build`。（开发机若为插件版则把 `docker-compose` 改为 `docker compose`。）
 
 ---
 
@@ -67,7 +104,7 @@ cd ~/qdhub-deploy
 ```bash
 # 镜像仓库（与推送时一致，结尾带 /）及版本号
 DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-IMAGE_TAG=v0.1.0-beta.2
+IMAGE_TAG=v0.1.0-beta.4
 
 # 数据与日志（阿里云数据盘）
 QDHUB_DATA_DIR=/mnt/vdb/qdhub/data
@@ -101,9 +138,9 @@ cd ~/qdhub-deploy
 cp .env.aliyun .env   # Compose 自动读当前目录 .env，兼容旧版（无 --env-file）
 docker login crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com -u linxemr --password-stdin
 
-# 任选其一：docker-compose（独立安装）或 docker compose（插件）
-docker-compose -f docker-compose.image.yml pull
-docker-compose -f docker-compose.image.yml up -d
+# 服务器上为 Docker 插件时用：docker compose（空格）；若为独立安装则用 docker-compose
+docker compose -f docker-compose.image.yml pull
+docker compose -f docker-compose.image.yml up -d
 ```
 
 ### 4. 访问
@@ -144,14 +181,51 @@ server {
 
 ---
 
+## 故障排查：backend unhealthy
+
+若出现 `dependency failed to start: container ... backend ... is unhealthy`：
+
+1. **ECS 上请用 `docker-compose.image.yml`**，不要用 `docker-compose.yml`（后者含 build，且默认数据目录为 `./qdhub/data`，在部署目录下可能不存在或权限不对）：
+   ```bash
+   docker compose -f docker-compose.image.yml up -d
+   ```
+   （服务器用 `docker compose`；若为独立安装则改为 `docker-compose`。）
+
+2. **查看 backend 日志**，确认是启动慢还是进程退出：
+   ```bash
+   docker compose -f docker-compose.image.yml logs backend
+   # 或
+   docker logs qdhub-deploy-backend-1
+   ```
+   - 若为 **migration 失败、permission denied、failed to initialize** 等，按报错修（目录权限、.env 中 `QDHUB_DATA_DIR`/`QDHUB_LOG_DIR` 等）。
+   - 若为 **启动较慢**（首次迁移多），已把健康检查的 `start_period` 改为 30s、`retries` 改为 5，可再试一次。
+
+3. **确认数据与日志目录存在且可写**：
+   ```bash
+   sudo mkdir -p /mnt/vdb/qdhub/data /mnt/vdb/qdhub/logs
+   sudo chown -R $USER:$USER /mnt/vdb/qdhub
+   ```
+
+4. **确认 .env 中必填项**：`docker-compose.image.yml` 里 `QDHUB_AUTH_ADMIN_PASSWORD` 为必填（无默认值），未设置时 compose 可能报错或行为异常。
+
+**镜像平台不匹配**（`The requested image's platform (linux/arm64) does not match the detected host platform (linux/amd64)`）：  
+镜像是在 Mac ARM 上按默认架构构建的，而 ECS 是 x86/amd64。需在**开发机**重新按 **linux/amd64** 构建并推送同一 tag（开发机用 `docker-compose`）：
+```bash
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker-compose -f docker-compose.yml build
+docker-compose -f docker-compose.yml push
+```
+然后在 **ECS** 上 `docker compose -f docker-compose.image.yml pull` 再 `up -d`。也可用上文「多架构构建」一次推送 amd64+arm64。
+
+---
+
 ## 三、后续更新
 
-1. **本地**：改代码后重新 `build` + `push`（同上）。
-2. **阿里云**：在 `~/qdhub-deploy` 执行（确保已有 `.env`，或先 `cp .env.aliyun .env`）：
+1. **本地**：改代码后重新 `build` + `push`（同上，用 `docker-compose`）。
+2. **阿里云 ECS**：在 `~/qdhub-deploy` 执行（确保已有 `.env`，或先 `cp .env.aliyun .env`），用 **`docker compose`**（插件）：
 
 ```bash
-docker-compose -f docker-compose.image.yml pull
-docker-compose -f docker-compose.image.yml up -d
+docker compose -f docker-compose.image.yml pull
+docker compose -f docker-compose.image.yml up -d
 ```
 
 无需拉取或上传任何源代码。

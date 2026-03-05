@@ -21,8 +21,8 @@ services:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 30s
 
   frontend:
     image: ${DOCKER_REGISTRY:-}qdhub-frontend:${IMAGE_TAG:-latest}
