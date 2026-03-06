@@ -1322,11 +1322,17 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 	}
 
 	var wfStatus *workflow.WorkflowStatus
+	instanceNotFound := false
 	if s.taskEngineAdapter != nil && !exec.WorkflowInstID.IsEmpty() {
 		wfStatus, err = s.taskEngineAdapter.GetInstanceStatus(ctx, exec.WorkflowInstID.String())
-		if err != nil && !shared.IsNotFoundError(err) {
-			// 非致命错误：交给调用方决定是否容忍
-			return nil, fmt.Errorf("failed to get workflow status: %w", err)
+		if err != nil {
+			if shared.IsNotFoundError(err) {
+				instanceNotFound = true
+				logrus.Warnf("[SyncExecution] Workflow instance %s not found when querying progress for execution %s", exec.WorkflowInstID, executionID)
+			} else {
+				// 非致命错误：交给调用方决定是否容忍
+				return nil, fmt.Errorf("failed to get workflow status: %w", err)
+			}
 		}
 		// Debug: Log workflow status details
 		if wfStatus != nil && wfStatus.TaskCount == 0 {
@@ -1474,6 +1480,42 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 				}
 			}
 		}
+	} else if instanceNotFound && (exec.Status == sync.ExecStatusRunning || exec.Status == sync.ExecStatusPending) {
+		// 工作流实例不存在：说明引擎侧已清理或历史数据缺失，避免执行永久停留在 running 状态
+		logrus.Infof("[SyncExecution] Auto-marking execution %s as failed because workflow instance %s was not found", executionID, exec.WorkflowInstID)
+
+		errMsg := "workflow instance not found during progress query"
+		exec.MarkFailed(errMsg)
+
+		if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
+			logrus.Warnf("[SyncExecution] Failed to persist auto-failed execution %s: %v", executionID, updateErr)
+		} else {
+			progress.Status = exec.Status
+			progress.FinishedAt = exec.FinishedAt
+			if exec.ErrorMessage != nil {
+				progress.ErrorMessage = exec.ErrorMessage
+			}
+
+			// 当执行被自动标记为终态时，也需要把计划从 running 拉回正常状态，避免长期显示“运行中”
+			plan, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
+			if planErr == nil && plan != nil && plan.Status == sync.PlanStatusRunning {
+				var nextRunAt *time.Time
+				if plan.CronExpression != nil && *plan.CronExpression != "" {
+					if s.planScheduler != nil {
+						nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+					}
+					if nextRunAt == nil {
+						nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+					}
+				}
+				plan.MarkCompleted(nextRunAt)
+				if updatePlanErr := s.syncPlanRepo.Update(plan); updatePlanErr != nil {
+					logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-fail: %v", updatePlanErr)
+				} else {
+					logrus.Infof("[SyncExecution] Plan %s marked completed after auto-fail (workflow instance missing)", exec.SyncPlanID)
+				}
+			}
+		}
 	}
 
 	return progress, nil
@@ -1497,6 +1539,67 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 	// DAO 已按 started_at DESC 排序，第一条即为最新执行
 	latest := execs[0]
 	return s.GetExecutionProgress(ctx, latest.ID)
+}
+
+// ReconcileRunningExecutions scans running executions and tries to sync their status
+// with the underlying workflow engine. Intended to be invoked on server startup
+// to clean up stale "running" executions after crashes or restarts.
+func (s *SyncApplicationServiceImpl) ReconcileRunningExecutions(ctx context.Context) error {
+	logrus.Info("[SyncExecution] Reconciling running sync executions on startup...")
+
+	plans, err := s.syncPlanRepo.GetByStatus(sync.PlanStatusRunning)
+	if err != nil {
+		return fmt.Errorf("failed to load running sync plans for reconcile: %w", err)
+	}
+
+	for _, plan := range plans {
+		execs, err := s.syncPlanRepo.GetExecutionsByPlan(plan.ID)
+		if err != nil {
+			logrus.Warnf("[SyncExecution] reconcile: failed to list executions for plan %s: %v", plan.ID, err)
+			continue
+		}
+		for _, exec := range execs {
+			if exec.Status != sync.ExecStatusRunning && exec.Status != sync.ExecStatusPending {
+				continue
+			}
+
+			// 极端情况：执行记录没有工作流实例 ID，只能直接标记为失败，避免永久占用“运行中”状态
+			if exec.WorkflowInstID.IsEmpty() {
+				logrus.Warnf("[SyncExecution] reconcile: execution %s has empty workflow instance id, marking as failed", exec.ID)
+				errMsg := "workflow instance id is empty during reconcile"
+				exec.MarkFailed(errMsg)
+				if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
+					logrus.Warnf("[SyncExecution] reconcile: failed to update execution %s: %v", exec.ID, updateErr)
+					continue
+				}
+
+				// 若计划仍标记为 running，则一并标记为 completed，避免前端长期显示运行中
+				if plan.Status == sync.PlanStatusRunning {
+					var nextRunAt *time.Time
+					if plan.CronExpression != nil && *plan.CronExpression != "" {
+						if s.planScheduler != nil {
+							nextRunAt = s.planScheduler.GetNextRunTime(plan.ID.String())
+						}
+						if nextRunAt == nil {
+							nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+						}
+					}
+					plan.MarkCompleted(nextRunAt)
+					if updatePlanErr := s.syncPlanRepo.Update(plan); updatePlanErr != nil {
+						logrus.Warnf("[SyncExecution] reconcile: failed to update plan %s after marking completed: %v", plan.ID, updatePlanErr)
+					}
+				}
+				continue
+			}
+
+			// 其余情况复用 GetExecutionProgress 的自动同步逻辑（含终态映射与 Plan.MarkCompleted）
+			if _, err := s.GetExecutionProgress(ctx, exec.ID); err != nil {
+				logrus.Warnf("[SyncExecution] reconcile: failed to sync execution %s progress: %v", exec.ID, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // RecordTaskResult 记录单次同步任务结果，供 DataSyncSuccess/DataSyncFailure Handler 调用。

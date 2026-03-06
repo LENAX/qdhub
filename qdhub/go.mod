@@ -3,7 +3,7 @@ module qdhub
 go 1.24.2
 
 require (
-	github.com/LENAX/task-engine v1.0.12
+	github.com/LENAX/task-engine v1.0.14
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/casbin/casbin/v2 v2.128.0
 	github.com/gin-contrib/authz v1.0.6
@@ -105,4 +105,4 @@ require (
 )
 
 // 本地调试 task-engine 时使用，提交前请删除或注释
-replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine
+// replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine

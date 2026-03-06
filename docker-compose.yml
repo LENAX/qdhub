@@ -1,7 +1,10 @@
 # QDHub - base compose (production or default)
 # Dev with hot reload: use docker-compose.override.yml (auto-merged when present)
+# 发布镜像：本地 build 后 push；阿里云上只 pull + up，无需源码（见 DEPLOY.md）
+# 版本号：与代码库 tag 一致，如 IMAGE_TAG=v0.1.0-beta.2
 services:
   backend:
+    image: ${DOCKER_REGISTRY:-}qdhub-backend:${IMAGE_TAG:-latest}
     build:
       context: ./qdhub
       dockerfile: Dockerfile
@@ -11,24 +14,23 @@ services:
       - QDHUB_SERVER_HOST=0.0.0.0
       - QDHUB_SERVER_PORT=8080
     volumes:
-      # Persist SQLite + DuckDB data
-      - qdhub_data:/app/data
+      # Persist SQLite + DuckDB data and logs
+      - ${QDHUB_DATA_DIR:-./qdhub/data}:/app/data
+      - ${QDHUB_LOG_DIR:-./qdhub/logs}:/app/logs
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 30s
 
   frontend:
+    image: ${DOCKER_REGISTRY:-}qdhub-frontend:${IMAGE_TAG:-latest}
     build:
       context: ./qdhub-frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:80"
+      - "3001:80"   # 宿主机 3001，由 ECS 上 Nginx 反代 80/443 → 3001
     depends_on:
       backend:
         condition: service_healthy
-
-volumes:
-  qdhub_data:

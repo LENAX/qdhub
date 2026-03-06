@@ -117,6 +117,9 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 	// 去重字段名
 	seenFields := make(map[string]bool)
 	primaryKeys := make([]string, 0)
+	hasTSCode := false
+	hasTradeTime := false
+	var tsCodeColName, tradeTimeColName string
 
 	for _, f := range fields {
 		fieldName := strings.TrimSpace(f.Name)
@@ -133,6 +136,16 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 			Comment:    f.Description,
 		}
 		schema.Columns = append(schema.Columns, col)
+
+		// 记录 ts_code / trade_time 是否存在（忽略大小写，但保留实际列名）
+		if strings.EqualFold(fieldName, "ts_code") {
+			hasTSCode = true
+			tsCodeColName = fieldName
+		}
+		if strings.EqualFold(fieldName, "trade_time") {
+			hasTradeTime = true
+			tradeTimeColName = fieldName
+		}
 
 		if f.IsPrimary {
 			primaryKeys = append(primaryKeys, fieldName)
@@ -165,7 +178,20 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 		Comment:    "记录创建时间",
 	})
 
-	schema.PrimaryKeys = primaryKeys
+	// 如果同时包含 ts_code 和 trade_time，则强制使用它们作为联合主键
+	if hasTSCode && hasTradeTime {
+		schema.PrimaryKeys = []string{tsCodeColName, tradeTimeColName}
+
+		// 确保联合主键列为 NOT NULL
+		for i, col := range schema.Columns {
+			if col.Name == tsCodeColName || col.Name == tradeTimeColName {
+				col.Nullable = false
+				schema.Columns[i] = col
+			}
+		}
+	} else {
+		schema.PrimaryKeys = primaryKeys
+	}
 
 	return schema
 }

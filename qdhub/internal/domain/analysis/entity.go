@@ -371,9 +371,16 @@ type LimitUpBySector struct {
 	StockCount      int            `json:"stock_count"`       // 板块涨停家数
 	LimitUpCount    int            `json:"limit_up_count"`    // 与 StockCount 一致，供前端统一使用
 	TotalStockCount int            `json:"total_stock_count"`
-	LimitUpRatio    float64        `json:"limit_up_ratio"`
+	LimitUpRatio    float64        `json:"limit_up_ratio"` // 保留字段，当前不再用于展示
 	AvgPctChg       float64        `json:"avg_pct_chg"`
 	Stocks          []LimitUpStock `json:"stocks"`
+
+	// 来自 limit_cpt_list 的附加字段，供前端展示板块连板信息等
+	Days     int    `json:"days,omitempty"`      // 上榜天数
+	UpStat   string `json:"up_stat,omitempty"`   // 连板高度描述
+	ConsNums int    `json:"cons_nums,omitempty"` // 连板家数
+	UpNums   int    `json:"up_nums,omitempty"`   // 涨停家数（与 StockCount 一致）
+	Rank     string `json:"rank,omitempty"`      // 板块热点排名
 }
 
 // ConceptRotationRank 题材轮动排名（单日）

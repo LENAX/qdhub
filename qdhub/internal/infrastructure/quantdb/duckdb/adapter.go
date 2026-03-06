@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,6 +30,11 @@ func NewAdapter(storagePath string) *Adapter {
 	}
 }
 
+// ensureDir creates the directory and any parent directories if they do not exist.
+func ensureDir(dir string) error {
+	return os.MkdirAll(dir, 0755)
+}
+
 // ==================== Connection Management ====================
 
 // Connect establishes connection to the DuckDB database.
@@ -36,7 +43,17 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	defer a.mu.Unlock()
 
 	if a.connected {
-		return nil
+		// already connected
+		if a.db != nil {
+			return nil
+		}
+	}
+
+	// 确保存储路径所在目录存在，否则 DuckDB 打开会报 "No such file or directory"
+	if dir := filepath.Dir(a.storagePath); dir != "." {
+		if err := ensureDir(dir); err != nil {
+			return fmt.Errorf("failed to create data dir %s: %w", dir, err)
+		}
 	}
 
 	db, err := sql.Open("duckdb", a.storagePath)
@@ -53,6 +70,19 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	a.db = db
 	a.connected = true
 	return nil
+}
+
+// ensureConnected makes sure the underlying database connection is available.
+// If the adapter is not connected or the *sql.DB is nil (e.g. after Close),
+// it will attempt to reconnect by calling Connect.
+func (a *Adapter) ensureConnected(ctx context.Context) error {
+	a.mu.RLock()
+	connected := a.connected && a.db != nil
+	a.mu.RUnlock()
+	if connected {
+		return nil
+	}
+	return a.Connect(ctx)
 }
 
 // Close closes the database connection.
@@ -72,14 +102,18 @@ func (a *Adapter) Close() error {
 
 // Ping tests the database connection.
 func (a *Adapter) Ping(ctx context.Context) error {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	if err := a.ensureConnected(ctx); err != nil {
+		return err
+	}
 
-	if !a.connected || a.db == nil {
+	a.mu.RLock()
+	db := a.db
+	a.mu.RUnlock()
+	if db == nil {
 		return fmt.Errorf("database not connected")
 	}
 
-	return a.db.PingContext(ctx)
+	return db.PingContext(ctx)
 }
 
 // ==================== Table Operations ====================
@@ -88,6 +122,10 @@ func (a *Adapter) Ping(ctx context.Context) error {
 func (a *Adapter) CreateTable(ctx context.Context, schema *datastore.TableSchema) error {
 	if schema == nil {
 		return fmt.Errorf("schema cannot be nil")
+	}
+
+	if err := a.ensureConnected(ctx); err != nil {
+		return err
 	}
 
 	ddl := a.generateDDL(schema)
@@ -110,6 +148,10 @@ func (a *Adapter) CreateTable(ctx context.Context, schema *datastore.TableSchema
 
 // DropTable drops a table by name.
 func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
+	if err := a.ensureConnected(ctx); err != nil {
+		return err
+	}
+
 	ddl := fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdentifier(tableName))
 	_, err := a.db.ExecContext(ctx, ddl)
 	if err != nil {
@@ -120,6 +162,10 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 
 // TableExists checks if a table exists.
 func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return false, err
+	}
+
 	query := `SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?`
 	var count int
 	err := a.db.QueryRowContext(ctx, query, tableName).Scan(&count)
@@ -131,6 +177,10 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 
 // ListTables returns table names in the main schema.
 func (a *Adapter) ListTables(ctx context.Context) ([]string, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
 	query := `SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name`
 	rows, err := a.db.QueryContext(ctx, query)
 	if err != nil {
@@ -154,6 +204,10 @@ func (a *Adapter) ListTables(ctx context.Context) ([]string, error) {
 
 // GetTableStats returns statistics for a table.
 func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datastore.TableStats, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
 	// Get row count
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tableName))
 	var rowCount int64
@@ -265,6 +319,10 @@ func (a *Adapter) getTableColumns(ctx context.Context, tableName string) (map[st
 func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[string]any) (int64, error) {
 	if len(data) == 0 {
 		return 0, nil
+	}
+
+	if err := a.ensureConnected(ctx); err != nil {
+		return 0, err
 	}
 
 	// Get actual table columns to filter out unknown columns from data
@@ -398,13 +456,13 @@ func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data
 		for i, col := range columns {
 			args[i] = row[col]
 		}
-		result, err := a.db.ExecContext(ctx, insertSQL, args...)
-		if err != nil {
-			if isConflictError(err) {
+		result, execErr := a.db.ExecContext(ctx, insertSQL, args...)
+		if execErr != nil {
+			if isConflictError(execErr) {
 				// 已用 OR REPLACE 仍冲突则跳过
 				continue
 			}
-			return totalInserted, fmt.Errorf("failed to insert row: %w", err)
+			return totalInserted, fmt.Errorf("failed to insert row: %w", execErr)
 		}
 		affected, _ := result.RowsAffected()
 		totalInserted += affected
@@ -434,6 +492,10 @@ func (a *Adapter) BulkInsertWithBatchID(ctx context.Context, tableName string, d
 
 // DeleteBySyncBatchID deletes all rows with the given sync batch ID.
 func (a *Adapter) DeleteBySyncBatchID(ctx context.Context, tableName string, syncBatchID string) (int64, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return 0, err
+	}
+
 	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", quoteIdentifier(tableName), quoteIdentifier("sync_batch_id"))
 	result, err := a.db.ExecContext(ctx, deleteSQL, syncBatchID)
 	if err != nil {
@@ -444,6 +506,10 @@ func (a *Adapter) DeleteBySyncBatchID(ctx context.Context, tableName string, syn
 
 // Query executes a SQL query and returns the results.
 func (a *Adapter) Query(ctx context.Context, sqlQuery string, args ...any) ([]map[string]any, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
 	rows, err := a.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
@@ -483,6 +549,10 @@ func (a *Adapter) Query(ctx context.Context, sqlQuery string, args ...any) ([]ma
 
 // Execute executes a SQL statement and returns affected rows.
 func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int64, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return 0, err
+	}
+
 	result, err := a.db.ExecContext(ctx, sqlStmt, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute statement: %w", err)
@@ -494,6 +564,10 @@ func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int
 
 // BeginTx begins a transaction.
 func (a *Adapter) BeginTx(ctx context.Context) (datastore.QuantDBTx, error) {
+	if err := a.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)

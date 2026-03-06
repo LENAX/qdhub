@@ -109,19 +109,36 @@ func CasbinRBACMiddleware(enforcer *casbin.Enforcer) gin.HandlerFunc {
 }
 
 // extractResourceAndAction extracts resource and action from the request.
+// 使用 gin 的 FullPath 以避免由于多余斜杠或前缀差异导致解析失败。
 func extractResourceAndAction(c *gin.Context) (string, string) {
-	path := c.Request.URL.Path
+	// 优先使用注册路由模式，例如 /api/v1/sync-plans/:id/progress-stream
+	path := c.FullPath()
+	if path == "" {
+		// 回退到实际请求路径
+		path = c.Request.URL.Path
+	}
 	method := c.Request.Method
 
-	// Remove /api/v1 prefix
-	path = strings.TrimPrefix(path, "/api/v1")
-	path = strings.TrimPrefix(path, "/")
+	// 统一去掉 /api/v1 前缀和多余的前后斜杠
+	if strings.HasPrefix(path, "/api/v1/") {
+		path = path[len("/api/v1/"):]
+	} else {
+		path = strings.TrimPrefix(path, "/api/v1")
+	}
+	path = strings.Trim(path, "/")
+
+	if path == "" {
+		return "", ""
+	}
 
 	// Extract resource from path
 	// Examples:
-	// /sync-plans -> sync-plans
-	// /executions/:id/cancel -> executions (then mapped to sync-plans)
+	// sync-plans -> sync-plans
+	// executions/:id/cancel -> executions (then mapped to sync-plans)
 	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return "", ""
+	}
 	resource := parts[0]
 
 	// executions 属于同步计划执行，复用 sync-plans 的权限策略

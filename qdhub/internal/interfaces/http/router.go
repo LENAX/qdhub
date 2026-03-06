@@ -20,11 +20,12 @@ import (
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Host         string
-	Port         int
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	Mode         string // debug, release, test
+	Host          string
+	Port          int
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	Mode          string // debug, release, test
+	EnableSwagger bool   // 生产环境建议设为 false，关闭 /swagger、/docs
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -46,12 +47,12 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler       *AuthHandler
-	metadataHandler   *MetadataHandler
-	dataStoreHandler  *DataStoreHandler
-	syncHandler       *SyncHandler
-	workflowHandler   *WorkflowHandler
-	analysisHandler   *AnalysisHandler
+	authHandler      *AuthHandler
+	metadataHandler  *MetadataHandler
+	dataStoreHandler *DataStoreHandler
+	syncHandler      *SyncHandler
+	workflowHandler  *WorkflowHandler
+	analysisHandler  *AnalysisHandler
 
 	// Auth components
 	jwtManager *authinfra.JWTManager
@@ -82,6 +83,8 @@ func NewServer(
 
 	// Create gin engine
 	engine := gin.New()
+	// 允许去重连续斜杠，例如 /api/v1//sync-plans -> /api/v1/sync-plans
+	engine.RemoveExtraSlash = true
 
 	// Create handlers
 	server := &Server{
@@ -121,22 +124,28 @@ func (s *Server) setupRoutes() {
 
 	// Health check
 	s.engine.GET("/health", s.healthCheck)
-	// 临时 debug：根路径也注册，便于 e2e 访问（子进程可能未正确加载 /api/v1 路由）
-	s.engine.GET("/debug/database", s.debugDatabase)
+	// Debug DB 接口仅在非 release 模式下启用，避免生产环境泄露 DSN
+	if s.config.Mode != gin.ReleaseMode {
+		// 临时 debug：根路径也注册，便于 e2e 访问（子进程可能未正确加载 /api/v1 路由）
+		s.engine.GET("/debug/database", s.debugDatabase)
+	}
 
-	// Swagger documentation
-	s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	// Alias for /docs -> /swagger/index.html
-	s.engine.GET("/docs", func(c *gin.Context) {
-		c.Redirect(302, "/swagger/index.html")
-	})
-	s.engine.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger documentation（生产环境可通过 server.enable_swagger=false 或 QDHUB_SERVER_ENABLE_SWAGGER=false 关闭）
+	if s.config.EnableSwagger {
+		s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+		s.engine.GET("/docs", func(c *gin.Context) {
+			c.Redirect(302, "/swagger/index.html")
+		})
+		s.engine.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	// API v1 routes
 	v1 := s.engine.Group("/api/v1")
 	{
-		// 临时 debug：返回当前连接的 DB DSN，用于 e2e 验证是否连错库（始终注册，未设置时返回空）
-		v1.GET("/debug/database", s.debugDatabase)
+		// 临时 debug：返回当前连接的 DB DSN，用于 e2e 验证是否连错库（仅在非 release 模式下注册）
+		if s.config.Mode != gin.ReleaseMode {
+			v1.GET("/debug/database", s.debugDatabase)
+		}
 		// Auth routes (public)
 		s.authHandler.RegisterRoutes(v1)
 
@@ -162,9 +171,6 @@ func (s *Server) setupRoutes() {
 // healthCheck handles GET /health. In debug mode, includes database_dsn for e2e to verify which DB the server uses.
 func (s *Server) healthCheck(c *gin.Context) {
 	out := gin.H{"status": "healthy", "version": "1.0.0"}
-	if s.debugDBDSN != "" {
-		out["database_dsn"] = s.debugDBDSN
-	}
 	c.JSON(http.StatusOK, out)
 }
 

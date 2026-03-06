@@ -1,6 +1,5 @@
 # 本仓库只跟踪 qdhub/ 目录（后端）；前端用独立 repo 管理
 /doc
-/README.md
 /scripts
 /qdhub-frontend
 .vscode

@@ -1,0 +1,31 @@
+# 仅用镜像部署，不包含 build，无需源码
+# 用法：在阿里云上放本文件 + .env.aliyun，执行 pull + up；IMAGE_TAG 与构建时一致（如 v0.1.0-beta.2）
+services:
+  backend:
+    image: ${DOCKER_REGISTRY:?err}qdhub-backend:${IMAGE_TAG:-latest}
+    ports:
+      - "8080:8080"
+    environment:
+      - QDHUB_SERVER_HOST=0.0.0.0
+      - QDHUB_SERVER_PORT=8080
+      - QDHUB_SERVER_ENABLE_SWAGGER=${QDHUB_SERVER_ENABLE_SWAGGER:-false}
+      - QDHUB_AUTH_ADMIN_PASSWORD=${QDHUB_AUTH_ADMIN_PASSWORD}
+    volumes:
+      - ${QDHUB_DATA_DIR:-/mnt/vdb/.qdhub/data}:/app/data
+      - ${QDHUB_LOG_DIR:-/mnt/vdb/.qdhub/logs}:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    image: ${DOCKER_REGISTRY:?err}qdhub-frontend:${IMAGE_TAG:-latest}
+    ports:
+      - "3001:80"   # 宿主机 3001；ECS Nginx 监听 80/443 并反代到 127.0.0.1:3001
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

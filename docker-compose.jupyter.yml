@@ -1,0 +1,22 @@
+# Jupyter Lab 研究环境（与主站 docker-compose 独立）
+# 挂载服务器上的 /mnt/data、/mnt/vdb/qdhub，便于做题材/情绪/龙头等课题
+# 启动：docker compose -f docker-compose.jupyter.yml up -d
+# 查看 token：docker compose -f docker-compose.jupyter.yml logs jupyter-lab
+
+services:
+  jupyter-lab:
+    image: ${DOCKER_REGISTRY:-}qdhub-jupyter-lab:${IMAGE_TAG:-latest}
+    build:
+      context: ./research-env
+      dockerfile: Dockerfile
+    container_name: qdhub-jupyter-lab
+    ports:
+      - "${JUPYTER_PORT:-8888}:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      # 无 token 时用 ?token=xxx 访问；生产建议设 JUPYTER_TOKEN 或挂载 jupyter_server_config
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-}
+    volumes:
+      - "${JUPYTER_MOUNT_DATA:-/mnt/data}:/mnt/data:ro"
+      - "${JUPYTER_MOUNT_QDHUB:-/mnt/vdb/qdhub}:/mnt/vdb/qdhub:rw"
+    restart: unless-stopped
