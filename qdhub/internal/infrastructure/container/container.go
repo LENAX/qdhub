@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -439,117 +441,199 @@ func (c *Container) initDatabase() error {
 	return nil
 }
 
-// runMigrations runs database migrations in order.
-// Order: 001 -> 002_auth -> 002_seed_mapping_rules (SQLite only) -> 003 -> 004 (SQLite only) -> 005 -> 006_seed -> 007 -> 008_seed_guest.
+// runMigrations 自动扫描并按顺序执行所有 *.up.sql 迁移文件。
+// 行为与 CLI `qdhub migrate up` 保持一致：
+//   - 按文件名排序应用（升序）
+//   - 按数据库驱动过滤 driver-specific 迁移（*.sqlite.* / *.postgres.* / *.mysql.*）
+//   - 对 "already exists"/"duplicate column" 等错误视为已应用，安全跳过
+// 同时在所有迁移执行完后，应用 admin/guest 密码覆盖（若配置了环境变量）。
 func (c *Container) runMigrations() error {
 	if c.config.MigrationPath == "" {
 		return nil
 	}
 
-	// 001_init_schema
-	migrationSQL, err := os.ReadFile(c.config.MigrationPath)
+	// 迁移文件所在目录：默认使用 MigrationPath 所在目录，未设置则退回 ./migrations
+	migrationsDir := filepath.Dir(c.config.MigrationPath)
+	if migrationsDir == "" || migrationsDir == "." {
+		migrationsDir = "./migrations"
+	}
+
+	driver := c.config.DBDriver
+	if driver == "" {
+		driver = "sqlite"
+	}
+
+	// 确保 schema_migrations 表存在（用于记录迁移执行记录）
+	if err := c.ensureSchemaMigrationsTable(driver); err != nil {
+		return fmt.Errorf("failed to ensure schema_migrations table: %w", err)
+	}
+
+	// 扫描所有 *.up.sql
+	upFiles, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
+		return fmt.Errorf("failed to find migration files: %w", err)
 	}
-	if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
-		return fmt.Errorf("failed to run migration: %w", err)
+	upFiles = filterMigrationsByDriver(upFiles, driver)
+
+	if len(upFiles) == 0 {
+		logrus.Info("No migration files found")
+		return nil
 	}
 
-	// 002_auth_schema (driver-specific)
-	if err := c.runAuthMigration(); err != nil {
-		return fmt.Errorf("failed to run auth migration: %w", err)
-	}
+	// 按文件名排序（升序），保证执行顺序确定
+	sort.Strings(upFiles)
 
-	// 002_seed_mapping_rules (SQLite: INSERT OR IGNORE)
-	if c.config.DBDriver == "sqlite" {
-		if err := c.runMigrationFile("./migrations/002_seed_mapping_rules.up.sql"); err != nil {
-			return fmt.Errorf("failed to run 002_seed_mapping_rules: %w", err)
+	appliedCount := 0
+	for _, file := range upFiles {
+		version := migrationVersionFromFile(file)
+
+		// 若 schema_migrations 已记录，则直接跳过
+		applied, err := c.isMigrationApplied(version)
+		if err != nil {
+			return fmt.Errorf("failed to check migration status for %s: %w", version, err)
 		}
-	} else {
-		logrus.Info("Skipping 002_seed_mapping_rules (SQLite only)")
-	}
-
-	// 003_sync_plan_migration
-	if err := c.runMigrationFile("./migrations/003_sync_plan_migration.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 003_sync_plan_migration: %w", err)
-	}
-
-	// 004_api_sync_strategy (SQLite: INSERT OR REPLACE, randomblob)
-	if c.config.DBDriver == "sqlite" {
-		if err := c.runMigrationFile("./migrations/004_api_sync_strategy.up.sql"); err != nil {
-			return fmt.Errorf("failed to run 004_api_sync_strategy: %w", err)
+		if applied {
+			logrus.Infof("Skip (recorded in schema_migrations): %s", version)
+			continue
 		}
-	} else {
-		logrus.Info("Skipping 004_api_sync_strategy (SQLite only)")
+
+		migrationSQL, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("failed to read migration %s: %w", file, err)
+		}
+
+		logrus.Infof("Applying migration (container): %s", filepath.Base(file))
+
+		if _, err := c.DB.Exec(string(migrationSQL)); err != nil {
+			msg := err.Error()
+			// 与 CLI 行为保持一致：表已存在 / 列已存在时视为已应用；
+			// 同时为兼容老库，这里会在 schema_migrations 中补上一条记录。
+			if strings.Contains(msg, "already exists") || strings.Contains(msg, "Already exists") ||
+				strings.Contains(msg, "duplicate column") || strings.Contains(msg, "Duplicate column") {
+				logrus.Infof("  Skip (already applied in DB, backfilling schema_migrations): %s", version)
+				if err := c.recordMigration(version); err != nil {
+					return fmt.Errorf("failed to record existing migration %s: %w", version, err)
+				}
+				continue
+			}
+			return fmt.Errorf("failed to apply migration %s: %w", file, err)
+		}
+
+		if err := c.recordMigration(version); err != nil {
+			return fmt.Errorf("failed to record migration %s: %w", version, err)
+		}
+
+		appliedCount++
+		logrus.Infof("  Applied successfully: %s", version)
 	}
 
-	// 005_sync_plan_default_params (idempotent: ignore "duplicate column" on re-run)
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/005_sync_plan_default_params.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 005_sync_plan_default_params: %w", err)
-	}
-
-	// 006_seed_default_admin (driver-specific)
-	if err := c.runDefaultAdminSeed(); err != nil {
-		return fmt.Errorf("failed to seed default admin: %w", err)
-	}
-	// 可选：用配置的强密码覆盖默认 admin 密码（生产环境建议设置 QDHUB_AUTH_ADMIN_PASSWORD）
+	// 迁移之后应用 admin/guest 密码覆盖（若配置了强密码）
 	if err := c.applyAdminPasswordOverride(); err != nil {
 		return fmt.Errorf("failed to apply admin password override: %w", err)
 	}
-
-	// 007_daily_adj_factor_trade_date_expand
-	if err := c.runMigrationFile("./migrations/007_daily_adj_factor_trade_date_expand.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 007_daily_adj_factor_trade_date_expand: %w", err)
-	}
-
-	// 009_add_api_metadata_param_dependencies (idempotent: 001 may already have the column)
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/009_add_api_metadata_param_dependencies.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 009_add_api_metadata_param_dependencies: %w", err)
-	}
-
-	// 010_sync_plan_incremental_mode (idempotent)
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/010_sync_plan_incremental_mode.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 010_sync_plan_incremental_mode: %w", err)
-	}
-
-	// 011_data_source_common_data_apis (idempotent)
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/011_data_source_common_data_apis.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 011_data_source_common_data_apis: %w", err)
-	}
-
-	// 012_sync_execution_detail
-	if err := c.runMigrationFile("./migrations/012_sync_execution_detail.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 012_sync_execution_detail: %w", err)
-	}
-	// 013_sync_execution_workflow_error_message
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/013_sync_execution_workflow_error_message.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 013_sync_execution_workflow_error_message: %w", err)
-	}
-	// 014_daily_basic_sync_strategy_fix：daily_basic 按 trade_date 逐日拉取以覆盖日期范围
-	if err := c.runMigrationFile("./migrations/014_daily_basic_sync_strategy_fix.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 014_daily_basic_sync_strategy_fix: %w", err)
-	}
-	// 015_sync_plan_incremental_start_date_source：增量模式下可选“数据最新日期”来源（API+列）
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/015_sync_plan_incremental_start_date_source.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 015_sync_plan_incremental_start_date_source: %w", err)
-	}
-
-	// 016_api_sync_strategy_fixed_params：为 API Sync Strategy 增加 fixed_params/fixed_param_keys
-	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/016_api_sync_strategy_fixed_params.up.sql"); err != nil {
-		return fmt.Errorf("failed to run 016_api_sync_strategy_fixed_params: %w", err)
-	}
-
-	// 008_seed_guest_user (driver-specific)
-	if err := c.runGuestSeed(); err != nil {
-		return fmt.Errorf("failed to seed guest user: %w", err)
-	}
-	// 可选：用配置的强密码覆盖默认 guest 密码（生产环境建议设置 QDHUB_AUTH_GUEST_PASSWORD）
 	if err := c.applyGuestPasswordOverride(); err != nil {
 		return fmt.Errorf("failed to apply guest password override: %w", err)
 	}
 
+	if appliedCount == 0 {
+		logrus.Info("All migrations already applied")
+	} else {
+		logrus.Infof("Applied %d migration(s) (container startup)", appliedCount)
+	}
+
 	logrus.Info("Database migrations applied successfully")
 	return nil
+}
+
+// ensureSchemaMigrationsTable 创建 schema_migrations 表（若不存在）。
+func (c *Container) ensureSchemaMigrationsTable(driver string) error {
+	var sql string
+	switch driver {
+	case "postgres", "postgresql":
+		sql = `CREATE TABLE IF NOT EXISTS schema_migrations (
+	version VARCHAR(255) PRIMARY KEY,
+	applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`
+	default: // sqlite, mysql 等
+		sql = `CREATE TABLE IF NOT EXISTS schema_migrations (
+	version TEXT PRIMARY KEY,
+	applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`
+	}
+	_, err := c.DB.Exec(sql)
+	return err
+}
+
+// migrationVersionFromFile 从迁移文件名推导 version（与 scripts/migrate.sh 一致）。
+// 例如：001_init_schema.up.sql -> 001_init_schema
+//       004_auth_schema.sqlite.up.sql -> 004_auth_schema.sqlite
+func migrationVersionFromFile(path string) string {
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, ".up.sql")
+}
+
+// isMigrationApplied 检查 schema_migrations 中是否已有记录。
+func (c *Container) isMigrationApplied(version string) (bool, error) {
+	var count int
+	// 这里版本号来源于文件名，输入可控，直接拼接避免占位符差异问题。
+	query := fmt.Sprintf("SELECT COUNT(*) FROM schema_migrations WHERE version = '%s';", version)
+	if err := c.DB.Get(&count, query); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// recordMigration 在 schema_migrations 中记录一条迁移执行记录。
+// 若已存在（UNIQUE 冲突），则安全忽略。
+func (c *Container) recordMigration(version string) error {
+	sql := fmt.Sprintf("INSERT INTO schema_migrations (version) VALUES ('%s');", version)
+	if _, err := c.DB.Exec(sql); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "UNIQUE constraint failed") ||
+			strings.Contains(msg, "duplicate key") ||
+			strings.Contains(msg, "Duplicate entry") {
+			// 已经有记录，忽略
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// filterMigrationsByDriver 根据数据库驱动过滤迁移文件。
+// 行为与 cmd/migrate.go 中的逻辑保持一致：
+//   - *.sqlite.* 仅在 driver=sqlite 时执行
+//   - *.postgres.* 仅在 driver=postgres 时执行
+//   - *.mysql.* 仅在 driver=mysql 时执行
+//   - 其他不带 driver 后缀的迁移对所有 driver 生效
+func filterMigrationsByDriver(files []string, driver string) []string {
+	if driver == "" {
+		driver = "sqlite"
+	}
+	var out []string
+	for _, f := range files {
+		base := filepath.Base(f)
+		if strings.Contains(base, ".sqlite.") {
+			if driver == "sqlite" {
+				out = append(out, f)
+			}
+			continue
+		}
+		if strings.Contains(base, ".postgres.") {
+			if driver == "postgres" {
+				out = append(out, f)
+			}
+			continue
+		}
+		if strings.Contains(base, ".mysql.") {
+			if driver == "mysql" {
+				out = append(out, f)
+			}
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // runMigrationFile reads and executes a single migration file.

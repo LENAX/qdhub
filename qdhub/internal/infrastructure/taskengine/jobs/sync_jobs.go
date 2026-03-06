@@ -24,6 +24,8 @@ import (
 	"qdhub/internal/infrastructure/datasource"
 )
 
+const maxParamLogLen = 200
+
 // ==================== 数据同步 Job Functions ====================
 
 // SyncAPIDataJob 同步单个 API 的数据
@@ -96,7 +98,6 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 处理上游参数映射
 	upstreamParams := resolveUpstreamParams(tc)
-	const maxParamLogLen = 200
 	for paramName, paramValue := range upstreamParams {
 		if _, exists := params[paramName]; !exists {
 			params[paramName] = paramValue
@@ -179,6 +180,9 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			params["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
 		}
 	}
+
+	// 打印最终请求参数（含上游与固定参数合并后的结果）
+	logrus.Printf("🔎 [SyncAPIData] Final request params for %s/%s: %s", dataSourceName, apiName, formatParamsForLog(params, maxParamLogLen))
 
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
@@ -395,6 +399,8 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
+	logrus.Printf("🔍 [SyncMultiParamAPIData] API=%s, fixedParams=%s", apiName, formatParamsForLog(fixedParams, maxParamLogLen))
+
 	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
 	if !ok {
 		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
@@ -418,6 +424,8 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			params[k] = v
 		}
 		params[iterateParam] = val
+
+		logrus.Printf("🔎 [SyncMultiParamAPIData] Request %s/%s %s=%s, params=%s", dataSourceName, apiName, iterateParam, val, formatParamsForLog(params, maxParamLogLen))
 
 		result, err := client.Query(ctx, apiName, params)
 		if err != nil {
@@ -1515,4 +1523,24 @@ func filterDatesByRange(dates []string, startDate, endDate string) []string {
 	}
 
 	return filtered
+}
+
+// formatParamsForLog 将参数 map 序列化为 JSON 并截断，避免日志过长。
+func formatParamsForLog(params map[string]interface{}, maxLen int) string {
+	if params == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		s := fmt.Sprintf("%v", params)
+		if len(s) > maxLen {
+			return s[:maxLen] + "..."
+		}
+		return s
+	}
+	s := string(b)
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }

@@ -97,22 +97,82 @@ func (p *RepositoryStrategyProvider) GetStrategies(ctx context.Context, dataSour
 	result := make(map[string]*APISyncStrategy, len(entities))
 	for _, entity := range entities {
 		strategy := convertEntityToStrategy(entity)
-		log.Printf("📋 [RepositoryStrategyProvider] 加载策略: API=%s, PreferredParam=%s, SupportDateRange=%v", entity.APIName, strategy.PreferredParam, strategy.SupportDateRange)
+		var iterateKeys []string
+		for k := range strategy.IterateParams {
+			iterateKeys = append(iterateKeys, k)
+		}
+		log.Printf("📋 [RepositoryStrategyProvider] 加载策略: API=%s, PreferredParam=%s, SupportDateRange=%v, RequiredParams=%v, Dependencies=%v, APIParamName=%s, FixedParams=%v, FixedParamKeys=%v, IterateParamsKeys=%v",
+			entity.APIName,
+			strategy.PreferredParam,
+			strategy.SupportDateRange,
+			strategy.RequiredParams,
+			strategy.Dependencies,
+			strategy.APIParamName,
+			strategy.FixedParams,
+			strategy.FixedParamKeys,
+			iterateKeys,
+		)
 		result[entity.APIName] = strategy
 	}
 	return result, nil
 }
 
 // convertEntityToStrategy 将领域实体转换为工作流 DTO
+// 注意：DB 中目前只存储了基础字段（preferred_param/support_date_range/required_params/dependencies/fixed_params），
+// 新增的 APIParamName / IterateParams 等增强能力通过代码内置默认策略提供。
+// 因此这里需要将「数据库策略」与「默认策略」进行合并：
+//   - 优先使用数据库中的 PreferredParam / SupportDateRange（用户可通过 API 自定义）
+//   - RequiredParams / Dependencies 取并集（避免丢失代码中新增加的依赖/必填项）
+//   - APIParamName / IterateParams 始终来自默认策略（DB 目前没有对应字段）
 func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy {
+	if entity == nil {
+		return nil
+	}
+
+	// 默认策略（代码内置，包含最新的 APIParamName / IterateParams 等信息）
+	base := GetAPISyncStrategy(entity.APIName)
+
+	// 合并 RequiredParams（并集，保持配置与默认的兼容性）
+	required := mergeStringSlicesUnique(entity.RequiredParams, base.RequiredParams)
+
+	// 合并 Dependencies（并集，避免丢失新增依赖，如 FetchIndexBasic）
+	deps := mergeStringSlicesUnique(entity.Dependencies, base.Dependencies)
+
 	return &APISyncStrategy{
 		PreferredParam:   string(entity.PreferredParam),
 		SupportDateRange: entity.SupportDateRange,
-		RequiredParams:   entity.RequiredParams,
-		Dependencies:     entity.Dependencies,
+		RequiredParams:   required,
+		Dependencies:     deps,
+		APIParamName:     base.APIParamName,
 		FixedParams:      entity.FixedParams,
 		FixedParamKeys:   entity.FixedParamKeys,
+		IterateParams:    base.IterateParams,
 	}
+}
+
+// mergeStringSlicesUnique 合并两个 string 切片并去重（保持先后顺序稳定）
+func mergeStringSlicesUnique(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]string, 0, len(a)+len(b))
+
+	for _, v := range a {
+		if !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+	for _, v := range b {
+		if !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+
+	return result
 }
 
 // defaultAPISyncStrategies 默认的 Tushare API 同步策略配置（作为回退）
@@ -626,6 +686,16 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// 优先使用 APIConfigs（高级配置模式）
 	if len(params.APIConfigs) > 0 {
+		// 加载策略（如果有策略提供者），使 FixedParams/FixedParamKeys 在高级配置模式中也能生效
+		ctx := context.Background()
+		var apiNames []string
+		for _, config := range params.APIConfigs {
+			apiNames = append(apiNames, config.APIName)
+		}
+		if err := b.loadStrategies(ctx, apiNames); err != nil {
+			log.Printf("⚠️ [BuildWorkflow] 加载策略失败（APIConfigs），将使用默认策略: %v", err)
+		}
+
 		for _, config := range params.APIConfigs {
 			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
 			if err != nil {
@@ -792,9 +862,28 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			case "ts_code":
 				// 按代码迭代的 API：使用 template 模式生成子任务
 				// stk_mins 的 freq 在 GenerateDataSyncSubTasks/SyncAPIData 中默认注入为 1min，故不跳过
-				// 有 APIParamName 的 API（如 index_weight）也不跳过
-				if len(strategy.RequiredParams) > 0 && apiName != "stk_mins" && strategy.APIParamName == "" {
-					continue
+				// 对于 RequiredParams，仅当存在我们无法自动提供的参数时才跳过：
+				//   - 若 RequiredParam 与 APIParamName 相同（如 index_weight 的 index_code），视为由模板参数提供；
+				//   - 若 APIParamName 为空且 RequiredParam 为 "ts_code"，视为由模板参数提供；
+				//   - 其他 RequiredParam 会导致跳过（需要用户通过高级配置显式指定）。
+				if apiName != "stk_mins" {
+					skippable := false
+					for _, reqParam := range strategy.RequiredParams {
+						// 由模板参数提供的字段：ts_code 或 APIParamName 本身
+						if reqParam == "ts_code" && (strategy.APIParamName == "" || strategy.APIParamName == "ts_code") {
+							continue
+						}
+						if strategy.APIParamName != "" && reqParam == strategy.APIParamName {
+							continue
+						}
+						// 其他必填参数当前无法自动提供，需要用户在 APIConfigs 中配置，跳过简单模式
+						skippable = true
+						break
+					}
+					if skippable {
+						log.Printf("⏭️ [BuildWorkflow] 跳过 ts_code 模式 API（存在无法自动提供的必填参数）: API=%s, RequiredParams=%v, APIParamName=%s", apiName, strategy.RequiredParams, strategy.APIParamName)
+						continue
+					}
 				}
 
 				// 确定上游任务和参数键
@@ -953,12 +1042,20 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 	// 构造请求参数：
 	// - 默认包含全局日期范围（start_date/end_date），使支持日期区间的 API 能按计划时间段执行
 	// - 若配置了 ExtraParams，则在其基础上叠加日期范围，调用方可通过 ExtraParams 显式覆盖同名字段
+	// - 再应用 APISyncStrategy.FixedParams/FixedParamKeys，保证策略中的固定参数生效
 	params := map[string]interface{}{}
 	if dateTimeParams != nil {
 		params = mergeParams(params, dateTimeParams)
 	}
 	if config.ExtraParams != nil {
 		params = mergeParams(params, config.ExtraParams)
+	}
+
+	strategy := b.getStrategy(config.APIName)
+	if len(strategy.FixedParams) > 0 || len(strategy.FixedParamKeys) > 0 {
+		params = mergeParamsWithStrategy(strategy, params, nil)
+		log.Printf("🔧 [buildAPITask] 应用策略 FixedParams: API=%s, FixedParams=%v, FixedParamKeys=%v, mergedParams=%v",
+			config.APIName, strategy.FixedParams, strategy.FixedParamKeys, params)
 	}
 
 	// 特殊处理：Tushare/forecast 要求 ann_date 和 ts_code 至少填一个参数。
@@ -1081,6 +1178,20 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 		return nil, ErrEmptyTargetDBPath
 	}
 	// startDate/endDate 可为空：仅同步无需日期参数的 API 时由调用方传空即可
+
+	// 预加载策略缓存（如果有提供者），以便在构建任务时应用 FixedParams 等
+	var apiNames []string
+	for _, level := range graph.Levels {
+		for _, apiName := range level {
+			apiNames = append(apiNames, apiName)
+		}
+	}
+	if len(apiNames) > 0 {
+		ctx := context.Background()
+		if err := b.loadStrategies(ctx, apiNames); err != nil {
+			log.Printf("⚠️ [BuildFromExecutionGraph] 加载策略失败，将使用默认策略: %v", err)
+		}
+	}
 
 	var tasks []*task.Task
 	var depNames []string
@@ -1248,8 +1359,22 @@ func (b *BatchDataSyncWorkflowBuilder) buildDirectTask(
 		jobParams["upstream_params"] = upstreamParams
 	}
 
-	// 添加日期参数
-	jobParams["params"] = dateTimeParams
+	// 添加日期参数并应用 APISyncStrategy.FixedParams（若存在）
+	params := map[string]interface{}{}
+	if dateTimeParams != nil {
+		params = mergeParams(params, dateTimeParams)
+	}
+
+	strategy := b.getStrategy(config.APIName)
+	if len(strategy.FixedParams) > 0 || len(strategy.FixedParamKeys) > 0 {
+		params = mergeParamsWithStrategy(strategy, params, nil)
+		log.Printf("🔧 [buildDirectTask] 应用策略 FixedParams: API=%s, FixedParams=%v, FixedParamKeys=%v, mergedParams=%v",
+			config.APIName, strategy.FixedParams, strategy.FixedParamKeys, params)
+	}
+
+	if len(params) > 0 {
+		jobParams["params"] = params
+	}
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
 		WithJobFunction("SyncAPIData", jobParams).
