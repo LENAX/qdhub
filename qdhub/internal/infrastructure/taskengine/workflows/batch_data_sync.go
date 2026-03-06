@@ -41,6 +41,16 @@ type APISyncStrategy struct {
 	RequiredParams []string
 	// Dependencies 依赖的上游任务
 	Dependencies []string
+	// APIParamName 当 API 实际参数名与迭代键不同时使用
+	// 例如 index_weight 通过 ts_code 列表迭代，但 API 参数名为 index_code
+	APIParamName string
+	// FixedParams 为该 API 请求固定追加的参数（例如 fields）
+	FixedParams map[string]interface{}
+	// FixedParamKeys 中的 key 将始终以 FixedParams 为准，上游调用方即便传了同名参数也会被忽略
+	FixedParamKeys []string
+	// IterateParams 需要迭代的参数及其值列表（如 news 的 src: ["sina","cls",...]）
+	// 当非空时，Build 会生成 SyncMultiParamAPIData 任务
+	IterateParams map[string][]string
 }
 
 // APISyncStrategyProvider 策略提供者接口
@@ -100,6 +110,8 @@ func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy 
 		SupportDateRange: entity.SupportDateRange,
 		RequiredParams:   entity.RequiredParams,
 		Dependencies:     entity.Dependencies,
+		FixedParams:      entity.FixedParams,
+		FixedParamKeys:   entity.FixedParamKeys,
 	}
 }
 
@@ -140,8 +152,8 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	"margin":        {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 	"margin_detail": {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
 	"block_trade":   {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
-	"index_daily":   {PreferredParam: "ts_code", SupportDateRange: true, RequiredParams: []string{"ts_code"}, Dependencies: []string{"FetchTradeCal"}},
-	"index_weight":  {PreferredParam: "ts_code", SupportDateRange: false, RequiredParams: []string{"index_code"}, Dependencies: []string{"FetchTradeCal"}},
+	"index_daily":   {PreferredParam: "ts_code", SupportDateRange: true, Dependencies: []string{"FetchIndexBasic", "FetchTradeCal"}},
+	"index_weight":  {PreferredParam: "ts_code", SupportDateRange: false, APIParamName: "index_code", Dependencies: []string{"FetchIndexBasic", "FetchTradeCal"}},
 
 	// ========== 资金流向 API ==========
 	"moneyflow_hsgt":    {PreferredParam: "trade_date", SupportDateRange: true, Dependencies: []string{"FetchTradeCal"}},
@@ -176,6 +188,33 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 	"cashflow":       {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
 	"fina_indicator": {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
 	"fina_mainbz":    {PreferredParam: "ts_code", Dependencies: []string{"FetchStockBasic"}},
+
+	// stk_mins：历史分钟数据，必填 ts_code + freq，支持 start_date/end_date（格式 yyyy-mm-dd HH:MM:SS），freq 默认 1min 在 job 内注入
+	"stk_mins": {PreferredParam: "ts_code", SupportDateRange: true, RequiredParams: []string{"freq"}, Dependencies: []string{"FetchStockBasic"}},
+
+	// ========== 新闻资讯 API ==========
+	// news：快讯，必填 src + start_date + end_date，按 src 迭代
+	"news": {
+		PreferredParam:   "none",
+		SupportDateRange: true,
+		IterateParams: map[string][]string{
+			"src": {"sina", "cls", "eastmoney", "10jqka", "wallstreetcn", "yuncaijing", "fenghuang", "jinrongjie", "yicai"},
+		},
+	},
+	// major_news：通讯，src 可选，按 src 迭代
+	"major_news": {
+		PreferredParam:   "none",
+		SupportDateRange: true,
+		IterateParams: map[string][]string{
+			"src": {"新浪财经", "财联社", "新华网", "凤凰财经", "同花顺", "华尔街见闻", "中证网", "财新网", "第一财经"},
+		},
+	},
+	// cctv_news：新闻联播，必填 date（YYYYMMDD），按交易日逐日
+	"cctv_news": {PreferredParam: "trade_date", SupportDateRange: false, APIParamName: "date", Dependencies: []string{"FetchTradeCal"}},
+	// npr：政策法规库，支持 start_date/end_date
+	"npr": {PreferredParam: "none", SupportDateRange: true},
+	// anns_d：上市公司全量公告，支持 ann_date 或 start_date/end_date
+	"anns_d": {PreferredParam: "trade_date", SupportDateRange: false, APIParamName: "ann_date", Dependencies: []string{"FetchTradeCal"}},
 }
 
 // GetAPISyncStrategy 获取 API 的同步策略（使用默认配置）
@@ -321,6 +360,28 @@ func (b *BatchDataSyncWorkflowBuilder) loadStrategies(ctx context.Context, apiNa
 // getStrategy 获取 API 的同步策略
 func (b *BatchDataSyncWorkflowBuilder) getStrategy(apiName string) APISyncStrategy {
 	return GetAPISyncStrategyWithFallback(apiName, b.strategyCache)
+}
+
+// checkDependency 检查待同步 API 列表中是否有任何 API 依赖指定的上游任务。
+// 同时检查 APIConfigs 和 APINames 模式。
+func (b *BatchDataSyncWorkflowBuilder) checkDependency(params BatchDataSyncParams, depName string) bool {
+	var allAPINames []string
+	if len(params.APIConfigs) > 0 {
+		for _, config := range params.APIConfigs {
+			allAPINames = append(allAPINames, config.APIName)
+		}
+	} else {
+		allAPINames = params.APINames
+	}
+	for _, apiName := range allAPINames {
+		strategy := b.getStrategy(apiName)
+		for _, dep := range strategy.Dependencies {
+			if dep == depName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // WithParams 设置工作流参数
@@ -540,6 +601,27 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	tasks = append(tasks, fetchStockBasicTask)
 	depNames = append(depNames, "FetchStockBasic")
 
+	// Task: 获取指数基础信息（多市场：SSE/SZSE/CSI/SW/OTH，条件添加）
+	// 仅当待同步 API 列表中存在依赖 FetchIndexBasic 的 API 时才添加
+	needsIndexBasic := b.checkDependency(params, "FetchIndexBasic")
+	if needsIndexBasic {
+		fetchIndexBasicTask, err := builder.NewTaskBuilder("FetchIndexBasic", "获取指数基础信息（多市场）", b.registry).
+			WithJobFunction("SyncMultiParamAPIData", mergeParams(baseParams, map[string]interface{}{
+				"api_name":       "index_basic",
+				"iterate_param":  "market",
+				"iterate_values": []string{"SSE", "SZSE", "CSI", "SW", "OTH"},
+			})).
+			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+			WithCompensationFunction("CompensateSyncData").
+			Build()
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, fetchIndexBasicTask)
+		depNames = append(depNames, "FetchIndexBasic")
+	}
+
 	// ==================== Level 1: 数据同步任务 ====================
 
 	// 优先使用 APIConfigs（高级配置模式）
@@ -569,7 +651,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 		for _, apiName := range apiNames {
 			// 跳过基础数据（已在 Level 0 处理）
-			if apiName == "trade_cal" || apiName == "stock_basic" {
+			if apiName == "trade_cal" || apiName == "stock_basic" || apiName == "index_basic" {
 				log.Printf("⏭️ [BuildWorkflow] 跳过基础数据 API: %s", apiName)
 				continue
 			}
@@ -604,17 +686,26 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				} else {
 					// 只支持单日查询：使用模板任务遍历交易日历中的每个交易日
 					// 从 FetchTradeCal 任务中提取交易日列表，为每个交易日生成子任务
-					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=false, 使用模板任务遍历交易日", apiName)
+					// APIParamName 如 "date"(cctv_news)、"ann_date"(anns_d) 表示 API 实际参数名
+					paramKey := "trade_date"
+					if strategy.APIParamName != "" {
+						paramKey = strategy.APIParamName
+					}
+					taskParams := map[string]interface{}{
+						"api_name":      apiName,
+						"param_key":     paramKey,
+						"upstream_task": "FetchTradeCal",
+						"max_sub_tasks": params.MaxStocks,
+						"start_date":    startDateOnly,
+						"end_date":      endDateOnly,
+					}
+					if paramKey != "trade_date" {
+						taskParams["upstream_param_key"] = "trade_date"
+					}
+					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=false, 使用模板任务遍历交易日, param_key=%s", apiName, paramKey)
 
 					syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按交易日）", b.registry).
-						WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, map[string]interface{}{
-							"api_name":      apiName,
-							"param_key":     "trade_date",    // 使用 trade_date 作为参数键
-							"upstream_task": "FetchTradeCal", // 从交易日历任务中提取交易日列表
-							"max_sub_tasks": params.MaxStocks,
-							"start_date":    startDateOnly,
-							"end_date":      endDateOnly,
-						})).
+						WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, taskParams)).
 						WithDependency("FetchTradeCal"). // 依赖交易日历
 						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 						WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -624,6 +715,48 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				}
 
 			case "none":
+				// 有 IterateParams 的 API（如 news、major_news）：使用 SyncMultiParamAPIData 多参数迭代
+				if len(strategy.IterateParams) > 0 {
+					var iterateParam string
+					var iterateValues []string
+					for k, v := range strategy.IterateParams {
+						iterateParam = k
+						iterateValues = v
+						break
+					}
+					if iterateParam != "" && len(iterateValues) > 0 {
+						dateParams := map[string]interface{}{}
+						if strategy.SupportDateRange {
+							dateParams["start_date"] = startDate
+							dateParams["end_date"] = endDate
+						}
+						// 将策略层的 FixedParams 与日期参数合并；若 key 在 FixedParamKeys 中，则以策略为准
+						fixedParams := mergeParamsWithStrategy(strategy, dateParams, nil)
+						log.Printf("🔧 [BuildWorkflow] API=%s, IterateParams=%s, values=%v, fixedParams=%v", apiName, iterateParam, iterateValues, fixedParams)
+						syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（多源迭代）", b.registry).
+							WithJobFunction("SyncMultiParamAPIData", mergeParams(baseParams, map[string]interface{}{
+								"api_name":       apiName,
+								"iterate_param":  iterateParam,
+								"iterate_values": iterateValues,
+								"params":         fixedParams,
+							})).
+							WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+							WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+							WithCompensationFunction("CompensateSyncData").
+							Build()
+						if err == nil {
+							tasks = append(tasks, syncTask)
+							depNames = append(depNames, taskName)
+						}
+						if err != nil {
+							log.Printf("❌ [BuildWorkflow] 构建任务失败: API=%s, TaskName=%s, Error=%v", apiName, taskName, err)
+							return nil, err
+						}
+						log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s", apiName, taskName)
+						continue
+					}
+				}
+
 				// 基础数据 API：直接查询，不需要拆分
 				// 但需要检查是否有额外的必填参数
 				apiParams := map[string]interface{}{}
@@ -635,14 +768,15 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					// hs_const 需要 hs_type 参数，有 SH（沪股通）和 SZ（深股通）两种
 					// 这里只同步沪股通，如需两者都同步，需要创建两个任务
 					apiParams["hs_type"] = "SH"
-				case "index_basic":
-					// index_basic 需要 market 参数
-					// SSE-上交所, SZSE-深交所, SW-申万, OTH-其他
-					apiParams["market"] = "SSE"
+				// index_basic 由 Level 0 的 FetchIndexBasic 处理，此处已 skip
 				case "stk_limit":
 					// stk_limit 支持 trade_date 参数，使用日期范围查询更高效
 					apiParams["start_date"] = params.StartDate
 					apiParams["end_date"] = params.EndDate
+				case "npr":
+					// npr 政策法规库支持 start_date/end_date
+					apiParams["start_date"] = startDate
+					apiParams["end_date"] = endDate
 				}
 
 				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（直接查询）", b.registry).
@@ -656,25 +790,44 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					Build()
 
 			case "ts_code":
-				// 必须提供 ts_code 的 API：使用 template 模式，按股票代码生成子任务
-				// 这类 API 不支持按日期查询全市场，必须按股票拆分
-				// 检查是否有其他必填参数（如 index_daily 需要 ts_code，index_weight 需要 index_code）
-				if len(strategy.RequiredParams) > 0 {
-					// 有必填参数但当前无法自动提供，跳过并记录警告
-					// 这类 API 需要用户通过 WithAPIConfigs 明确指定参数
+				// 按代码迭代的 API：使用 template 模式生成子任务
+				// stk_mins 的 freq 在 GenerateDataSyncSubTasks/SyncAPIData 中默认注入为 1min，故不跳过
+				// 有 APIParamName 的 API（如 index_weight）也不跳过
+				if len(strategy.RequiredParams) > 0 && apiName != "stk_mins" && strategy.APIParamName == "" {
 					continue
 				}
-				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按股票）", b.registry).
-					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
-						"api_name":      apiName,
-						"param_key":     "ts_code",
-						"upstream_task": "FetchStockBasic",
-						"max_sub_tasks": params.MaxStocks,
-					})).
-					WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
+
+				// 确定上游任务和参数键
+				upstreamTask := "FetchStockBasic"
+				for _, dep := range strategy.Dependencies {
+					if dep == "FetchIndexBasic" {
+						upstreamTask = "FetchIndexBasic"
+						break
+					}
+				}
+
+				apiParamKey := "ts_code"
+				if strategy.APIParamName != "" {
+					apiParamKey = strategy.APIParamName
+				}
+
+				taskParams := mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
+					"api_name":      apiName,
+					"param_key":     apiParamKey,
+					"upstream_task": upstreamTask,
+					"max_sub_tasks": params.MaxStocks,
+				})
+				if apiParamKey != "ts_code" {
+					taskParams["upstream_param_key"] = "ts_code"
+				}
+
+				taskDesc := "同步" + apiName + "数据（按代码）"
+				syncTask, err = builder.NewTaskBuilder(taskName, taskDesc, b.registry).
+					WithJobFunction("GenerateDataSyncSubTasks", taskParams).
+					WithDependency(upstreamTask).
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-					WithTemplate(true). // 标记为模板任务
+					WithTemplate(true).
 					Build()
 
 			default:
@@ -852,6 +1005,44 @@ func mergeParams(base, extra map[string]interface{}) map[string]interface{} {
 		result[k] = v
 	}
 	return result
+}
+
+// mergeParamsWithStrategy 将策略中的 FixedParams、FixedParamKeys 与基础参数/运行时参数合并。
+// 合并优先级：FixedParams > base > runtime，当 key 在 FixedParamKeys 中时，始终以 FixedParams 为准。
+func mergeParamsWithStrategy(strategy APISyncStrategy, base map[string]interface{}, runtime map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{})
+
+	// 1) 先放 FixedParams
+	for k, v := range strategy.FixedParams {
+		out[k] = v
+	}
+
+	// 2) 再放 base 参数
+	for k, v := range base {
+		if contains(strategy.FixedParamKeys, k) {
+			continue
+		}
+		out[k] = v
+	}
+
+	// 3) 最后放运行时参数
+	for k, v := range runtime {
+		if contains(strategy.FixedParamKeys, k) {
+			continue
+		}
+		out[k] = v
+	}
+
+	return out
+}
+
+func contains(list []string, key string) bool {
+	for _, v := range list {
+		if v == key {
+			return true
+		}
+	}
+	return false
 }
 
 // ==================== ExecutionGraph 支持 ====================

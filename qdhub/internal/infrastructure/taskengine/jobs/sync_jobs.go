@@ -302,13 +302,184 @@ func buildSyncResultFromData(data []map[string]any, apiName, syncBatchID string)
 	}
 }
 
+// SyncMultiParamAPIDataJob 多参数迭代同步（如 index_basic 需对多个 market 分别调用）
+//
+// Input params:
+//   - data_source_name, token, target_db_path, sync_batch_id: 同 SyncAPIDataJob
+//   - api_name: 要调用的 API 名称
+//   - iterate_param: 需要迭代的参数名（如 "market"）
+//   - iterate_values: 该参数的值列表（如 ["SSE","SZSE","CSI","SW","OTH"]）
+//   - params: 其他固定查询参数（可选）
+//
+// 对每个迭代值调用一次 API，将所有结果合并后写入 DuckDB 同一张表，
+// 返回结构与 SyncAPIDataJob 一致（含 extracted_data）。
+func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	dataSourceName := tc.GetParamString("data_source_name")
+	apiName := tc.GetParamString("api_name")
+	token := tc.GetParamString("token")
+	targetDBPath := tc.GetParamString("target_db_path")
+	syncBatchID := tc.GetParamString("sync_batch_id")
+	iterateParam := tc.GetParamString("iterate_param")
+
+	if syncBatchID == "" {
+		syncBatchID = tc.WorkflowInstanceID
+	}
+	if dataSourceName == "" || apiName == "" || iterateParam == "" {
+		return nil, fmt.Errorf("data_source_name, api_name, iterate_param are required")
+	}
+
+	// 公共数据：Cache → DuckDB → API（与 SyncAPIDataJob 一致）
+	commonDataAPIs := getCommonDataAPIsFromParams(tc)
+	isCommonData := false
+	for _, n := range commonDataAPIs {
+		if n == apiName {
+			isCommonData = true
+			break
+		}
+	}
+	if isCommonData {
+		cacheKey := fmt.Sprintf("%s:%s:multi", dataSourceName, apiName)
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				if cached, hit := cache.Get(ctx, cacheKey); hit {
+					logrus.Printf("📦 [SyncMultiParamAPIData] 缓存命中: %s/%s", dataSourceName, apiName)
+					return buildSyncResultFromData(cached, apiName, syncBatchID), nil
+				}
+			}
+		}
+		if targetDBPath != "" && isSafeTableName(apiName) {
+			quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+			if err == nil {
+				exists, _ := quantDB.TableExists(ctx, apiName)
+				if exists {
+					sqlSelect := fmt.Sprintf(`SELECT * FROM "%s"`, strings.ReplaceAll(apiName, `"`, `""`))
+					rows, err := quantDB.Query(ctx, sqlSelect)
+					if err == nil && len(rows) > 0 {
+						if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+							if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+								_ = cache.Set(ctx, cacheKey, rows, 24*time.Hour)
+							}
+						}
+						logrus.Printf("📦 [SyncMultiParamAPIData] DuckDB 命中: %s/%s, 记录数=%d", dataSourceName, apiName, len(rows))
+						return buildSyncResultFromData(rows, apiName, syncBatchID), nil
+					}
+				}
+			}
+		}
+	}
+
+	iterateValues := convertToStringSlice(tc.GetParam("iterate_values"))
+	if len(iterateValues) == 0 {
+		return nil, fmt.Errorf("iterate_values must be a non-empty list")
+	}
+
+	var fixedParams map[string]interface{}
+	if raw := tc.GetParam("params"); raw != nil {
+		if p, ok := raw.(map[string]interface{}); ok {
+			fixedParams = p
+		}
+	}
+
+	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
+	if !ok {
+		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
+	}
+	registry := registryInterface.(*datasource.Registry)
+	client, err := registry.GetClient(dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+	if token != "" {
+		client.SetToken(token)
+	}
+
+	logrus.Printf("📡 [SyncMultiParamAPIData] 开始多参数同步: %s/%s, iterate_param=%s, values=%v",
+		dataSourceName, apiName, iterateParam, iterateValues)
+
+	var allData []map[string]interface{}
+	for _, val := range iterateValues {
+		params := make(map[string]interface{})
+		for k, v := range fixedParams {
+			params[k] = v
+		}
+		params[iterateParam] = val
+
+		result, err := client.Query(ctx, apiName, params)
+		if err != nil {
+			logrus.Printf("⚠️ [SyncMultiParamAPIData] %s/%s %s=%s 查询失败: %v", dataSourceName, apiName, iterateParam, val, err)
+			continue
+		}
+		logrus.Printf("✅ [SyncMultiParamAPIData] %s/%s %s=%s 获取 %d 条", dataSourceName, apiName, iterateParam, val, len(result.Data))
+		allData = append(allData, result.Data...)
+	}
+
+	var savedCount int64
+	var fields []string
+	if targetDBPath != "" && len(allData) > 0 {
+		quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
+		}
+		exists, err := quantDB.TableExists(ctx, apiName)
+		if err != nil {
+			return nil, fmt.Errorf("check table existence for %s: %w", apiName, err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
+		}
+		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, allData, syncBatchID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save data: %w", err)
+		}
+		if len(allData) > 0 {
+			for key := range allData[0] {
+				fields = append(fields, key)
+			}
+		}
+		logrus.Printf("💾 [SyncMultiParamAPIData] 保存数据: %s, 总记录数=%d", apiName, savedCount)
+	}
+
+	// 公共数据回填缓存
+	if isCommonData {
+		cacheKey := fmt.Sprintf("%s:%s:multi", dataSourceName, apiName)
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				dataAny := make([]map[string]any, len(allData))
+				for i, m := range allData {
+					row := make(map[string]any)
+					for k, v := range m {
+						row[k] = v
+					}
+					dataAny[i] = row
+				}
+				_ = cache.Set(ctx, cacheKey, dataAny, 24*time.Hour)
+			}
+		}
+	}
+
+	extractedData := extractKeyFields(allData, []string{"ts_code", "trade_date", "cal_date"})
+
+	return map[string]interface{}{
+		"count":          savedCount,
+		"total":          len(allData),
+		"api_name":       apiName,
+		"fields":         fields,
+		"has_more":       false,
+		"extracted_data": extractedData,
+		"sync_batch_id":  syncBatchID,
+	}, nil
+}
+
 // GenerateDataSyncSubTasksJob 生成数据同步子任务（模板任务 Job Function）
 // 根据上游任务结果（如 ts_codes 列表）为每个项目生成同步子任务
 //
 // Input params:
 //   - data_source_name: string - 数据源名称
 //   - api_name: string - 要调用的 API 名称
-//   - param_key: string - 参数键名（如 "ts_code"）
+//   - param_key: string - 子任务 API 调用时使用的参数键名（如 "ts_code"、"index_code"）
+//   - upstream_param_key: string - 从上游结果提取值的键名（可选，默认同 param_key；
+//     例如 index_weight 的 param_key="index_code" 但上游 FetchIndexBasic 存储的是 ts_codes）
 //   - upstream_task: string - 上游任务名称（可选，用于明确指定从哪个任务获取参数列表）
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
@@ -326,7 +497,11 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
 	paramKey := tc.GetParamString("param_key")
-	upstreamTask := tc.GetParamString("upstream_task") // 新增：明确指定上游任务
+	upstreamParamKey := tc.GetParamString("upstream_param_key")
+	if upstreamParamKey == "" {
+		upstreamParamKey = paramKey
+	}
+	upstreamTask := tc.GetParamString("upstream_task")
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
@@ -352,15 +527,14 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
 	}
 
-	// 从上游任务提取参数值列表
+	// 从上游任务提取参数值列表（使用 upstreamParamKey 作为提取键）
 	var paramValues []string
 	if upstreamTask != "" {
-		// 使用新 API：从指定的上游任务获取
-		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, paramKey)
-		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个", upstreamTask, paramKey, len(paramValues))
+		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, upstreamParamKey)
+		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个 (upstream_param_key=%s)",
+			upstreamTask, paramKey, len(paramValues), upstreamParamKey)
 	} else {
-		// 兼容旧逻辑：遍历所有上游任务
-		paramValues = extractParamValuesFromUpstream(tc, paramKey)
+		paramValues = extractParamValuesFromUpstream(tc, upstreamParamKey)
 	}
 
 	if len(paramValues) == 0 {

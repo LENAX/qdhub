@@ -518,6 +518,11 @@ func (c *Container) runMigrations() error {
 		return fmt.Errorf("failed to run 015_sync_plan_incremental_start_date_source: %w", err)
 	}
 
+	// 016_api_sync_strategy_fixed_params：为 API Sync Strategy 增加 fixed_params/fixed_param_keys
+	if err := c.runMigrationFileOrIgnoreDuplicateColumn("./migrations/016_api_sync_strategy_fixed_params.up.sql"); err != nil {
+		return fmt.Errorf("failed to run 016_api_sync_strategy_fixed_params: %w", err)
+	}
+
 	// 008_seed_guest_user (driver-specific)
 	if err := c.runGuestSeed(); err != nil {
 		return fmt.Errorf("failed to seed guest user: %w", err)

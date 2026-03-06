@@ -139,6 +139,8 @@ type CreateAPISyncStrategyRequest struct {
 	SupportDateRange bool
 	RequiredParams   []string
 	Dependencies     []string
+	FixedParams      map[string]interface{}
+	FixedParamKeys   []string
 	Description      string
 }
 
@@ -156,6 +158,8 @@ type UpdateAPISyncStrategyRequest struct {
 	SupportDateRange *bool
 	RequiredParams   *[]string
 	Dependencies     *[]string
+	FixedParams      *map[string]interface{}
+	FixedParamKeys   *[]string
 	Description      *string
 }
 

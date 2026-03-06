@@ -356,16 +356,20 @@ const (
 // 定义每个 API 的同步方式，用于工作流构建
 // Belongs to: DataSource aggregate (通过 data_source_id + api_name 关联)
 type APISyncStrategy struct {
-	ID               shared.ID        `json:"id"`
-	DataSourceID     shared.ID        `json:"data_source_id"`
-	APIName          string           `json:"api_name"`
-	PreferredParam   SyncParamType    `json:"preferred_param"`
-	SupportDateRange bool             `json:"support_date_range"`
-	RequiredParams   []string         `json:"required_params,omitempty"`
-	Dependencies     []string         `json:"dependencies,omitempty"`
-	Description      string           `json:"description"`
-	CreatedAt        shared.Timestamp `json:"created_at"`
-	UpdatedAt        shared.Timestamp `json:"updated_at"`
+	ID               shared.ID             `json:"id"`
+	DataSourceID     shared.ID             `json:"data_source_id"`
+	APIName          string                `json:"api_name"`
+	PreferredParam   SyncParamType         `json:"preferred_param"`
+	SupportDateRange bool                  `json:"support_date_range"`
+	RequiredParams   []string              `json:"required_params,omitempty"`
+	Dependencies     []string              `json:"dependencies,omitempty"`
+	// FixedParams 为该 API 请求固定追加的参数（例如 fields），通常由管理员在策略里配置。
+	FixedParams      map[string]any        `json:"fixed_params,omitempty"`
+	// FixedParamKeys 中的 key 将始终以 FixedParams 为准，上游调用方即便传了同名参数也会被忽略。
+	FixedParamKeys   []string              `json:"fixed_param_keys,omitempty"`
+	Description      string                `json:"description"`
+	CreatedAt        shared.Timestamp      `json:"created_at"`
+	UpdatedAt        shared.Timestamp      `json:"updated_at"`
 }
 
 // NewAPISyncStrategy 创建新的 API 同步策略
@@ -379,6 +383,8 @@ func NewAPISyncStrategy(dataSourceID shared.ID, apiName string, preferredParam S
 		SupportDateRange: false,
 		RequiredParams:   []string{},
 		Dependencies:     []string{},
+		FixedParams:      map[string]any{},
+		FixedParamKeys:   []string{},
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}

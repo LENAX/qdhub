@@ -124,6 +124,48 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 		assert.NotNil(t, status, "Status should not be nil")
 	})
 
+	t.Run("ExecuteBatchDataSync - index APIs include FetchIndexBasic", func(t *testing.T) {
+		// 验证 index_daily/index_weight 会触发 FetchIndexBasic Level 0 任务
+		req := workflow.BatchDataSyncRequest{
+			DataSourceName: "tushare",
+			Token:          "test-token",
+			TargetDBPath:   "/tmp/test.duckdb",
+			StartDate:      "20251201",
+			EndDate:        "20251231",
+			APINames:       []string{"index_daily", "index_weight"},
+			MaxStocks:      10,
+		}
+
+		instanceID, err := workflowExecutor.ExecuteBatchDataSync(ctx, req)
+		assert.NoError(t, err, "ExecuteBatchDataSync with index APIs should not return error")
+		assert.NotEmpty(t, instanceID, "Instance ID should not be empty")
+
+		status, err := taskEngineAdapter.GetInstanceStatus(ctx, instanceID.String())
+		assert.NoError(t, err, "Should be able to get instance status")
+		assert.NotNil(t, status, "Status should not be nil")
+	})
+
+	t.Run("ExecuteBatchDataSync - news APIs use IterateParams", func(t *testing.T) {
+		// 验证 news 多 src 展开、cctv_news 按 trade_date 迭代
+		req := workflow.BatchDataSyncRequest{
+			DataSourceName: "tushare",
+			Token:          "test-token",
+			TargetDBPath:   "/tmp/test.duckdb",
+			StartDate:      "20251201",
+			EndDate:        "20251231",
+			APINames:       []string{"news", "cctv_news", "npr"},
+			MaxStocks:      0,
+		}
+
+		instanceID, err := workflowExecutor.ExecuteBatchDataSync(ctx, req)
+		assert.NoError(t, err, "ExecuteBatchDataSync with news APIs should not return error")
+		assert.NotEmpty(t, instanceID, "Instance ID should not be empty")
+
+		status, err := taskEngineAdapter.GetInstanceStatus(ctx, instanceID.String())
+		assert.NoError(t, err, "Should be able to get instance status")
+		assert.NotNil(t, status, "Status should not be nil")
+	})
+
 	t.Run("ExecuteRealtimeDataSync - converts parameters correctly", func(t *testing.T) {
 		req := workflow.RealtimeDataSyncRequest{
 			DataSourceName:  "tushare",

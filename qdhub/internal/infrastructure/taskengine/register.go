@@ -66,6 +66,7 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 
 		// ==================== 数据同步 Jobs ====================
 		{"SyncAPIData", jobs.SyncAPIDataJob, "同步单个 API 数据"},
+		{"SyncMultiParamAPIData", jobs.SyncMultiParamAPIDataJob, "多参数迭代同步（如 index_basic 多市场）"},
 		{"GenerateDataSyncSubTasks", jobs.GenerateDataSyncSubTasksJob, "生成数据同步子任务（模板任务）"},
 		{"DeleteSyncedData", jobs.DeleteSyncedDataJob, "删除同步的数据（用于回滚）"},
 		{"NotifySyncComplete", jobs.NotifySyncCompleteJob, "批量同步完成占位（回调在 Handler 中执行）"},
