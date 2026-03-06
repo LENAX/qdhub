@@ -65,6 +65,9 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"datasources", "read"},
 		{"datasources", "write"},
 		{"datasources", "delete"},
+		{"api-sync-strategies", "read"},
+		{"api-sync-strategies", "write"},
+		{"api-sync-strategies", "delete"},
 		{"sync-plans", "read"},
 		{"sync-plans", "write"},
 		{"sync-plans", "delete"},
@@ -90,6 +93,8 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		action   string
 	}{
 		{"datasources", "read"},
+		{"api-sync-strategies", "read"},
+		{"api-sync-strategies", "write"},
 		{"sync-plans", "read"},
 		{"sync-plans", "write"},
 		{"sync-plans", "execute"},
@@ -106,6 +111,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		action   string
 	}{
 		{"datasources", "read"},
+		{"api-sync-strategies", "read"},
 		{"sync-plans", "read"},
 		{"datastores", "read"},
 		{"analysis", "read"},
@@ -169,6 +175,34 @@ func EnsureAnalysisPolicies(enforcer *casbin.Enforcer) error {
 		if !ok {
 			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
 				return fmt.Errorf("add analysis policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
+}
+
+// EnsureAPISyncStrategiesPolicies adds api-sync-strategies policies if missing (for existing DBs that were created before this resource was added).
+func EnsureAPISyncStrategiesPolicies(enforcer *casbin.Enforcer) error {
+	policies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "api-sync-strategies", "read"},
+		{"admin", "api-sync-strategies", "write"},
+		{"admin", "api-sync-strategies", "delete"},
+		{"operator", "api-sync-strategies", "read"},
+		{"operator", "api-sync-strategies", "write"},
+		{"viewer", "api-sync-strategies", "read"},
+	}
+	for _, p := range policies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add api-sync-strategies policy %s %s %s: %w", p.role, p.resource, p.action, err)
 			}
 		}
 	}

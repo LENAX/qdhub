@@ -3,6 +3,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -25,6 +26,20 @@ var (
 	ErrEmptyStartDate      = errors.New("start_date is required")
 	ErrEmptyEndDate        = errors.New("end_date is required")
 )
+
+// APITimeWindowStrategy 时间窗口模板策略（工作流内部使用的 DTO）
+// 用于声明某个 API 需要按时间窗口 + 模板任务拆分子任务。
+type APITimeWindowStrategy struct {
+	// Enabled 是否启用时间窗口模板
+	Enabled bool
+	// Freq 时间步长（如 "D", "3H"），由 GenerateDatetimeRange 解析
+	Freq string
+	// DateParamKey 若非空，则使用窗口起始时间转换为 YYYYMMDD 注入到该参数，
+	// 而不是使用 start_date/end_date（例如 cctv_news 的 "date"）。
+	DateParamKey string
+	// UseTradeCalendar 预留：未来可按交易日历（trade_cal）切片，目前按自然时间切片。
+	UseTradeCalendar bool
+}
 
 // APISyncStrategy API 同步策略（工作流内部使用的 DTO）
 // 定义每个 API 优先使用的同步维度
@@ -51,6 +66,9 @@ type APISyncStrategy struct {
 	// IterateParams 需要迭代的参数及其值列表（如 news 的 src: ["sina","cls",...]）
 	// 当非空时，Build 会生成 SyncMultiParamAPIData 任务
 	IterateParams map[string][]string
+	// TimeWindow 若非空且 Enabled=true，则优先使用 GenerateDatetimeRange + GenerateTimeWindowSubTasks
+	// 执行「时间窗口 + 模板任务」的同步策略。
+	TimeWindow *APITimeWindowStrategy
 }
 
 // APISyncStrategyProvider 策略提供者接口
@@ -138,7 +156,7 @@ func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy 
 	// 合并 Dependencies（并集，避免丢失新增依赖，如 FetchIndexBasic）
 	deps := mergeStringSlicesUnique(entity.Dependencies, base.Dependencies)
 
-	return &APISyncStrategy{
+	strategy := &APISyncStrategy{
 		PreferredParam:   string(entity.PreferredParam),
 		SupportDateRange: entity.SupportDateRange,
 		RequiredParams:   required,
@@ -147,7 +165,35 @@ func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy 
 		FixedParams:      entity.FixedParams,
 		FixedParamKeys:   entity.FixedParamKeys,
 		IterateParams:    base.IterateParams,
+		TimeWindow:       base.TimeWindow,
 	}
+
+	// 如 fixed_params 中包含 time_window 配置，则覆盖默认的 TimeWindow
+	if entity.FixedParams != nil {
+		if twRaw, ok := entity.FixedParams["time_window"]; ok {
+			switch v := twRaw.(type) {
+			case map[string]interface{}:
+				tw := &APITimeWindowStrategy{}
+				if enabled, ok := v["enabled"].(bool); ok {
+					tw.Enabled = enabled
+				} else {
+					tw.Enabled = true
+				}
+				if freq, ok := v["freq"].(string); ok {
+					tw.Freq = freq
+				}
+				if key, ok := v["date_param_key"].(string); ok {
+					tw.DateParamKey = key
+				}
+				if useCal, ok := v["use_trade_calendar"].(bool); ok {
+					tw.UseTradeCalendar = useCal
+				}
+				strategy.TimeWindow = tw
+			}
+		}
+	}
+
+	return strategy
 }
 
 // mergeStringSlicesUnique 合并两个 string 切片并去重（保持先后顺序稳定）
@@ -260,6 +306,12 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 		IterateParams: map[string][]string{
 			"src": {"sina", "cls", "eastmoney", "10jqka", "wallstreetcn", "yuncaijing", "fenghuang", "jinrongjie", "yicai"},
 		},
+		TimeWindow: &APITimeWindowStrategy{
+			Enabled:         true,
+			Freq:            "D",
+			DateParamKey:    "",
+			UseTradeCalendar: false,
+		},
 	},
 	// major_news：通讯，src 可选，按 src 迭代
 	"major_news": {
@@ -268,9 +320,25 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 		IterateParams: map[string][]string{
 			"src": {"新浪财经", "财联社", "新华网", "凤凰财经", "同花顺", "华尔街见闻", "中证网", "财新网", "第一财经"},
 		},
+		TimeWindow: &APITimeWindowStrategy{
+			Enabled:         true,
+			Freq:            "3H",
+			DateParamKey:    "",
+			UseTradeCalendar: false,
+		},
 	},
-	// cctv_news：新闻联播，必填 date（YYYYMMDD），按交易日逐日
-	"cctv_news": {PreferredParam: "trade_date", SupportDateRange: false, APIParamName: "date", Dependencies: []string{"FetchTradeCal"}},
+	// cctv_news：新闻联播，必填 date（YYYYMMDD），按自然日逐日
+	"cctv_news": {
+		PreferredParam:   "none",
+		SupportDateRange: false,
+		APIParamName:     "date",
+		TimeWindow: &APITimeWindowStrategy{
+			Enabled:         true,
+			Freq:            "D",
+			DateParamKey:    "date",
+			UseTradeCalendar: false,
+		},
+	},
 	// npr：政策法规库，支持 start_date/end_date
 	"npr": {PreferredParam: "none", SupportDateRange: true},
 	// anns_d：上市公司全量公告，支持 ann_date 或 start_date/end_date
@@ -697,6 +765,18 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		}
 
 		for _, config := range params.APIConfigs {
+			// 优先处理时间窗口模板策略
+			strategy := b.getStrategy(config.APIName)
+			if strategy.TimeWindow != nil && strategy.TimeWindow.Enabled {
+				twTasks, twDepName, err := b.buildTimeWindowTasks(config.APIName, strategy, baseParams, startDate, endDate, params.MaxStocks)
+				if err != nil {
+					return nil, err
+				}
+				tasks = append(tasks, twTasks...)
+				depNames = append(depNames, twDepName)
+				continue
+			}
+
 			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
 			if err != nil {
 				return nil, err
@@ -731,6 +811,17 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			taskName := "Sync_" + apiName
 			log.Printf("🔨 [BuildWorkflow] 开始构建任务: API=%s, TaskName=%s, PreferredParam=%s", apiName, taskName, strategy.PreferredParam)
 
+			// 优先处理时间窗口模板策略：GenerateDatetimeRange + GenerateTimeWindowSubTasks
+			if strategy.TimeWindow != nil && strategy.TimeWindow.Enabled {
+				twTasks, twDepName, err := b.buildTimeWindowTasks(apiName, strategy, baseParams, startDate, endDate, params.MaxStocks)
+				if err != nil {
+					return nil, err
+				}
+				tasks = append(tasks, twTasks...)
+				depNames = append(depNames, twDepName)
+				continue
+			}
+
 			var syncTask *task.Task
 			var err error
 
@@ -754,7 +845,54 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 						WithCompensationFunction("CompensateSyncData").
 						Build()
 				} else {
-					// 只支持单日查询：使用模板任务遍历交易日历中的每个交易日
+					// 只支持单日查询
+					// cctv_news 使用 GenerateDatetimeRange + GenerateTimeWindowSubTasks，按自然日（YYYYMMDD）逐日同步
+					if apiName == "cctv_news" {
+						rangeTaskName := "GenerateCCTVNewsDateRange"
+						rangeParams := map[string]interface{}{
+							"start":      startDateOnly,
+							"end":        endDateOnly,
+							"freq":       "D",
+							"inclusive":  "both",
+							"as_windows": true,
+						}
+						rangeTask, errRange := builder.NewTaskBuilder(rangeTaskName, "生成 cctv_news 日期窗口", b.registry).
+							WithJobFunction("GenerateDatetimeRange", rangeParams).
+							WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+							WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+							Build()
+						if errRange != nil {
+							log.Printf("❌ [BuildWorkflow] 构建 cctv_news 日期窗口任务失败: TaskName=%s, Error=%v", rangeTaskName, errRange)
+							return nil, errRange
+						}
+						tasks = append(tasks, rangeTask)
+
+						templateParams := mergeParams(baseParams, map[string]interface{}{
+							"api_name":      apiName,
+							"upstream_task": rangeTaskName,
+							"window_field":  "windows",
+							"date_param_key": "date",
+							"max_sub_tasks": params.MaxStocks,
+						})
+
+						templateTask, errTpl := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按自然日逐日）", b.registry).
+							WithJobFunction("GenerateTimeWindowSubTasks", templateParams).
+							WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+							WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+							WithTemplate(true).
+							WithCompensationFunction("CompensateSyncData").
+							Build()
+						if errTpl != nil {
+							log.Printf("❌ [BuildWorkflow] 构建 cctv_news 模板任务失败: TaskName=%s, Error=%v", taskName, errTpl)
+							return nil, errTpl
+						}
+						tasks = append(tasks, templateTask)
+						depNames = append(depNames, taskName)
+						log.Printf("✅ [BuildWorkflow] 任务构建成功（日期窗口 + 模板）: API=%s, TaskName=%s", apiName, taskName)
+						continue
+					}
+
+					// 其他仅支持单日查询的 trade_date API：使用模板任务遍历交易日历中的每个交易日
 					// 从 FetchTradeCal 任务中提取交易日列表，为每个交易日生成子任务
 					// APIParamName 如 "date"(cctv_news)、"ann_date"(anns_d) 表示 API 实际参数名
 					paramKey := "trade_date"
@@ -785,7 +923,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				}
 
 			case "none":
-				// 有 IterateParams 的 API（如 news、major_news）：使用 SyncMultiParamAPIData 多参数迭代
+				// 有 IterateParams 的 API（如自定义多源迭代）：使用 SyncMultiParamAPIData 多参数迭代
 				if len(strategy.IterateParams) > 0 {
 					var iterateParam string
 					var iterateValues []string
@@ -974,6 +1112,73 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	wf.SetTransactional(true)
 
 	return wf, nil
+}
+
+// buildTimeWindowTasks 为指定 API 构建时间窗口任务链（GenerateDatetimeRange → GenerateTimeWindowSubTasks）。
+// 返回需要添加到 workflow 的任务列表和模板任务名（用作下游依赖）。
+// 调用方需确保 strategy.TimeWindow != nil && strategy.TimeWindow.Enabled == true。
+func (b *BatchDataSyncWorkflowBuilder) buildTimeWindowTasks(
+	apiName string,
+	strategy APISyncStrategy,
+	baseParams map[string]interface{},
+	startDate, endDate string,
+	maxStocks int,
+) ([]*task.Task, string, error) {
+	rangeTaskName := fmt.Sprintf("Generate_%s_TimeWindow", apiName)
+	taskName := "Sync_" + apiName
+
+	rangeParams := map[string]interface{}{
+		"start":      startDate,
+		"end":        endDate,
+		"freq":       strategy.TimeWindow.Freq,
+		"inclusive":  "both",
+		"as_windows": true,
+	}
+	rangeTask, err := builder.NewTaskBuilder(rangeTaskName, "生成"+apiName+"时间窗口", b.registry).
+		WithJobFunction("GenerateDatetimeRange", rangeParams).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build time-window task for %s: %w", apiName, err)
+	}
+
+	templateParams := mergeParams(baseParams, map[string]interface{}{
+		"api_name":      apiName,
+		"upstream_task": rangeTaskName,
+		"window_field":  "windows",
+		"max_sub_tasks": maxStocks,
+	})
+	// task-engine builder 会将非 string 类型用 fmt.Sprintf 转为字符串，
+	// 导致 []string/map 变成不可逆的 Go 格式。这里提前 JSON 编码，job 端再解码。
+	if len(strategy.FixedParams) > 0 {
+		if fpJSON, err := json.Marshal(strategy.FixedParams); err == nil {
+			templateParams["fixed_params"] = string(fpJSON)
+		}
+	}
+	if srcVals, ok := strategy.IterateParams["src"]; ok && len(srcVals) > 0 {
+		if svJSON, err := json.Marshal(srcVals); err == nil {
+			templateParams["src_values"] = string(svJSON)
+		}
+	}
+	if strategy.TimeWindow.DateParamKey != "" {
+		templateParams["date_param_key"] = strategy.TimeWindow.DateParamKey
+	}
+
+	templateTask, err := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（时间窗口模板）", b.registry).
+		WithJobFunction("GenerateTimeWindowSubTasks", templateParams).
+		WithDependency(rangeTaskName).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithTemplate(true).
+		WithCompensationFunction("CompensateSyncData").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build time-window template task for %s: %w", apiName, err)
+	}
+
+	log.Printf("✅ [BuildWorkflow] 任务构建成功（时间窗口 + 模板）: API=%s, TaskName=%s, Freq=%s", apiName, taskName, strategy.TimeWindow.Freq)
+	return []*task.Task{rangeTask, templateTask}, taskName, nil
 }
 
 // buildAPITask 根据 APISyncConfig 构建同步任务
@@ -1230,11 +1435,23 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 				}
 			}
 
+			// 优先处理时间窗口模板策略
+			strategy := b.getStrategy(apiName)
+			taskName := "Sync_" + apiName
+			if strategy.TimeWindow != nil && strategy.TimeWindow.Enabled {
+				twTasks, twDepName, err := b.buildTimeWindowTasks(apiName, strategy, baseParams, startDateTime, endDateTime, maxStocks)
+				if err != nil {
+					return nil, err
+				}
+				tasks = append(tasks, twTasks...)
+				depNames = append(depNames, twDepName)
+				continue
+			}
+
 			syncTask, err := b.buildTaskFromConfig(config, baseParams, dateTimeParams, maxStocks)
 			if err != nil {
 				return nil, fmt.Errorf("build task for %s: %w", apiName, err)
 			}
-			taskName := "Sync_" + apiName
 			tasks = append(tasks, syncTask)
 			depNames = append(depNames, taskName)
 		}

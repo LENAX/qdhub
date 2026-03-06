@@ -970,9 +970,7 @@ func (c *Container) initAuth() error {
 		}
 		logrus.Info("Default RBAC policies initialized")
 	} else {
-		if err := authinfra.EnsureAnalysisPolicies(enforcer); err != nil {
-			return fmt.Errorf("failed to ensure analysis policies: %w", err)
-		}
+		logrus.Info("Existing RBAC policies loaded from database")
 	}
 
 	logrus.Info("Auth components initialized")

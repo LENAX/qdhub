@@ -68,6 +68,8 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"SyncAPIData", jobs.SyncAPIDataJob, "同步单个 API 数据"},
 		{"SyncMultiParamAPIData", jobs.SyncMultiParamAPIDataJob, "多参数迭代同步（如 index_basic 多市场）"},
 		{"GenerateDataSyncSubTasks", jobs.GenerateDataSyncSubTasksJob, "生成数据同步子任务（模板任务）"},
+		{"GenerateDatetimeRange", jobs.GenerateDatetimeRangeJob, "生成时间序列（类似 pandas.date_range）"},
+		{"GenerateTimeWindowSubTasks", jobs.GenerateTimeWindowSubTasksJob, "根据时间窗口和来源生成 SyncAPIData 子任务（模板任务）"},
 		{"DeleteSyncedData", jobs.DeleteSyncedDataJob, "删除同步的数据（用于回滚）"},
 		{"NotifySyncComplete", jobs.NotifySyncCompleteJob, "批量同步完成占位（回调在 Handler 中执行）"},
 
