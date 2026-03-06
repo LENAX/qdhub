@@ -10,6 +10,7 @@ import (
 	"log"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
 )
+
+const maxParamLogLen = 200
 
 // ==================== 数据同步 Job Functions ====================
 
@@ -96,7 +99,6 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 处理上游参数映射
 	upstreamParams := resolveUpstreamParams(tc)
-	const maxParamLogLen = 200
 	for paramName, paramValue := range upstreamParams {
 		if _, exists := params[paramName]; !exists {
 			params[paramName] = paramValue
@@ -179,6 +181,9 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			params["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
 		}
 	}
+
+	// 打印最终请求参数（含上游与固定参数合并后的结果）
+	logrus.Printf("🔎 [SyncAPIData] Final request params for %s/%s: %s", dataSourceName, apiName, formatParamsForLog(params, maxParamLogLen))
 
 	result, err := client.Query(ctx, apiName, params)
 	if err != nil {
@@ -316,13 +321,188 @@ func buildSyncResultFromData(data []map[string]any, apiName, syncBatchID string)
 	}
 }
 
+// SyncMultiParamAPIDataJob 多参数迭代同步（如 index_basic 需对多个 market 分别调用）
+//
+// Input params:
+//   - data_source_name, token, target_db_path, sync_batch_id: 同 SyncAPIDataJob
+//   - api_name: 要调用的 API 名称
+//   - iterate_param: 需要迭代的参数名（如 "market"）
+//   - iterate_values: 该参数的值列表（如 ["SSE","SZSE","CSI","SW","OTH"]）
+//   - params: 其他固定查询参数（可选）
+//
+// 对每个迭代值调用一次 API，将所有结果合并后写入 DuckDB 同一张表，
+// 返回结构与 SyncAPIDataJob 一致（含 extracted_data）。
+func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	dataSourceName := tc.GetParamString("data_source_name")
+	apiName := tc.GetParamString("api_name")
+	token := tc.GetParamString("token")
+	targetDBPath := tc.GetParamString("target_db_path")
+	syncBatchID := tc.GetParamString("sync_batch_id")
+	iterateParam := tc.GetParamString("iterate_param")
+
+	if syncBatchID == "" {
+		syncBatchID = tc.WorkflowInstanceID
+	}
+	if dataSourceName == "" || apiName == "" || iterateParam == "" {
+		return nil, fmt.Errorf("data_source_name, api_name, iterate_param are required")
+	}
+
+	// 公共数据：Cache → DuckDB → API（与 SyncAPIDataJob 一致）
+	commonDataAPIs := getCommonDataAPIsFromParams(tc)
+	isCommonData := false
+	for _, n := range commonDataAPIs {
+		if n == apiName {
+			isCommonData = true
+			break
+		}
+	}
+	if isCommonData {
+		cacheKey := fmt.Sprintf("%s:%s:multi", dataSourceName, apiName)
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				if cached, hit := cache.Get(ctx, cacheKey); hit {
+					logrus.Printf("📦 [SyncMultiParamAPIData] 缓存命中: %s/%s", dataSourceName, apiName)
+					return buildSyncResultFromData(cached, apiName, syncBatchID), nil
+				}
+			}
+		}
+		if targetDBPath != "" && isSafeTableName(apiName) {
+			quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+			if err == nil {
+				exists, _ := quantDB.TableExists(ctx, apiName)
+				if exists {
+					sqlSelect := fmt.Sprintf(`SELECT * FROM "%s"`, strings.ReplaceAll(apiName, `"`, `""`))
+					rows, err := quantDB.Query(ctx, sqlSelect)
+					if err == nil && len(rows) > 0 {
+						if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+							if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+								_ = cache.Set(ctx, cacheKey, rows, 24*time.Hour)
+							}
+						}
+						logrus.Printf("📦 [SyncMultiParamAPIData] DuckDB 命中: %s/%s, 记录数=%d", dataSourceName, apiName, len(rows))
+						return buildSyncResultFromData(rows, apiName, syncBatchID), nil
+					}
+				}
+			}
+		}
+	}
+
+	iterateValues := convertToStringSlice(tc.GetParam("iterate_values"))
+	if len(iterateValues) == 0 {
+		return nil, fmt.Errorf("iterate_values must be a non-empty list")
+	}
+
+	var fixedParams map[string]interface{}
+	if raw := tc.GetParam("params"); raw != nil {
+		if p, ok := raw.(map[string]interface{}); ok {
+			fixedParams = p
+		}
+	}
+
+	logrus.Printf("🔍 [SyncMultiParamAPIData] API=%s, fixedParams=%s", apiName, formatParamsForLog(fixedParams, maxParamLogLen))
+
+	registryInterface, ok := tc.GetDependency("DataSourceRegistry")
+	if !ok {
+		return nil, fmt.Errorf("DataSourceRegistry dependency not found")
+	}
+	registry := registryInterface.(*datasource.Registry)
+	client, err := registry.GetClient(dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+	if token != "" {
+		client.SetToken(token)
+	}
+
+	logrus.Printf("📡 [SyncMultiParamAPIData] 开始多参数同步: %s/%s, iterate_param=%s, values=%v",
+		dataSourceName, apiName, iterateParam, iterateValues)
+
+	var allData []map[string]interface{}
+	for _, val := range iterateValues {
+		params := make(map[string]interface{})
+		for k, v := range fixedParams {
+			params[k] = v
+		}
+		params[iterateParam] = val
+
+		logrus.Printf("🔎 [SyncMultiParamAPIData] Request %s/%s %s=%s, params=%s", dataSourceName, apiName, iterateParam, val, formatParamsForLog(params, maxParamLogLen))
+
+		result, err := client.Query(ctx, apiName, params)
+		if err != nil {
+			logrus.Printf("⚠️ [SyncMultiParamAPIData] %s/%s %s=%s 查询失败: %v", dataSourceName, apiName, iterateParam, val, err)
+			continue
+		}
+		logrus.Printf("✅ [SyncMultiParamAPIData] %s/%s %s=%s 获取 %d 条", dataSourceName, apiName, iterateParam, val, len(result.Data))
+		allData = append(allData, result.Data...)
+	}
+
+	var savedCount int64
+	var fields []string
+	if targetDBPath != "" && len(allData) > 0 {
+		quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
+		}
+		exists, err := quantDB.TableExists(ctx, apiName)
+		if err != nil {
+			return nil, fmt.Errorf("check table existence for %s: %w", apiName, err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
+		}
+		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, allData, syncBatchID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save data: %w", err)
+		}
+		if len(allData) > 0 {
+			for key := range allData[0] {
+				fields = append(fields, key)
+			}
+		}
+		logrus.Printf("💾 [SyncMultiParamAPIData] 保存数据: %s, 总记录数=%d", apiName, savedCount)
+	}
+
+	// 公共数据回填缓存
+	if isCommonData {
+		cacheKey := fmt.Sprintf("%s:%s:multi", dataSourceName, apiName)
+		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
+				dataAny := make([]map[string]any, len(allData))
+				for i, m := range allData {
+					row := make(map[string]any)
+					for k, v := range m {
+						row[k] = v
+					}
+					dataAny[i] = row
+				}
+				_ = cache.Set(ctx, cacheKey, dataAny, 24*time.Hour)
+			}
+		}
+	}
+
+	extractedData := extractKeyFields(allData, []string{"ts_code", "trade_date", "cal_date"})
+
+	return map[string]interface{}{
+		"count":          savedCount,
+		"total":          len(allData),
+		"api_name":       apiName,
+		"fields":         fields,
+		"has_more":       false,
+		"extracted_data": extractedData,
+		"sync_batch_id":  syncBatchID,
+	}, nil
+}
+
 // GenerateDataSyncSubTasksJob 生成数据同步子任务（模板任务 Job Function）
 // 根据上游任务结果（如 ts_codes 列表）为每个项目生成同步子任务
 //
 // Input params:
 //   - data_source_name: string - 数据源名称
 //   - api_name: string - 要调用的 API 名称
-//   - param_key: string - 参数键名（如 "ts_code"）
+//   - param_key: string - 子任务 API 调用时使用的参数键名（如 "ts_code"、"index_code"）
+//   - upstream_param_key: string - 从上游结果提取值的键名（可选，默认同 param_key；
+//     例如 index_weight 的 param_key="index_code" 但上游 FetchIndexBasic 存储的是 ts_codes）
 //   - upstream_task: string - 上游任务名称（可选，用于明确指定从哪个任务获取参数列表）
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
@@ -340,7 +520,11 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
 	paramKey := tc.GetParamString("param_key")
-	upstreamTask := tc.GetParamString("upstream_task") // 新增：明确指定上游任务
+	upstreamParamKey := tc.GetParamString("upstream_param_key")
+	if upstreamParamKey == "" {
+		upstreamParamKey = paramKey
+	}
+	upstreamTask := tc.GetParamString("upstream_task")
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
@@ -366,15 +550,14 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
 	}
 
-	// 从上游任务提取参数值列表
+	// 从上游任务提取参数值列表（使用 upstreamParamKey 作为提取键）
 	var paramValues []string
 	if upstreamTask != "" {
-		// 使用新 API：从指定的上游任务获取
-		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, paramKey)
-		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个", upstreamTask, paramKey, len(paramValues))
+		paramValues = extractParamValuesFromSpecificUpstream(tc, upstreamTask, upstreamParamKey)
+		logrus.Printf("📥 [GenerateDataSyncSubTasks] 从上游任务 %s 获取 %s 列表: %d 个 (upstream_param_key=%s)",
+			upstreamTask, paramKey, len(paramValues), upstreamParamKey)
 	} else {
-		// 兼容旧逻辑：遍历所有上游任务
-		paramValues = extractParamValuesFromUpstream(tc, paramKey)
+		paramValues = extractParamValuesFromUpstream(tc, upstreamParamKey)
 	}
 
 	if len(paramValues) == 0 {
@@ -498,6 +681,170 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		"param_key": paramKey,
 		"sub_tasks": subTaskInfos,
 	}, nil
+}
+
+// GenerateDatetimeRangeJob 生成时间序列（类似 pandas.date_range），供模板任务按时间窗口拆分子任务使用。
+//
+// Input params:
+//   - start / start_date: string - 起始时间，支持多种格式（如 "2025-01-01", "2025-01-01 09:00:00", "20250101"）
+//   - end / end_date: string   - 结束时间，支持同样格式
+//   - freq: string             - 频率，支持 "D"（天）、"H"（小时）、"3H"（3 小时）等简单格式
+//   - inclusive: string        - {"both","left","right","neither"}，默认 "both"
+//   - as_windows: bool         - 是否同时返回连续时间窗口（覆盖 [start,end]），默认 false
+//   - max_points: int          - 可选，限制最大时间点数量，防止生成过长序列
+//
+// Output:
+//   - start: string           - 归一化后的起始时间（"yyyy-mm-dd HH:MM:SS"）
+//   - end: string             - 归一化后的结束时间
+//   - freq: string
+//   - inclusive: string
+//   - datetimes: []string     - 时间点列表
+//   - windows: []{start,end}  - 当 as_windows=true 时返回的时间窗口列表
+//   - count: int              - 时间点数量
+//   - extracted_data:
+//       - datetimes / datetime_points: 同上
+//       - windows: 时间窗口列表
+func GenerateDatetimeRangeJob(tc *task.TaskContext) (interface{}, error) {
+	startStr := tc.GetParamString("start")
+	if startStr == "" {
+		startStr = tc.GetParamString("start_date")
+	}
+	endStr := tc.GetParamString("end")
+	if endStr == "" {
+		endStr = tc.GetParamString("end_date")
+	}
+	if strings.TrimSpace(startStr) == "" || strings.TrimSpace(endStr) == "" {
+		return nil, fmt.Errorf("start and end are required")
+	}
+
+	freq := tc.GetParamString("freq")
+	if strings.TrimSpace(freq) == "" {
+		return nil, fmt.Errorf("freq is required")
+	}
+
+	inclusive := tc.GetParamString("inclusive")
+	if inclusive == "" {
+		inclusive = "both"
+	}
+	switch inclusive {
+	case "both", "left", "right", "neither":
+	default:
+		return nil, fmt.Errorf("invalid inclusive value: %s", inclusive)
+	}
+
+	asWindows := false
+	if raw := tc.GetParam("as_windows"); raw != nil {
+		switch v := raw.(type) {
+		case bool:
+			asWindows = v
+		case string:
+			if strings.EqualFold(v, "true") {
+				asWindows = true
+			}
+		}
+	}
+
+	maxPoints, _ := tc.GetParamInt("max_points")
+	if maxPoints <= 0 {
+		maxPoints = 0 // 0 表示不限制
+	}
+
+	startTime, err := parseFlexibleDateTime(startStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse start: %w", err)
+	}
+	endTime, err := parseFlexibleDateTime(endStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse end: %w", err)
+	}
+	if !endTime.After(startTime) && !endTime.Equal(startTime) {
+		return nil, fmt.Errorf("end must be after or equal to start")
+	}
+
+	step, err := parseFreqToDuration(freq)
+	if err != nil {
+		return nil, err
+	}
+	if step <= 0 {
+		return nil, fmt.Errorf("freq must be positive")
+	}
+
+	// 先生成包含端点的时间点序列
+	var times []time.Time
+	for t := startTime; !t.After(endTime); t = t.Add(step) {
+		times = append(times, t)
+		if maxPoints > 0 && len(times) > maxPoints {
+			return nil, fmt.Errorf("generated datetime points exceed max_points=%d", maxPoints)
+		}
+	}
+
+	// 根据 inclusive 过滤
+	var filtered []time.Time
+	switch inclusive {
+	case "both":
+		filtered = times
+	case "left":
+		if len(times) > 0 {
+			filtered = times[:len(times)-1]
+		}
+	case "right":
+		if len(times) > 1 {
+			filtered = times[1:]
+		}
+	case "neither":
+		if len(times) > 2 {
+			filtered = times[1 : len(times)-1]
+		}
+	}
+
+	format := "2006-01-02 15:04:05"
+	datetimeStrings := make([]string, 0, len(filtered))
+	for _, t := range filtered {
+		datetimeStrings = append(datetimeStrings, t.Format(format))
+	}
+
+	// 生成连续覆盖 [start,end] 的窗口列表
+	var windows []map[string]string
+	if asWindows {
+		cur := startTime
+		for cur.Before(endTime) {
+			next := cur.Add(step)
+			if next.After(endTime) {
+				next = endTime
+			}
+			windows = append(windows, map[string]string{
+				"start": cur.Format(format),
+				"end":   next.Format(format),
+			})
+			if !next.After(endTime) && next.Equal(endTime) {
+				break
+			}
+			cur = next
+		}
+	}
+
+	result := map[string]interface{}{
+		"start":     startTime.Format(format),
+		"end":       endTime.Format(format),
+		"freq":      strings.ToUpper(freq),
+		"inclusive": inclusive,
+		"datetimes": datetimeStrings,
+		"count":     len(datetimeStrings),
+	}
+	if asWindows {
+		result["windows"] = windows
+	}
+
+	extracted := map[string]interface{}{
+		"datetimes":       datetimeStrings,
+		"datetime_points": datetimeStrings,
+	}
+	if asWindows {
+		extracted["windows"] = windows
+	}
+	result["extracted_data"] = extracted
+
+	return result, nil
 }
 
 // DeleteSyncedDataJob 删除同步的数据（用于回滚）
@@ -952,6 +1299,329 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	}, nil
 }
 
+// GenerateTimeWindowSubTasksJob 根据时间窗口和一维参数列表（如 src）生成 SyncAPIData 子任务。
+// 典型用法：news / major_news 这类按时间窗口 + 来源拆分拉取的 API。
+//
+// Input params:
+//   - data_source_name: string
+//   - api_name: string
+//   - token: string
+//   - target_db_path: string
+//   - upstream_task: string        - 上游生成时间窗口的任务名（如 GenerateNewsDatetimeRange）
+//   - src_values: []string         - 需要迭代的来源列表（如 ["sina","cls",...]），可选
+//   - window_field: string         - 上游结果中窗口列表字段名，默认 "windows"
+//   - fixed_params: map[string]any - 额外固定参数（例如 fields），优先级高于运行时参数
+//   - date_param_key: string       - 若非空，则以日期参数模式运行：仅向该参数注入 YYYYMMDD，不注入 start_date/end_date
+//   - max_sub_tasks: int           - 最大子任务数量（0=不限制）
+//
+// Output:
+//   - status: string
+//   - generated: int
+//   - api_name: string
+//   - sub_tasks: []{name,src,start_date,end_date}
+func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
+	logrus.Printf("📋 [GenerateTimeWindowSubTasks] Job Function 执行, Params: %v", getParamKeys(tc.Params))
+
+	dataSourceName := tc.GetParamString("data_source_name")
+	apiName := tc.GetParamString("api_name")
+	token := tc.GetParamString("token")
+	targetDBPath := tc.GetParamString("target_db_path")
+	upstreamTask := tc.GetParamString("upstream_task")
+	windowField := tc.GetParamString("window_field")
+	if windowField == "" {
+		windowField = "windows"
+	}
+	dateParamKey := tc.GetParamString("date_param_key")
+	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
+
+	if dataSourceName == "" || apiName == "" {
+		return nil, fmt.Errorf("data_source_name and api_name are required")
+	}
+	if upstreamTask == "" {
+		return nil, fmt.Errorf("upstream_task is required")
+	}
+
+	srcValues := convertToStringSlice(tc.GetParam("src_values"))
+	hasDateParam := strings.TrimSpace(dateParamKey) != ""
+	if len(srcValues) == 0 && !hasDateParam {
+		logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 未找到 src_values 列表，且未指定 date_param_key")
+		return map[string]interface{}{
+			"status":    "no_data",
+			"generated": 0,
+			"api_name":  apiName,
+			"message":   "未找到 src_values 列表，且未指定 date_param_key，跳过子任务生成",
+		}, nil
+	}
+
+	// 获取 Engine（仅用于 taskRegistry）
+	engineInterface, ok := tc.GetDependency("Engine")
+	if !ok {
+		return nil, fmt.Errorf("Engine dependency not found")
+	}
+	eng := engineInterface.(*engine.Engine)
+	taskRegistry := eng.GetRegistry()
+
+	// 获取 InstanceManager（用于 AtomicAddSubTasks）
+	type instanceManagerWithAtomic interface {
+		AtomicAddSubTasks(subTasks []types.Task, parentTaskID string) error
+	}
+	managerInterface := tc.GetInstanceManager()
+	if managerInterface == nil {
+		return nil, fmt.Errorf("InstanceManager not found (template task must run with InstanceManager set)")
+	}
+	manager, ok := managerInterface.(instanceManagerWithAtomic)
+	if !ok {
+		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
+	}
+
+	// 从上游任务获取时间窗口列表
+	upstreamResult := tc.GetUpstreamResult(upstreamTask)
+	if upstreamResult == nil {
+		logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 未找到上游任务 %s 的结果", upstreamTask)
+		return map[string]interface{}{
+			"status":    "no_data",
+			"generated": 0,
+			"api_name":  apiName,
+			"message":   fmt.Sprintf("未找到上游任务 %s 的结果", upstreamTask),
+		}, nil
+	}
+
+	var windowItems interface{}
+	if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+		if v, ok := extracted[windowField]; ok {
+			windowItems = v
+		}
+	}
+	if windowItems == nil {
+		if v, ok := upstreamResult[windowField]; ok {
+			windowItems = v
+		}
+	}
+	windows := convertToTimeWindowSlice(windowItems)
+	if len(windows) == 0 {
+		logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 上游任务 %s 未提供任何 %s 窗口", upstreamTask, windowField)
+		return map[string]interface{}{
+			"status":    "no_data",
+			"generated": 0,
+			"api_name":  apiName,
+			"message":   fmt.Sprintf("上游任务 %s 未提供任何 %s 窗口", upstreamTask, windowField),
+		}, nil
+	}
+
+	rawFixed := tc.GetParam("fixed_params")
+	var fixedParams map[string]interface{}
+	if rawFixed != nil {
+		switch fp := rawFixed.(type) {
+		case map[string]interface{}:
+			fixedParams = fp
+		case string:
+			if strings.HasPrefix(fp, "{") {
+				_ = json.Unmarshal([]byte(fp), &fixedParams)
+			}
+		}
+	}
+	// time_window 是工作流调度配置，不应作为 API 请求参数
+	delete(fixedParams, "time_window")
+
+	parentTaskID := tc.TaskID
+	workflowInstanceID := tc.WorkflowInstanceID
+
+	subTasks := make([]types.Task, 0)
+	var subTaskInfos []map[string]interface{}
+	generated := 0
+
+	for wi, w := range windows {
+		// 日期参数模式：使用窗口起始时间转换为 YYYYMMDD 注入到 date_param_key，不注入 start_date/end_date
+		if hasDateParam {
+			t, err := parseFlexibleDateTime(w.Start)
+			if err != nil {
+				logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 解析窗口开始时间失败: %s, err=%v", w.Start, err)
+				continue
+			}
+			dateStr := t.Format("20060102")
+
+			if len(srcValues) == 0 {
+				// 只有日期，无 src
+				if maxSubTasks > 0 && generated >= maxSubTasks {
+					logrus.Printf("📡 [GenerateTimeWindowSubTasks] 达到最大子任务数量限制: %d", maxSubTasks)
+					break
+				}
+
+				params := make(map[string]interface{})
+				for k, v := range fixedParams {
+					params[k] = v
+				}
+				params[dateParamKey] = dateStr
+
+				subTaskName := fmt.Sprintf("Sync_%s_%s_%d", apiName, dateStr, wi)
+				paramsJSON, _ := json.Marshal(params)
+
+				subTaskParams := map[string]interface{}{
+					"data_source_name": dataSourceName,
+					"api_name":         apiName,
+					"token":            token,
+					"target_db_path":   targetDBPath,
+					"sync_batch_id":    workflowInstanceID,
+					"params":           string(paramsJSON),
+				}
+
+				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s", apiName, dateParamKey, dateStr), taskRegistry).
+					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+					WithCompensationFunction("CompensateSyncData").
+					Build()
+				if err != nil {
+					logrus.Printf("❌ [GenerateTimeWindowSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+					continue
+				}
+
+				subTasks = append(subTasks, subTask)
+				subTaskInfos = append(subTaskInfos, map[string]interface{}{
+					"name":          subTaskName,
+					"api_name":      apiName,
+					"date_param":    dateParamKey,
+					"date":          dateStr,
+					"window_start":  w.Start,
+					"window_end":    w.End,
+					"date_yyyymmdd": dateStr,
+				})
+				generated++
+				continue
+			}
+
+			// 日期 + 来源模式
+			for si, src := range srcValues {
+				if maxSubTasks > 0 && generated >= maxSubTasks {
+					logrus.Printf("📡 [GenerateTimeWindowSubTasks] 达到最大子任务数量限制: %d", maxSubTasks)
+					break
+				}
+
+				params := make(map[string]interface{})
+				for k, v := range fixedParams {
+					params[k] = v
+				}
+				params["src"] = src
+				params[dateParamKey] = dateStr
+
+				subTaskName := fmt.Sprintf("Sync_%s_%s_%s_%d_%d", apiName, src, dateStr, wi, si)
+				paramsJSON, _ := json.Marshal(params)
+
+				subTaskParams := map[string]interface{}{
+					"data_source_name": dataSourceName,
+					"api_name":         apiName,
+					"token":            token,
+					"target_db_path":   targetDBPath,
+					"sync_batch_id":    workflowInstanceID,
+					"params":           string(paramsJSON),
+				}
+
+				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: src=%s, %s=%s", apiName, src, dateParamKey, dateStr), taskRegistry).
+					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+					WithCompensationFunction("CompensateSyncData").
+					Build()
+				if err != nil {
+					logrus.Printf("❌ [GenerateTimeWindowSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+					continue
+				}
+
+				subTasks = append(subTasks, subTask)
+				subTaskInfos = append(subTaskInfos, map[string]interface{}{
+					"name":          subTaskName,
+					"api_name":      apiName,
+					"src":           src,
+					"date_param":    dateParamKey,
+					"date":          dateStr,
+					"window_start":  w.Start,
+					"window_end":    w.End,
+					"date_yyyymmdd": dateStr,
+				})
+				generated++
+			}
+			if maxSubTasks > 0 && generated >= maxSubTasks {
+				break
+			}
+			continue
+		}
+
+		// 区间模式：为每个窗口 × src 生成带 start_date/end_date 的子任务
+		for si, src := range srcValues {
+			if maxSubTasks > 0 && generated >= maxSubTasks {
+				logrus.Printf("📡 [GenerateTimeWindowSubTasks] 达到最大子任务数量限制: %d", maxSubTasks)
+				break
+			}
+
+			params := make(map[string]interface{})
+			for k, v := range fixedParams {
+				params[k] = v
+			}
+			params["src"] = src
+			params["start_date"] = w.Start
+			params["end_date"] = w.End
+
+			subTaskName := fmt.Sprintf("Sync_%s_%s_%d_%d", apiName, src, wi, si)
+			paramsJSON, _ := json.Marshal(params)
+
+			subTaskParams := map[string]interface{}{
+				"data_source_name": dataSourceName,
+				"api_name":         apiName,
+				"token":            token,
+				"target_db_path":   targetDBPath,
+				"sync_batch_id":    workflowInstanceID,
+				"params":           string(paramsJSON),
+			}
+
+			subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: src=%s, window=%s~%s", apiName, src, w.Start, w.End), taskRegistry).
+				WithJobFunction("SyncAPIData", subTaskParams).
+				WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+				WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+				WithCompensationFunction("CompensateSyncData").
+				Build()
+			if err != nil {
+				logrus.Printf("❌ [GenerateTimeWindowSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+				continue
+			}
+
+			subTasks = append(subTasks, subTask)
+			subTaskInfos = append(subTaskInfos, map[string]interface{}{
+				"name":       subTaskName,
+				"api_name":   apiName,
+				"src":        src,
+				"start_date": w.Start,
+				"end_date":   w.End,
+			})
+			generated++
+		}
+		if maxSubTasks > 0 && generated >= maxSubTasks {
+			break
+		}
+	}
+
+	if len(subTasks) == 0 {
+		logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 无有效子任务可提交")
+		return map[string]interface{}{
+			"status":    "success",
+			"generated": 0,
+			"api_name":  apiName,
+			"sub_tasks": subTaskInfos,
+		}, nil
+	}
+
+	if err := manager.AtomicAddSubTasks(subTasks, parentTaskID); err != nil {
+		return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+	}
+	logrus.Printf("✅ [GenerateTimeWindowSubTasks] 共生成并一次性提交 %d 个子任务", generated)
+
+	return map[string]interface{}{
+		"status":    "success",
+		"generated": generated,
+		"api_name":  apiName,
+		"sub_tasks": subTaskInfos,
+	}, nil
+}
+
 // ==================== 辅助函数 ====================
 
 // UpstreamParamConfig 上游参数配置
@@ -1226,6 +1896,13 @@ func convertToStringSlice(raw interface{}) []string {
 			}
 		}
 		return result
+	case string:
+		if strings.HasPrefix(v, "[") {
+			var arr []string
+			if err := json.Unmarshal([]byte(v), &arr); err == nil && len(arr) > 0 {
+				return arr
+			}
+		}
 	}
 	return nil
 }
@@ -1314,6 +1991,56 @@ func normalizeDateTimeToStkMinsFormat(s, defaultTime string) string {
 	return ""
 }
 
+// convertToTimeWindowSlice 将接口类型转换为时间窗口切片，元素为 map[string]string{"start": ..., "end": ...}
+func convertToTimeWindowSlice(raw interface{}) []struct{ Start, End string } {
+	var result []struct{ Start, End string }
+	if raw == nil {
+		return nil
+	}
+
+	switch v := raw.(type) {
+	case []map[string]string:
+		for _, item := range v {
+			start := strings.TrimSpace(item["start"])
+			end := strings.TrimSpace(item["end"])
+			if start != "" && end != "" {
+				result = append(result, struct{ Start, End string }{Start: start, End: end})
+			}
+		}
+	case []map[string]interface{}:
+		for _, item := range v {
+			start, _ := item["start"].(string)
+			end, _ := item["end"].(string)
+			start = strings.TrimSpace(start)
+			end = strings.TrimSpace(end)
+			if start != "" && end != "" {
+				result = append(result, struct{ Start, End string }{Start: start, End: end})
+			}
+		}
+	case []interface{}:
+		for _, it := range v {
+			switch m := it.(type) {
+			case map[string]interface{}:
+				start, _ := m["start"].(string)
+				end, _ := m["end"].(string)
+				start = strings.TrimSpace(start)
+				end = strings.TrimSpace(end)
+				if start != "" && end != "" {
+					result = append(result, struct{ Start, End string }{Start: start, End: end})
+				}
+			case map[string]string:
+				start := strings.TrimSpace(m["start"])
+				end := strings.TrimSpace(m["end"])
+				if start != "" && end != "" {
+					result = append(result, struct{ Start, End string }{Start: start, End: end})
+				}
+			}
+		}
+	}
+
+	return result
+}
+
 // filterDatesByRange 根据日期范围过滤日期列表
 // dates: 日期列表（格式: "20260122"）
 // startDate: 开始日期（格式: "20260115"），为空则不限制开始
@@ -1341,4 +2068,81 @@ func filterDatesByRange(dates []string, startDate, endDate string) []string {
 	}
 
 	return filtered
+}
+
+// formatParamsForLog 将参数 map 序列化为 JSON 并截断，避免日志过长。
+func formatParamsForLog(params map[string]interface{}, maxLen int) string {
+	if params == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		s := fmt.Sprintf("%v", params)
+		if len(s) > maxLen {
+			return s[:maxLen] + "..."
+		}
+		return s
+	}
+	s := string(b)
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
+}
+
+// parseFlexibleDateTime 尝试使用多种 layout 解析日期/时间字符串，返回 time.Time。
+// 复用 stk_mins 的日期时间解析布局，确保常见格式都能支持。
+func parseFlexibleDateTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, fmt.Errorf("empty datetime string")
+	}
+	for _, layout := range dateTimeLayoutsForStkMins {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported datetime format: %s", s)
+}
+
+// parseFreqToDuration 将简单频率字符串（如 "D", "3H"）解析为 time.Duration。
+// 仅支持正向步长。
+func parseFreqToDuration(freq string) (time.Duration, error) {
+	freq = strings.TrimSpace(strings.ToUpper(freq))
+	if freq == "" {
+		return 0, fmt.Errorf("freq is empty")
+	}
+
+	// 拆分倍数和单位，例如 "3H" -> 3 + "H"
+	i := 0
+	for ; i < len(freq); i++ {
+		if freq[i] < '0' || freq[i] > '9' {
+			break
+		}
+	}
+
+	multiplier := 1
+	var err error
+	if i > 0 {
+		multiplier, err = strconv.Atoi(freq[:i])
+		if err != nil || multiplier <= 0 {
+			return 0, fmt.Errorf("invalid freq multiplier: %s", freq[:i])
+		}
+	}
+	unit := freq[i:]
+	if unit == "" {
+		return 0, fmt.Errorf("invalid freq unit in %s", freq)
+	}
+
+	var base time.Duration
+	switch unit {
+	case "D":
+		base = 24 * time.Hour
+	case "H":
+		base = time.Hour
+	default:
+		return 0, fmt.Errorf("unsupported freq unit: %s", unit)
+	}
+
+	return time.Duration(multiplier) * base, nil
 }

@@ -412,6 +412,12 @@ func (s *MetadataApplicationServiceImpl) CreateAPISyncStrategy(ctx context.Conte
 	if len(req.Dependencies) > 0 {
 		strategy.SetDependencies(req.Dependencies)
 	}
+	if req.FixedParams != nil {
+		strategy.FixedParams = req.FixedParams
+	}
+	if len(req.FixedParamKeys) > 0 {
+		strategy.FixedParamKeys = req.FixedParamKeys
+	}
 	if req.Description != "" {
 		strategy.SetDescription(req.Description)
 	}
@@ -475,6 +481,12 @@ func (s *MetadataApplicationServiceImpl) UpdateAPISyncStrategy(ctx context.Conte
 	}
 	if req.Dependencies != nil {
 		strategy.SetDependencies(*req.Dependencies)
+	}
+	if req.FixedParams != nil {
+		strategy.FixedParams = *req.FixedParams
+	}
+	if req.FixedParamKeys != nil {
+		strategy.FixedParamKeys = *req.FixedParamKeys
 	}
 	if req.Description != nil {
 		strategy.SetDescription(*req.Description)

@@ -117,4 +117,4 @@ load();
 ## 说明
 
 - 若数据源尚未导入 API 元数据，`api_names` 可能为空，此时不展示勾选项或提示先刷新/导入元数据。  
-- 常见可设为公共数据的 API（如 Tushare）：`trade_cal`、`stock_basic` 等全量、变更较少的基础接口。
+- 常见可设为公共数据的 API（如 Tushare）：`trade_cal`、`stock_basic`、`index_basic` 等全量、变更较少的基础接口。

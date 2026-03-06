@@ -26,9 +26,9 @@ func NewAPISyncStrategyDAO(db *sqlx.DB) *APISyncStrategyDAO {
 // Create inserts a new API sync strategy record.
 func (d *APISyncStrategyDAO) Create(tx *sqlx.Tx, entity *metadata.APISyncStrategy) error {
 	query := `INSERT INTO api_sync_strategies (id, data_source_id, api_name, preferred_param, 
-		support_date_range, required_params, dependencies, description, created_at, updated_at)
+		support_date_range, required_params, dependencies, fixed_params, fixed_param_keys, description, created_at, updated_at)
 		VALUES (:id, :data_source_id, :api_name, :preferred_param, 
-		:support_date_range, :required_params, :dependencies, :description, :created_at, :updated_at)`
+		:support_date_range, :required_params, :dependencies, :fixed_params, :fixed_param_keys, :description, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
 	if err != nil {
@@ -64,6 +64,7 @@ func (d *APISyncStrategyDAO) Update(tx *sqlx.Tx, entity *metadata.APISyncStrateg
 	query := `UPDATE api_sync_strategies SET
 		preferred_param = :preferred_param, support_date_range = :support_date_range,
 		required_params = :required_params, dependencies = :dependencies,
+		fixed_params = :fixed_params, fixed_param_keys = :fixed_param_keys,
 		description = :description, updated_at = :updated_at
 		WHERE id = :id`
 
@@ -218,6 +219,22 @@ func (d *APISyncStrategyDAO) toRow(entity *metadata.APISyncStrategy) (*APISyncSt
 		row.Description = sql.NullString{String: entity.Description, Valid: true}
 	}
 
+	if len(entity.FixedParams) > 0 {
+		data, err := json.Marshal(entity.FixedParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal fixed params: %w", err)
+		}
+		row.FixedParams = sql.NullString{String: string(data), Valid: true}
+	}
+
+	if len(entity.FixedParamKeys) > 0 {
+		data, err := json.Marshal(entity.FixedParamKeys)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal fixed param keys: %w", err)
+		}
+		row.FixedParamKeys = sql.NullString{String: string(data), Valid: true}
+	}
+
 	return row, nil
 }
 
@@ -251,6 +268,22 @@ func (d *APISyncStrategyDAO) toEntity(row *APISyncStrategyRow) (*metadata.APISyn
 
 	if row.Description.Valid {
 		entity.Description = row.Description.String
+	}
+
+	if row.FixedParams.Valid && row.FixedParams.String != "" {
+		var fixed map[string]any
+		if err := json.Unmarshal([]byte(row.FixedParams.String), &fixed); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal fixed params: %w", err)
+		}
+		entity.FixedParams = fixed
+	}
+
+	if row.FixedParamKeys.Valid && row.FixedParamKeys.String != "" {
+		var keys []string
+		if err := json.Unmarshal([]byte(row.FixedParamKeys.String), &keys); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal fixed param keys: %w", err)
+		}
+		entity.FixedParamKeys = keys
 	}
 
 	return entity, nil

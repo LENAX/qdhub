@@ -515,6 +515,8 @@ func (h *MetadataHandler) CreateAPISyncStrategy(c *gin.Context) {
 		SupportDateRange: req.SupportDateRange,
 		RequiredParams:   req.RequiredParams,
 		Dependencies:     req.Dependencies,
+		FixedParams:      req.FixedParams,
+		FixedParamKeys:   req.FixedParamKeys,
 		Description:      req.Description,
 	})
 	if err != nil {
@@ -606,6 +608,8 @@ func (h *MetadataHandler) UpdateAPISyncStrategy(c *gin.Context) {
 		SupportDateRange: req.SupportDateRange,
 		RequiredParams:   req.RequiredParams,
 		Dependencies:     req.Dependencies,
+		FixedParams:      req.FixedParams,
+		FixedParamKeys:   req.FixedParamKeys,
 		Description:      req.Description,
 	})
 	if err != nil {
@@ -668,19 +672,23 @@ type SetTokenReq struct {
 
 // CreateAPISyncStrategyReq represents the request body for creating an API sync strategy.
 type CreateAPISyncStrategyReq struct {
-	APIName          string   `json:"api_name" binding:"required"`
-	PreferredParam   string   `json:"preferred_param" binding:"required"` // none/trade_date/ts_code
-	SupportDateRange bool     `json:"support_date_range"`
-	RequiredParams   []string `json:"required_params"`
-	Dependencies     []string `json:"dependencies"`
-	Description       string   `json:"description"`
+	APIName          string                 `json:"api_name" binding:"required"`
+	PreferredParam   string                 `json:"preferred_param" binding:"required"` // none/trade_date/ts_code
+	SupportDateRange bool                   `json:"support_date_range"`
+	RequiredParams   []string               `json:"required_params"`
+	Dependencies     []string               `json:"dependencies"`
+	FixedParams      map[string]interface{} `json:"fixed_params"`       // JSON object
+	FixedParamKeys   []string               `json:"fixed_param_keys"`   // keys that cannot be overridden
+	Description      string                 `json:"description"`
 }
 
 // UpdateAPISyncStrategyReq represents the request body for updating an API sync strategy.
 type UpdateAPISyncStrategyReq struct {
-	PreferredParam   *string   `json:"preferred_param"`
-	SupportDateRange *bool      `json:"support_date_range"`
-	RequiredParams   *[]string `json:"required_params"`
-	Dependencies     *[]string  `json:"dependencies"`
-	Description       *string    `json:"description"`
+	PreferredParam   *string                `json:"preferred_param"`
+	SupportDateRange *bool                  `json:"support_date_range"`
+	RequiredParams   *[]string              `json:"required_params"`
+	Dependencies     *[]string              `json:"dependencies"`
+	FixedParams      *map[string]interface{} `json:"fixed_params"`
+	FixedParamKeys   *[]string              `json:"fixed_param_keys"`
+	Description      *string                `json:"description"`
 }

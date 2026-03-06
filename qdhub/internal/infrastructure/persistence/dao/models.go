@@ -116,6 +116,8 @@ type APISyncStrategyRow struct {
 	SupportDateRange int            `db:"support_date_range"` // 0: false, 1: true
 	RequiredParams   sql.NullString `db:"required_params"`    // JSON array
 	Dependencies     sql.NullString `db:"dependencies"`       // JSON array
+	FixedParams      sql.NullString `db:"fixed_params"`       // JSON object
+	FixedParamKeys   sql.NullString `db:"fixed_param_keys"`   // JSON array
 	Description      sql.NullString `db:"description"`
 	CreatedAt        time.Time      `db:"created_at"`
 	UpdatedAt        time.Time      `db:"updated_at"`

@@ -75,3 +75,45 @@ func TestDeleteSyncedDataJob_MissingSyncBatchID(t *testing.T) {
 		t.Error("expected error for missing sync_batch_id")
 	}
 }
+
+func TestGenerateDatetimeRangeJob_MissingParams(t *testing.T) {
+	tc := mockTaskContext(map[string]interface{}{})
+
+	_, err := jobs.GenerateDatetimeRangeJob(tc)
+	if err == nil {
+		t.Error("expected error for missing start/end")
+	}
+}
+
+func TestGenerateDatetimeRangeJob_BasicDaily(t *testing.T) {
+	tc := mockTaskContext(map[string]interface{}{
+		"start": "2025-01-01",
+		"end":   "2025-01-03",
+		"freq":  "D",
+	})
+
+	out, err := jobs.GenerateDatetimeRangeJob(tc)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	result, ok := out.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", out)
+	}
+	dts, ok := result["datetimes"].([]string)
+	if !ok {
+		t.Fatalf("expected []string datetimes, got %T", result["datetimes"])
+	}
+	if len(dts) != 3 {
+		t.Errorf("expected 3 datetimes, got %d", len(dts))
+	}
+}
+
+func TestGenerateTimeWindowSubTasksJob_MissingParams(t *testing.T) {
+	tc := mockTaskContext(map[string]interface{}{})
+
+	_, err := jobs.GenerateTimeWindowSubTasksJob(tc)
+	if err == nil {
+		t.Error("expected error for missing data_source_name and api_name")
+	}
+}

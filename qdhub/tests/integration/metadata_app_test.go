@@ -165,15 +165,18 @@ func TestMetadataApplicationService_Integration_TokenLifecycle(t *testing.T) {
 	svc := impl.NewMetadataApplicationService(dsRepo, metadataRepo, parserFactory, workflowExecutor, nil)
 
 	// Create data source first
-	ds, _ := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
+	ds, err := svc.CreateDataSource(ctx, contracts.CreateDataSourceRequest{
 		Name:        "Tushare",
 		Description: "Test",
 		BaseURL:     "https://api.tushare.pro",
 		DocURL:      "https://doc.tushare.pro",
 	})
+	if err != nil {
+		t.Fatalf("CreateDataSource failed: %v", err)
+	}
 
 	// Save token
-	err := svc.SaveToken(ctx, contracts.SaveTokenRequest{
+	err = svc.SaveToken(ctx, contracts.SaveTokenRequest{
 		DataSourceID: ds.ID,
 		TokenValue:   "test-token-value",
 	})

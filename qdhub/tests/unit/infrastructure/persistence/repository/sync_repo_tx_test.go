@@ -39,6 +39,8 @@ func setupSyncRepoTestDB(t *testing.T) (*persistence.DB, func()) {
 			default_execute_params TEXT,
 			incremental_mode BOOLEAN DEFAULT 0,
 			last_successful_end_date VARCHAR(32),
+			incremental_start_date_api VARCHAR(128),
+			incremental_start_date_column VARCHAR(128),
 			status VARCHAR(32) DEFAULT 'draft',
 			last_executed_at TIMESTAMP,
 			next_execute_at TIMESTAMP,

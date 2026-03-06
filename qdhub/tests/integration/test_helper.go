@@ -75,6 +75,54 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to execute 005_sync_plan_default_params migration: %v", err)
 	}
 
+	// Incremental sync plan fields (mode, last_successful_end_date)
+	incrementalModeSQL, err := os.ReadFile("../../migrations/010_sync_plan_incremental_mode.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 010_sync_plan_incremental_mode migration file: %v", err)
+	}
+	_, err = db.Exec(string(incrementalModeSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 010_sync_plan_incremental_mode migration: %v", err)
+	}
+
+	// Sync plan incremental start date source columns
+	incrementalStartSQL, err := os.ReadFile("../../migrations/015_sync_plan_incremental_start_date_source.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 015_sync_plan_incremental_start_date_source migration file: %v", err)
+	}
+	_, err = db.Exec(string(incrementalStartSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 015_sync_plan_incremental_start_date_source migration: %v", err)
+	}
+
+	// DataSource common_data_apis column
+	commonDataSQL, err := os.ReadFile("../../migrations/011_data_source_common_data_apis.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 011_data_source_common_data_apis migration file: %v", err)
+	}
+	_, err = db.Exec(string(commonDataSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 011_data_source_common_data_apis migration: %v", err)
+	}
+
+	// API Sync Strategy fixed params columns
+	fixedParamsSQL, err := os.ReadFile("../../migrations/016_api_sync_strategy_fixed_params.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 016_api_sync_strategy_fixed_params migration file: %v", err)
+	}
+	_, err = db.Exec(string(fixedParamsSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 016_api_sync_strategy_fixed_params migration: %v", err)
+	}
+
 	cleanup := func() {
 		db.Close()
 		os.Remove(dsn)

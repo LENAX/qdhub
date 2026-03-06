@@ -59,3 +59,4 @@ qdhub/data/qdhub.db-wal
 bak/qdhub.duckdb
 qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal
+roadmap.md

@@ -46,6 +46,8 @@ func setupAPISyncStrategyTestDB(t *testing.T) (*persistence.DB, func()) {
 			support_date_range INTEGER DEFAULT 0,
 			required_params  TEXT,
 			dependencies     TEXT,
+			fixed_params     TEXT,
+			fixed_param_keys TEXT,
 			description      TEXT,
 			created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
