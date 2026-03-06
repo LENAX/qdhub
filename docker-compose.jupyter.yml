@@ -19,4 +19,6 @@ services:
     volumes:
       - "${JUPYTER_MOUNT_DATA:-/mnt/data}:/mnt/data:ro"
       - "${JUPYTER_MOUNT_QDHUB:-/mnt/vdb/qdhub}:/mnt/vdb/qdhub:rw"
+      # Jupyter Server 配置：用于支持在 nginx 下通过 https://<host>/jupyter/ 访问
+      - ./deploy/jupyter_server_config.py:/home/jovyan/.jupyter/jupyter_server_config.py:ro
     restart: unless-stopped

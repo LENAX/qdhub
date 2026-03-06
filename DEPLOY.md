@@ -229,3 +229,48 @@ docker compose -f docker-compose.image.yml up -d
 ```
 
 无需拉取或上传任何源代码。
+
+---
+
+## 四、Jupyter Lab 研究环境镜像（可选）
+
+若需要在服务器上通过 Nginx 以 `https://<域名>/jupyter/` 方式访问 Jupyter Lab，**必须在本地先构建并推送 Jupyter 镜像**，ECS 只从镜像仓库拉取。
+
+### 1. 本地构建并推送（linux/amd64）
+
+在项目根目录：
+
+```bash
+export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
+export IMAGE_TAG=v0.1.0-jupyter.1
+
+# 使用 buildx 按 linux/amd64 构建并推送（与 research-env/README.md 一致）
+docker buildx create --name qdhub-jupyter --use 2>/dev/null || true
+docker buildx inspect --bootstrap
+
+docker buildx build \
+  --platform linux/amd64 \
+  -t "${DOCKER_REGISTRY}qdhub-jupyter-lab:${IMAGE_TAG}" \
+  -f research-env/Dockerfile \
+  research-env \
+  --push
+```
+
+### 2. ECS 上使用 Jupyter 镜像
+
+在 ECS 上，按照 `research-env/README.md` 中示例设置：
+
+```bash
+export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
+export IMAGE_TAG=v0.1.0-jupyter.1   # 必须与本地构建时一致
+
+export JUPYTER_MOUNT_DATA=/mnt/data/jupyter
+export JUPYTER_MOUNT_QDHUB=/mnt/data/qdhub
+export JUPYTER_PORT=8888
+export JUPYTER_TOKEN=your-secret
+
+docker compose -f docker-compose.jupyter.yml pull jupyter-lab
+docker compose -f docker-compose.jupyter.yml up -d
+```
+
+ECS 只需拉取 `qdhub-jupyter-lab` 镜像并启动，不在服务器上 `build`，这样可避免访问 Docker Hub / GHCR 以及多架构问题。详细说明可参考 `research-env/README.md`。
