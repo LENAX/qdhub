@@ -186,6 +186,81 @@ func TestSyncApplicationService_Integration_CreateAndGetSyncPlan(t *testing.T) {
 	}
 }
 
+// TestSyncApplicationService_Integration_CreateSyncPlan_WithPullIntervalAndScheduleWindow 验证创建计划时支持 pull_interval_seconds、schedule_start_cron、schedule_end_cron
+func TestSyncApplicationService_Integration_CreateSyncPlan_WithPullIntervalAndScheduleWindow(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
+
+	dataSource := metadata.NewDataSource("Tushare", "Test", "https://api.tushare.pro", "https://doc.tushare.pro")
+	if err := dataSourceRepo.Create(dataSource); err != nil {
+		t.Fatalf("create data source: %v", err)
+	}
+
+	plan, err := svc.CreateSyncPlan(ctx, contracts.CreateSyncPlanRequest{
+		Name:                 "Realtime Plan",
+		Description:          "With pull interval and window",
+		DataSourceID:         dataSource.ID,
+		SelectedAPIs:         []string{"realtime_quote"},
+		PlanMode:             sync.PlanModeRealtime,
+		PullIntervalSeconds:  45,
+		ScheduleStartCron:    "0 0 9 * * 1-5",
+		ScheduleEndCron:      "0 30 15 * * 1-5",
+	})
+	if err != nil {
+		t.Fatalf("CreateSyncPlan: %v", err)
+	}
+
+	retrieved, err := svc.GetSyncPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("GetSyncPlan: %v", err)
+	}
+	if retrieved.PullIntervalSeconds != 45 {
+		t.Errorf("PullIntervalSeconds = %d, expected 45", retrieved.PullIntervalSeconds)
+	}
+	if retrieved.ScheduleStartCron == nil || *retrieved.ScheduleStartCron != "0 0 9 * * 1-5" {
+		t.Errorf("ScheduleStartCron = %v", retrieved.ScheduleStartCron)
+	}
+	if retrieved.ScheduleEndCron == nil || *retrieved.ScheduleEndCron != "0 30 15 * * 1-5" {
+		t.Errorf("ScheduleEndCron = %v", retrieved.ScheduleEndCron)
+	}
+	if retrieved.Mode != sync.PlanModeRealtime {
+		t.Errorf("Mode = %s, expected realtime", retrieved.Mode)
+	}
+}
+
+// TestSyncApplicationService_Integration_ReconcileRunningWindow_NoError 无配置运行时段的计划时调用 ReconcileRunningWindow 不报错
+func TestSyncApplicationService_Integration_ReconcileRunningWindow_NoError(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	syncPlanRepo := repository.NewSyncPlanRepository(db)
+	dataSourceRepo := repository.NewDataSourceRepository(db)
+	dataStoreRepo := repository.NewQuantDataStoreRepository(db)
+	cronCalculator := scheduler.NewCronSchedulerCalculatorAdapter()
+	workflowExecutor := &MockSyncWorkflowExecutor{}
+	dependencyResolver := &MockSyncDependencyResolver{}
+	uowImpl := uow.NewUnitOfWork(db)
+	metadataRepo := repository.NewMetadataRepository(db)
+	svc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, nil, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, nil, uowImpl, metadataRepo, nil)
+
+	err := svc.ReconcileRunningWindow(ctx)
+	if err != nil {
+		t.Errorf("ReconcileRunningWindow with no plans: %v", err)
+	}
+}
+
 func TestSyncApplicationService_Integration_ListSyncPlans(t *testing.T) {
 	db, cleanup := setupIntegrationDB(t)
 	defer cleanup()

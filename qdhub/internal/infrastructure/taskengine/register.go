@@ -12,6 +12,8 @@ import (
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
+	"qdhub/internal/infrastructure/datasource/tushare/realtime"
+	"qdhub/internal/infrastructure/realtimebuffer"
 	"qdhub/internal/infrastructure/taskengine/handlers"
 	"qdhub/internal/infrastructure/taskengine/jobs"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -34,6 +36,11 @@ type Dependencies struct {
 	SyncCallbackInvoker interface{}
 	// CommonDataCache 可选；SyncAPIDataJob 用于公共数据 Cache→DuckDB→API 复用，未设置则不走缓存。
 	CommonDataCache sync.CommonDataCache
+
+	// RealtimeAdapterRegistry 实时行情 Adapter 注册表（sina/eastmoney 等），RealtimeDataCollectorJob 使用。
+	RealtimeAdapterRegistry realtime.RealtimeAdapterRegistry
+	// RealtimeBufferRegistry 实时同步 buffer 按实例 ID 管理，Collector Push、Handler 消费。
+	RealtimeBufferRegistry realtimebuffer.Registry
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -75,9 +82,16 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 
 		// ==================== 增量实时同步 Jobs ====================
 		{"GetSyncCheckpoint", jobs.GetSyncCheckpointJob, "获取同步检查点"},
+		{"GetSyncRangeFromTarget", jobs.GetSyncRangeFromTargetJob, "从目标库表+日期列计算同步起始日（不依赖 checkpoint）"},
 		{"FetchLatestTradingDate", jobs.FetchLatestTradingDateJob, "获取最新交易日"},
 		{"GenerateIncrementalSyncSubTasks", jobs.GenerateIncrementalSyncSubTasksJob, "生成增量同步子任务（模板任务）"},
 		{"UpdateSyncCheckpoint", jobs.UpdateSyncCheckpointJob, "更新同步检查点"},
+
+		// ==================== 实时流式同步 Jobs ====================
+		{"RealtimeDataCollector", jobs.RealtimeDataCollectorJob, "实时数据采集（Pull 单次 Fetch，Push 到 buffer）"},
+		{"RealtimeSyncDataHandler", jobs.RealtimeSyncDataHandlerJob, "实时数据落库（从 buffer 消费）"},
+		{"RealtimeCloseBuffer", jobs.RealtimeCloseBufferJob, "关闭实时 buffer（所有 Collector 完成后调用）"},
+		{"RealtimeQuoteStreamHandler", jobs.RealtimeQuoteStreamHandlerJob, "Streaming 模式实时行情流处理（从 DataBuffer Pop 的 data 落库）"},
 
 		// ==================== 建表 Jobs ====================
 		{"CreateTableFromMetadata", jobs.CreateTableFromMetadataJob, "根据 Metadata 创建数据表"},
@@ -191,6 +205,14 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 	// Register CommonDataCache (optional; SyncAPIDataJob uses for cache-first reuse)
 	if deps.CommonDataCache != nil {
 		registry.RegisterDependencyWithKey("CommonDataCache", deps.CommonDataCache)
+	}
+
+	// RealtimeAdapterRegistry & RealtimeBufferRegistry (for realtime sync workflow)
+	if deps.RealtimeAdapterRegistry != nil {
+		registry.RegisterDependencyWithKey("RealtimeAdapterRegistry", deps.RealtimeAdapterRegistry)
+	}
+	if deps.RealtimeBufferRegistry != nil {
+		registry.RegisterDependencyWithKey("RealtimeBufferRegistry", deps.RealtimeBufferRegistry)
 	}
 
 	// Register engine itself as dependency (for template tasks)

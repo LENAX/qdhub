@@ -224,6 +224,14 @@ func (s *e2eJobScheduler) UnschedulePlan(planID string) {
 	delete(s.scheduledJobs, planID)
 }
 
+func (s *e2eJobScheduler) GetScheduledPlanIDs() []string {
+	ids := make([]string, 0, len(s.scheduledJobs))
+	for id := range s.scheduledJobs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (s *e2eJobScheduler) IsScheduled(planID string) bool {
 	_, exists := s.scheduledJobs[planID]
 	return exists

@@ -43,6 +43,9 @@ type SyncPlanRepository interface {
 	// GetExecutionByWorkflowInstID 按 workflow 实例 ID 获取执行记录（用于完成回调）
 	GetExecutionByWorkflowInstID(workflowInstID string) (*SyncExecution, error)
 
+	// GetRunningExecutionByPlanID 获取计划当前正在运行的执行（status=running），若无则返回 nil
+	GetRunningExecutionByPlanID(planID shared.ID) (*SyncExecution, error)
+
 	// UpdateExecution 更新执行记录
 	UpdatePlanExecution(exec *SyncExecution) error
 

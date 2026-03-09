@@ -66,6 +66,10 @@ type APISyncStrategy struct {
 	// IterateParams 需要迭代的参数及其值列表（如 news 的 src: ["sina","cls",...]）
 	// 当非空时，Build 会生成 SyncMultiParamAPIData 任务
 	IterateParams map[string][]string
+	// RealtimeTsCodeChunkSize 实时模式下 ts_code 分批大小（0 表示不分批）
+	RealtimeTsCodeChunkSize int
+	// RealtimeTsCodeFormat 实时模式下 ts_code 格式（如 "000001.SZ"）
+	RealtimeTsCodeFormat string
 	// TimeWindow 若非空且 Enabled=true，则优先使用 GenerateDatetimeRange + GenerateTimeWindowSubTasks
 	// 执行「时间窗口 + 模板任务」的同步策略。
 	TimeWindow *APITimeWindowStrategy
@@ -156,16 +160,24 @@ func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy 
 	// 合并 Dependencies（并集，避免丢失新增依赖，如 FetchIndexBasic）
 	deps := mergeStringSlicesUnique(entity.Dependencies, base.Dependencies)
 
+	// IterateParams：DB 有则用 entity，否则用 base
+	iterateParams := base.IterateParams
+	if len(entity.IterateParams) > 0 {
+		iterateParams = entity.IterateParams
+	}
+
 	strategy := &APISyncStrategy{
-		PreferredParam:   string(entity.PreferredParam),
-		SupportDateRange: entity.SupportDateRange,
-		RequiredParams:   required,
-		Dependencies:     deps,
-		APIParamName:     base.APIParamName,
-		FixedParams:      entity.FixedParams,
-		FixedParamKeys:   entity.FixedParamKeys,
-		IterateParams:    base.IterateParams,
-		TimeWindow:       base.TimeWindow,
+		PreferredParam:            string(entity.PreferredParam),
+		SupportDateRange:          entity.SupportDateRange,
+		RequiredParams:            required,
+		Dependencies:              deps,
+		APIParamName:              base.APIParamName,
+		FixedParams:               entity.FixedParams,
+		FixedParamKeys:            entity.FixedParamKeys,
+		IterateParams:             iterateParams,
+		RealtimeTsCodeChunkSize:   entity.RealtimeTsCodeChunkSize,
+		RealtimeTsCodeFormat:      entity.RealtimeTsCodeFormat,
+		TimeWindow:                base.TimeWindow,
 	}
 
 	// 如 fixed_params 中包含 time_window 配置，则覆盖默认的 TimeWindow

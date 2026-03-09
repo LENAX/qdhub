@@ -64,8 +64,8 @@ func TestApplicationServices_WorkflowExecutor_Integration(t *testing.T) {
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	// Create WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
+	// Create WorkflowExecutor（集成测试不覆盖实时 Adapter，传 nil）
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
 
 	// Create application services with WorkflowExecutor
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)

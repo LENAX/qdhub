@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 
+	taskrealtime "github.com/LENAX/task-engine/pkg/core/realtime"
 	"github.com/LENAX/task-engine/pkg/core/task"
 
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/datasource/tushare/realtime"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
@@ -20,6 +22,8 @@ type WorkflowExecutorImpl struct {
 	workflowRepo      workflow.WorkflowDefinitionRepository
 	taskEngineAdapter workflow.TaskEngineAdapter
 	metadataRepo      metadata.Repository
+	// RealtimeAdapterRegistry 由外层注入，用于 Streaming Collector 构建 QuotePullCollector 时访问 Sina/Eastmoney 实时接口。
+	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
@@ -27,11 +31,13 @@ func NewWorkflowExecutor(
 	workflowRepo workflow.WorkflowDefinitionRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
 	metadataRepo metadata.Repository,
+	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry,
 ) workflow.WorkflowExecutor {
 	return &WorkflowExecutorImpl{
-		workflowRepo:      workflowRepo,
-		taskEngineAdapter: taskEngineAdapter,
-		metadataRepo:      metadataRepo,
+		workflowRepo:           workflowRepo,
+		taskEngineAdapter:      taskEngineAdapter,
+		metadataRepo:           metadataRepo,
+		realtimeAdapterRegistry: realtimeAdapterRegistry,
 	}
 }
 
@@ -186,33 +192,104 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 	return shared.ID(controller), nil
 }
 
-// ExecuteRealtimeDataSync executes the realtime_data_sync built-in workflow.
-// Converts the typed request to params map and delegates to ExecuteBuiltInWorkflow.
+// ExecuteRealtimeDataSync 执行实时同步：当 DataSourceID 非空时走流式工作流（RealtimeSync）；否则走原增量检查点工作流。
 func (e *WorkflowExecutorImpl) ExecuteRealtimeDataSync(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	if !req.DataSourceID.IsEmpty() {
+		return e.executeRealtimeStreaming(ctx, req)
+	}
+	return e.executeRealtimeIncremental(ctx, req)
+}
+
+// executeRealtimeStreaming 构建并提交基于 Streaming 的实时工作流（RealtimeMarketSync）。
+func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
+	registryInterface := e.taskEngineAdapter.GetFunctionRegistry()
+	registry, ok := registryInterface.(task.FunctionRegistry)
+	if !ok {
+		return "", fmt.Errorf("failed to get function registry: invalid type")
+	}
+	if e.realtimeAdapterRegistry == nil {
+		return "", fmt.Errorf("realtime adapter registry is nil")
+	}
+
+	params := workflows.RealtimeMarketStreamingParams{
+		DataSourceID:    req.DataSourceID,
+		DataSourceName:  req.DataSourceName,
+		Token:           req.Token,
+		TargetDBPath:    req.TargetDBPath,
+		APINames:        req.APINames,
+		TsCodes:         req.TsCodes,
+		IndexCodes:      req.IndexCodes,
+		PullIntervalSecs: req.PullIntervalSecs,
+	}
+
+	var (
+		collector     taskrealtime.DataCollector
+		collectorName string
+	)
+
+	// realtime_tick 使用 SSE Push 模式，通过 TickPushCollector + eastmoney 适配器消费分笔数据。
+	if len(req.APINames) > 0 && req.APINames[0] == "realtime_tick" {
+		collector = &realtime.TickPushCollector{
+			DataSourceName:  req.DataSourceName,
+			Token:           req.Token,
+			TargetDBPath:    req.TargetDBPath,
+			TsCodes:         req.TsCodes,
+			AdapterRegistry: e.realtimeAdapterRegistry,
+		}
+		collectorName = "tushare_tick_push"
+	} else {
+		collector = &realtime.QuotePullCollector{
+			DataSourceName:   req.DataSourceName,
+			Token:            req.Token,
+			TargetDBPath:     req.TargetDBPath,
+			APINames:         req.APINames,
+			TsCodes:          req.TsCodes,
+			IndexCodes:       req.IndexCodes,
+			PullIntervalSecs: req.PullIntervalSecs,
+			AdapterRegistry:  e.realtimeAdapterRegistry,
+			Sources:          []string{"sina"},
+		}
+		collectorName = "tushare_quote_pull"
+	}
+
+	builder := workflows.NewRealtimeMarketStreamingBuilder(registry, params, collectorName, collector)
+	wf, err := builder.Build()
+	if err != nil {
+		return "", fmt.Errorf("build realtime streaming workflow: %w", err)
+	}
+	controller, err := e.taskEngineAdapter.SubmitDynamicWorkflow(ctx, wf)
+	if err != nil {
+		return "", fmt.Errorf("submit realtime streaming workflow: %w", err)
+	}
+	return shared.ID(controller), nil
+}
+
+// executeRealtimeIncremental 执行增量实时工作流（RealtimeDataSync，不依赖 checkpoint，与 SyncPlan 一致）
+func (e *WorkflowExecutorImpl) executeRealtimeIncremental(ctx context.Context, req workflow.RealtimeDataSyncRequest) (shared.ID, error) {
 	params := map[string]interface{}{
 		"data_source_name": req.DataSourceName,
 		"token":            req.Token,
 		"target_db_path":   req.TargetDBPath,
 		"api_names":        req.APINames,
 	}
-
-	// Set checkpoint table with default value
-	checkpointTable := req.CheckpointTable
-	if checkpointTable == "" {
-		checkpointTable = "sync_checkpoint"
+	if req.StartDate != "" {
+		params["start_date"] = req.StartDate
 	}
-	params["checkpoint_table"] = checkpointTable
-
-	// Add optional cron expression if set
+	if req.EndDate != "" {
+		params["end_date"] = req.EndDate
+	}
+	if req.IncrementalStartDateTable != "" {
+		params["incremental_start_date_table"] = req.IncrementalStartDateTable
+	}
+	if req.IncrementalStartDateColumn != "" {
+		params["incremental_start_date_column"] = req.IncrementalStartDateColumn
+	}
 	if req.CronExpr != "" {
 		params["cron_expr"] = req.CronExpr
 	}
-
-	// Only add max_stocks if it's set (non-zero means limit)
 	if req.MaxStocks > 0 {
 		params["max_stocks"] = req.MaxStocks
 	}
-
 	return e.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameRealtimeDataSync, params)
 }
 

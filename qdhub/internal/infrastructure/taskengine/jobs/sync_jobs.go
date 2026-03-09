@@ -21,6 +21,7 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/types"
 
+	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/infrastructure/datasource"
 )
@@ -972,6 +973,110 @@ func GetSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	}, nil
 }
 
+// GetSyncRangeFromTargetJob 从目标库「表+日期列」计算同步起始日，不依赖 checkpoint 表。
+// 同步范围可选：不传 start_date 且不传 table+column 时，下游仅同步最新一日（start=end=最新交易日）。
+//
+// Input params:
+//   - target_db_path: string - 目标数据库路径（必填）
+//   - start_date: string - 可选，调用方传入的起始日（20060102）
+//   - end_date: string - 可选，调用方传入的结束日（本 Job 仅透传，end_date 由 FetchLatestTradingDate 提供时可不传）
+//   - incremental_start_date_table: string - 可选，用于 MAX(列) 的表名
+//   - incremental_start_date_column: string - 可选，日期列名（如 trade_date）
+//
+// Output:
+//   - start_date: string - 本次同步起始日（表 MAX 与 param 同时存在时取 min）
+func GetSyncRangeFromTargetJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	targetDBPath := tc.GetParamString("target_db_path")
+	paramStartDate := trimParam(tc.GetParamString("start_date"))
+	table := trimParam(tc.GetParamString("incremental_start_date_table"))
+	column := trimParam(tc.GetParamString("incremental_start_date_column"))
+
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is required")
+	}
+
+	startDate := paramStartDate
+
+	if table != "" && column != "" {
+		if !safeSQLIdentifier(table) || !safeSQLIdentifier(column) {
+			return nil, fmt.Errorf("incremental_start_date_table and incremental_start_date_column must be alphanumeric identifiers")
+		}
+		quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+		if err != nil {
+			return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
+		}
+		dataMax, err := queryMaxDateFromDB(ctx, quantDB, table, column)
+		if err != nil {
+			logrus.Warnf("[GetSyncRangeFromTarget] query MAX failed: %v", err)
+		} else if dataMax != "" {
+			if startDate == "" {
+				startDate = dataMax
+			} else if dataMax < startDate {
+				startDate = dataMax
+			}
+			logrus.Printf("📍 [GetSyncRangeFromTarget] table=%s, column=%s -> data_max=%s, start_date=%s", table, column, dataMax, startDate)
+		}
+	}
+
+	return map[string]interface{}{
+		"start_date": startDate,
+	}, nil
+}
+
+// trimParam 去除首尾空格，并将未替换的占位符（${...}）视为空。
+func trimParam(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || (strings.HasPrefix(s, "${") && strings.HasSuffix(s, "}")) {
+		return ""
+	}
+	return s
+}
+
+// safeSQLIdentifier 仅允许 [a-zA-Z0-9_]，用于表名/列名防注入。
+func safeSQLIdentifier(name string) bool {
+	return regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(name)
+}
+
+// syncQuoteIdentifier 双引号包裹并转义内部双引号（DuckDB 标识符）。
+func syncQuoteIdentifier(name string) string {
+	escaped := strings.ReplaceAll(name, `"`, `""`)
+	return `"` + escaped + `"`
+}
+
+// queryMaxDateFromDB 在 QuantDB 上执行 SELECT MAX(column) FROM table，返回 20060102 格式日期字符串。
+func queryMaxDateFromDB(ctx context.Context, quantDB datastore.QuantDB, tableName, columnName string) (string, error) {
+	sql := fmt.Sprintf("SELECT MAX(%s) AS mx FROM %s", syncQuoteIdentifier(columnName), syncQuoteIdentifier(tableName))
+	rows, err := quantDB.Query(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	v, ok := rows[0]["mx"]
+	if !ok || v == nil {
+		return "", nil
+	}
+	switch val := v.(type) {
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return "", nil
+		}
+		if strings.Contains(val, "-") {
+			val = strings.ReplaceAll(val, "-", "")
+		}
+		if len(val) >= 8 {
+			return val[:8], nil
+		}
+		return val, nil
+	default:
+		// 忽略非字符串类型
+		return "", nil
+	}
+}
+
 // FetchLatestTradingDateJob 获取最新交易日
 // 调用 trade_cal API 获取最新的交易日期
 //
@@ -1090,24 +1195,19 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 		}
 	}
 
-	// 从上游任务获取检查点信息
-	checkpoints := make(map[string]string)
-	if cached := tc.GetParam("_cached_GetSyncCheckpoint"); cached != nil {
+	// 从上游任务获取同步范围（表+日期列计算，不依赖 checkpoint 表）
+	startDate := ""
+	if cached := tc.GetParam("_cached_GetSyncRangeFromTarget"); cached != nil {
 		if resultMap, ok := cached.(map[string]interface{}); ok {
-			if cp, ok := resultMap["checkpoints"].(map[string]interface{}); ok {
-				for k, v := range cp {
-					if s, ok := v.(string); ok {
-						checkpoints[k] = s
-					}
-				}
+			if s, ok := resultMap["start_date"].(string); ok && s != "" {
+				startDate = s
 			}
 		}
 	}
-
-	// 确定同步的开始日期
-	startDate := ""
-	if cp, ok := checkpoints[apiName]; ok && cp != "" {
-		startDate = cp // 从检查点开始
+	// 未配置时间范围时视为仅拉最新（实时 API 通常即最新数据；时间范围设计主要用于历史补数）
+	if startDate == "" && latestTradeDate != "" {
+		startDate = latestTradeDate
+		logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] 未配置时间范围，仅同步最新: %s", latestTradeDate)
 	}
 
 	logrus.Printf("📋 [GenerateIncrementalSyncSubTasks] api=%s, startDate=%s, endDate=%s",

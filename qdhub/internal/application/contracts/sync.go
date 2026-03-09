@@ -62,6 +62,10 @@ type SyncApplicationService interface {
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
 
+	// ReconcileRunningWindow 运行时段协调：对配置了 schedule_start_cron/schedule_end_cron 的 realtime 计划，
+	// 根据当前时间判断是否在时段内，在则自动启动、不在则自动停止。
+	ReconcileRunningWindow(ctx context.Context) error
+
 	// PauseExecution pauses a running sync execution (workflow instance).
 	PauseExecution(ctx context.Context, executionID shared.ID) error
 
@@ -120,6 +124,13 @@ type CreateSyncPlanRequest struct {
 	IncrementalMode             bool
 	IncrementalStartDateAPI     string // optional: API (table) name for MAX(column) in target DuckDB
 	IncrementalStartDateColumn  string // optional: column name for date, e.g. trade_date
+	// PlanMode 控制计划执行模式：batch（默认）或 realtime
+	PlanMode                    sync.PlanMode
+	// 运行时段（仅 realtime）：cron 表达式，时段内自动启动、时段外自动停止
+	ScheduleStartCron           string
+	ScheduleEndCron             string
+	// Pull 模式拉取间隔（秒），0 表示默认 60
+	PullIntervalSeconds         int
 }
 
 // UpdateSyncPlanRequest represents a request to update a sync plan.
@@ -133,6 +144,11 @@ type UpdateSyncPlanRequest struct {
 	IncrementalMode             *bool
 	IncrementalStartDateAPI     *string
 	IncrementalStartDateColumn  *string
+	// PlanMode 可选更新；nil 表示不变
+	PlanMode                    *sync.PlanMode
+	ScheduleStartCron           *string
+	ScheduleEndCron             *string
+	PullIntervalSeconds         *int
 }
 
 // ExecuteSyncPlanRequest represents a request to execute a sync plan.

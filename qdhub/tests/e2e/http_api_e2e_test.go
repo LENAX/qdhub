@@ -61,8 +61,8 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	// 创建WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
+	// 创建WorkflowExecutor（HTTP E2E 不直接依赖实时 Adapter，传 nil）
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
 
 	// 创建依赖解析器
 	dependencyResolver := sync.NewDependencyResolver()

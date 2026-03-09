@@ -102,6 +102,35 @@ func (s *CronScheduler) UnschedulePlan(planID string) {
 	}
 }
 
+// ReconcileRunningWindowJobID 运行时段协调任务的固定 jobID，由 ExecuteScheduledJob 识别并调用 ReconcileRunningWindow。
+const ReconcileRunningWindowJobID = "_reconcile_running_window"
+
+// ScheduleRepeatingJob 注册一个按 cron 周期执行的后台任务（如运行时段协调），jobID 会传给 JobHandler.ExecuteScheduledJob。
+func (s *CronScheduler) ScheduleRepeatingJob(jobID string, cronExpr string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existingID, exists := s.entryIDs[jobID]; exists {
+		s.cron.Remove(existingID)
+		delete(s.entryIDs, jobID)
+	}
+	entryID, err := s.cron.AddFunc(cronExpr, func() {
+		if s.jobHandler != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := s.jobHandler.ExecuteScheduledJob(ctx, jobID); err != nil {
+				logrus.Warnf("[CronScheduler] Repeating job %s failed: %v", jobID, err)
+			}
+		}
+	})
+	if err != nil {
+		return err
+	}
+	s.entryIDs[jobID] = entryID
+	logrus.Infof("[CronScheduler] Repeating job %s scheduled with cron %q", jobID, cronExpr)
+	return nil
+}
+
 // GetScheduledPlanIDs returns IDs of plans currently registered in the scheduler.
 func (s *CronScheduler) GetScheduledPlanIDs() []string {
 	s.mu.RLock()

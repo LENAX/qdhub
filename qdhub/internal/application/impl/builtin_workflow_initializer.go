@@ -169,13 +169,11 @@ func (i *BuiltInWorkflowInitializer) createWorkflowWithPlaceholders(meta workflo
 			Build()
 
 	case workflows.BuiltInWorkflowIDRealtimeDataSync:
-		// 实时同步：使用空参数触发占位符模式
-		// 注意：需要显式清空CheckpointTable（因为构造函数有默认值）
+		// 实时同步：使用空参数触发占位符模式（同步范围不依赖 checkpoint，由 ReplaceParams 注入）
 		return i.workflowFactory.RealtimeDataSync().
-			WithDataSource("", "").  // 清空默认值
-			WithTargetDB("").        // 清空默认值
-			WithCheckpointTable(""). // 清空默认值（重要！）
-			WithAPIs().              // 空数组
+			WithDataSource("", "").
+			WithTargetDB("").
+			WithAPIs(). // 空数组
 			WithMaxStocks(0).
 			Build()
 

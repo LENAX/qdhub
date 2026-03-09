@@ -89,6 +89,36 @@ func TestSyncPlan_SetCronExpression(t *testing.T) {
 	}
 }
 
+func TestSyncPlan_SetScheduleWindow(t *testing.T) {
+	plan := sync.NewSyncPlan("Test", "", shared.NewID(), []string{"daily"})
+
+	plan.SetScheduleWindow("0 0 9 * * 1-5", "0 30 15 * * 1-5")
+	if plan.ScheduleStartCron == nil || *plan.ScheduleStartCron != "0 0 9 * * 1-5" {
+		t.Errorf("ScheduleStartCron = %v", plan.ScheduleStartCron)
+	}
+	if plan.ScheduleEndCron == nil || *plan.ScheduleEndCron != "0 30 15 * * 1-5" {
+		t.Errorf("ScheduleEndCron = %v", plan.ScheduleEndCron)
+	}
+
+	plan.SetScheduleWindow("", "")
+	if plan.ScheduleStartCron != nil || plan.ScheduleEndCron != nil {
+		t.Error("empty strings should clear schedule window")
+	}
+}
+
+func TestSyncPlan_SetPullIntervalSeconds(t *testing.T) {
+	plan := sync.NewSyncPlan("Test", "", shared.NewID(), []string{"daily"})
+
+	plan.SetPullIntervalSeconds(30)
+	if plan.PullIntervalSeconds != 30 {
+		t.Errorf("PullIntervalSeconds = %d, expected 30", plan.PullIntervalSeconds)
+	}
+	plan.SetPullIntervalSeconds(0)
+	if plan.PullIntervalSeconds != 0 {
+		t.Errorf("PullIntervalSeconds = %d, expected 0", plan.PullIntervalSeconds)
+	}
+}
+
 func TestSyncPlan_EnableDisable(t *testing.T) {
 	plan := sync.NewSyncPlan("Test", "", shared.NewID(), []string{"daily"})
 	// Set to resolved first

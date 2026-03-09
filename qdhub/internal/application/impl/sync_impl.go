@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
@@ -91,6 +92,20 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "data source not found", nil)
 	}
 
+	// PlanMode：默认 batch，realtime 时校验 SelectedAPIs 必须在白名单内
+	mode := req.PlanMode
+	if !mode.IsValid() {
+		mode = sync.PlanModeBatch
+	}
+	if mode == sync.PlanModeRealtime {
+		for _, api := range req.SelectedAPIs {
+			if !sync.IsRealtimeAPI(api) {
+				return nil, shared.NewDomainError(shared.ErrCodeValidation,
+					fmt.Sprintf("realtime plan only allows APIs: %v, got: %s", sync.RealtimeAllowedAPIs, api), nil)
+			}
+		}
+	}
+
 	// Create domain entity
 	plan := sync.NewSyncPlan(
 		req.Name,
@@ -98,6 +113,7 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		req.DataSourceID,
 		req.SelectedAPIs,
 	)
+	plan.Mode = mode
 
 	// Set optional fields
 	if req.DataStoreID != "" {
@@ -113,6 +129,8 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 	if req.IncrementalStartDateAPI != "" || req.IncrementalStartDateColumn != "" {
 		plan.SetIncrementalStartDateSource(req.IncrementalStartDateAPI, req.IncrementalStartDateColumn)
 	}
+	plan.SetScheduleWindow(req.ScheduleStartCron, req.ScheduleEndCron)
+	plan.SetPullIntervalSeconds(req.PullIntervalSeconds)
 
 	// Persist
 	if err := s.syncPlanRepo.Create(plan); err != nil {
@@ -211,6 +229,34 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 			col = *req.IncrementalStartDateColumn
 		}
 		plan.SetIncrementalStartDateSource(api, col)
+	}
+	if req.PlanMode != nil {
+		mode := *req.PlanMode
+		if !mode.IsValid() {
+			mode = sync.PlanModeBatch
+		}
+		if mode == sync.PlanModeRealtime {
+			for _, api := range plan.SelectedAPIs {
+				if !sync.IsRealtimeAPI(api) {
+					return shared.NewDomainError(shared.ErrCodeValidation,
+						fmt.Sprintf("realtime plan only allows APIs: %v, got: %s", sync.RealtimeAllowedAPIs, api), nil)
+				}
+			}
+		}
+		plan.Mode = mode
+	}
+	if req.ScheduleStartCron != nil || req.ScheduleEndCron != nil {
+		start, end := "", ""
+		if req.ScheduleStartCron != nil {
+			start = *req.ScheduleStartCron
+		}
+		if req.ScheduleEndCron != nil {
+			end = *req.ScheduleEndCron
+		}
+		plan.SetScheduleWindow(start, end)
+	}
+	if req.PullIntervalSeconds != nil {
+		plan.SetPullIntervalSeconds(*req.PullIntervalSeconds)
 	}
 
 	plan.UpdatedAt = shared.Now()
@@ -506,7 +552,8 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			eff.EndTime = p.EndTime
 		}
 	}
-	// 增量模式且日期未传：用 min(上次成功结束日, 数据最新日期) 作为起始，结束日默认为今天
+	// SyncPlan 增量模式：不依赖 sync_checkpoint 表。由用户配置「某表 + 某日期列」，
+	// 执行时取 min(上次成功结束日 LastSuccessfulEndDate, 表中 MAX(日期列)) 作为起始日，结束日为今天。
 	requiresDate := s.planRequiresDateRange(plan)
 	if requiresDate && plan.IncrementalMode && (eff.StartDate == "" || eff.EndDate == "") {
 		var startCandidates []string
@@ -534,8 +581,8 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		logrus.Infof("[ExecuteSyncPlan] IncrementalMode=true for plan %s, resolved date range: %s -> %s (requiresDate=%v)",
 			plan.ID, eff.StartDate, eff.EndDate, requiresDate)
 	}
-	// 仅当计划内任一 API 的参数包含 date/time/dt 等模式时才要求配置日期范围
-	if requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
+	// 日期范围校验仅针对批量模式：实时计划不做日期校验（实时 API 通常始终提供最新数据，时间范围仅用于补充历史）
+	if plan.Mode != sync.PlanModeRealtime && requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
 		return "", shared.NewDomainError(shared.ErrCodeValidation,
 			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
 	}
@@ -573,25 +620,47 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		return "", shared.NewDomainError(shared.ErrCodeValidation, "token not configured for data source", nil)
 	}
 
-	// 使用计划解析出的任务配置（依赖与参数来源），避免工作流仅按 APINames 用默认策略推断
-	apiConfigs := s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
-
-	// Execute workflow (external async operation, not part of transaction)
-	instanceID, err := s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
-		DataSourceID:   plan.DataSourceID,
-		DataSourceName: ds.Name,
-		Token:          token.TokenValue,
-		TargetDBPath:   eff.TargetDBPath,
-		StartDate:      eff.StartDate,
-		EndDate:        eff.EndDate,
-		StartTime:      eff.StartTime,
-		EndTime:        eff.EndTime,
-		APIConfigs:     apiConfigs,
-		MaxStocks:      0,
-		CommonDataAPIs: ds.CommonDataAPIs,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to execute workflow: %w", err)
+	var instanceID shared.ID
+	if plan.Mode == sync.PlanModeRealtime {
+		// 实时同步：不校验、不依赖日期范围；实时 API 通常即最新数据，时间范围仅用于补充历史
+		apiNames := s.extractAPINames(needSyncTasks)
+		tsCodes, indexCodes := s.loadTsCodesFromTargetDB(ctx, eff.TargetDBPath)
+		pullSecs := plan.PullIntervalSeconds
+		if pullSecs <= 0 {
+			pullSecs = 60
+		}
+		instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, workflow.RealtimeDataSyncRequest{
+			DataSourceName:     ds.Name,
+			Token:              token.TokenValue,
+			TargetDBPath:       eff.TargetDBPath,
+			APINames:           apiNames,
+			DataSourceID:       plan.DataSourceID,
+			TsCodes:            tsCodes,
+			IndexCodes:         indexCodes,
+			PullIntervalSecs:   pullSecs,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
+		}
+	} else {
+		// 批量工作流
+		apiConfigs := s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
+		instanceID, err = s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
+			DataSourceID:   plan.DataSourceID,
+			DataSourceName: ds.Name,
+			Token:          token.TokenValue,
+			TargetDBPath:   eff.TargetDBPath,
+			StartDate:      eff.StartDate,
+			EndDate:        eff.EndDate,
+			StartTime:      eff.StartTime,
+			EndTime:        eff.EndTime,
+			APIConfigs:     apiConfigs,
+			MaxStocks:      0,
+			CommonDataAPIs: ds.CommonDataAPIs,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to execute workflow: %w", err)
+		}
 	}
 
 	// Create sync execution record and update plan status using UoW
@@ -752,6 +821,54 @@ func (s *SyncApplicationServiceImpl) getMaxDateFromTargetDB(ctx context.Context,
 		}
 		return s
 	}
+}
+
+// loadTsCodesFromTargetDB 从目标 DuckDB 读取 stock_basic.ts_code 与 index_basic.ts_code，供实时工作流分片用。
+// 若 quantDBFactory 为空或表不存在则返回 nil；调用方不依赖非空列表也可运行（仅无 ts_code 的 API 会生成任务）。
+func (s *SyncApplicationServiceImpl) loadTsCodesFromTargetDB(ctx context.Context, targetDBPath string) (tsCodes, indexCodes []string) {
+	if targetDBPath == "" || s.quantDBFactory == nil {
+		return nil, nil
+	}
+	qdb, err := s.quantDBFactory.Create(datastore.QuantDBConfig{
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: targetDBPath,
+	})
+	if err != nil {
+		logrus.Warnf("[loadTsCodesFromTargetDB] Create QuantDB failed: %v", err)
+		return nil, nil
+	}
+	if err := qdb.Connect(ctx); err != nil {
+		logrus.Warnf("[loadTsCodesFromTargetDB] Connect failed: %v", err)
+		_ = qdb.Close()
+		return nil, nil
+	}
+	defer func() { _ = qdb.Close() }()
+
+	if ok, _ := qdb.TableExists(ctx, "stock_basic"); ok {
+		rows, err := qdb.Query(ctx, `SELECT ts_code FROM stock_basic`)
+		if err == nil {
+			for _, row := range rows {
+				if v, ok := row["ts_code"]; ok && v != nil {
+					if str, ok := v.(string); ok && str != "" {
+						tsCodes = append(tsCodes, strings.TrimSpace(str))
+					}
+				}
+			}
+		}
+	}
+	if ok, _ := qdb.TableExists(ctx, "index_basic"); ok {
+		rows, err := qdb.Query(ctx, `SELECT ts_code FROM index_basic`)
+		if err == nil {
+			for _, row := range rows {
+				if v, ok := row["ts_code"]; ok && v != nil {
+					if str, ok := v.(string); ok && str != "" {
+						indexCodes = append(indexCodes, strings.TrimSpace(str))
+					}
+				}
+			}
+		}
+	}
+	return tsCodes, indexCodes
 }
 
 // planRequiresDateRange 根据计划内 API 的请求参数是否包含 date/time/dt 等模式，判断是否必须配置日期范围。
@@ -938,6 +1055,71 @@ func (s *SyncApplicationServiceImpl) ListPlanExecutionHistory(ctx context.Contex
 		return nil, 0, fmt.Errorf("failed to get sync plan: %w", err)
 	}
 	return s.syncPlanRepo.GetExecutionsByPlanPaged(planID, limit, offset)
+}
+
+// ReconcileRunningWindow 运行时段协调：对配置了 schedule_start_cron/schedule_end_cron 的 realtime 计划，
+// 判断当前是否在时段内，在则自动启动、不在则自动停止。
+func (s *SyncApplicationServiceImpl) ReconcileRunningWindow(ctx context.Context) error {
+	plans, err := s.syncPlanRepo.GetEnabledPlans()
+	if err != nil {
+		return fmt.Errorf("get enabled plans: %w", err)
+	}
+	now := time.Now()
+	for _, plan := range plans {
+		if plan.Mode != sync.PlanModeRealtime || plan.ScheduleStartCron == nil || plan.ScheduleEndCron == nil {
+			continue
+		}
+		inWindow, err := isInScheduleWindow(now, *plan.ScheduleStartCron, *plan.ScheduleEndCron)
+		if err != nil {
+			logrus.Warnf("[ReconcileRunningWindow] plan %s cron parse error: %v", plan.ID, err)
+			continue
+		}
+		running, err := s.syncPlanRepo.GetRunningExecutionByPlanID(plan.ID)
+		if err != nil {
+			logrus.Warnf("[ReconcileRunningWindow] get running execution plan %s: %v", plan.ID, err)
+			continue
+		}
+		if inWindow && running == nil {
+			_, err = s.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{})
+			if err != nil {
+				logrus.Warnf("[ReconcileRunningWindow] start plan %s: %v", plan.ID, err)
+			} else {
+				logrus.Infof("[ReconcileRunningWindow] started plan %s (in window)", plan.ID)
+			}
+		} else if !inWindow && running != nil {
+			if err := s.CancelExecution(ctx, running.ID); err != nil {
+				logrus.Warnf("[ReconcileRunningWindow] cancel execution %s plan %s: %v", running.ID, plan.ID, err)
+			} else {
+				logrus.Infof("[ReconcileRunningWindow] stopped plan %s (outside window)", plan.ID)
+			}
+		}
+	}
+	return nil
+}
+
+// isInScheduleWindow 判断 now 是否在 startCron 与 endCron 构成的时段内（last_start > last_end 表示在时段内）。
+func isInScheduleWindow(now time.Time, startCron, endCron string) (bool, error) {
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.DowOptional)
+	startSched, err := parser.Parse(startCron)
+	if err != nil {
+		return false, err
+	}
+	endSched, err := parser.Parse(endCron)
+	if err != nil {
+		return false, err
+	}
+	lastStart := lastCronRunBefore(startSched, now)
+	lastEnd := lastCronRunBefore(endSched, now)
+	return lastStart.After(lastEnd), nil
+}
+
+func lastCronRunBefore(sched cron.Schedule, t time.Time) time.Time {
+	from := t.Add(-366 * 24 * time.Hour)
+	last := from
+	for n := sched.Next(from); !n.After(t); n = sched.Next(n) {
+		last = n
+	}
+	return last
 }
 
 // CancelExecution cancels a running sync execution.

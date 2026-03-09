@@ -19,7 +19,6 @@ func TestRealtimeDataSyncWorkflow_Build(t *testing.T) {
 		builder := workflows.NewRealtimeDataSyncWorkflowBuilder(nil).
 			WithDataSource("tushare", "test-token").
 			WithTargetDB("/tmp/test.db").
-			WithCheckpointTable("sync_checkpoint").
 			WithAPIs("daily", "adj_factor").
 			WithMaxStocks(10)
 
@@ -34,7 +33,6 @@ func TestRealtimeDataSyncWorkflow_Build(t *testing.T) {
 		builder := workflows.NewRealtimeDataSyncWorkflowBuilder(nil).
 			WithDataSource("tushare", "test-token").
 			WithTargetDB("/tmp/test.db").
-			WithCheckpointTable("sync_checkpoint").
 			WithAPIs("daily").
 			WithCronExpr("0 0 18 * * 1-5") // 每个工作日18:00
 
@@ -55,21 +53,19 @@ func TestRealtimeDataSyncParams_Validate(t *testing.T) {
 		{
 			name: "Valid params",
 			params: workflows.RealtimeDataSyncParams{
-				DataSourceName:  "tushare",
-				Token:           "test-token",
-				TargetDBPath:    "/tmp/stock.db",
-				CheckpointTable: "sync_checkpoint",
-				APINames:        []string{"daily"},
+				DataSourceName: "tushare",
+				Token:          "test-token",
+				TargetDBPath:   "/tmp/stock.db",
+				APINames:       []string{"daily"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "Missing DataSourceName",
 			params: workflows.RealtimeDataSyncParams{
-				Token:           "test-token",
-				TargetDBPath:    "/tmp/stock.db",
-				CheckpointTable: "sync_checkpoint",
-				APINames:        []string{"daily"},
+				Token:          "test-token",
+				TargetDBPath:   "/tmp/stock.db",
+				APINames:       []string{"daily"},
 			},
 			wantErr: true,
 			errType: workflows.ErrEmptyDataSourceName,
@@ -77,10 +73,9 @@ func TestRealtimeDataSyncParams_Validate(t *testing.T) {
 		{
 			name: "Missing Token",
 			params: workflows.RealtimeDataSyncParams{
-				DataSourceName:  "tushare",
-				TargetDBPath:    "/tmp/stock.db",
-				CheckpointTable: "sync_checkpoint",
-				APINames:        []string{"daily"},
+				DataSourceName: "tushare",
+				TargetDBPath:   "/tmp/stock.db",
+				APINames:       []string{"daily"},
 			},
 			wantErr: true,
 			errType: workflows.ErrEmptyToken,
@@ -88,33 +83,20 @@ func TestRealtimeDataSyncParams_Validate(t *testing.T) {
 		{
 			name: "Missing TargetDBPath",
 			params: workflows.RealtimeDataSyncParams{
-				DataSourceName:  "tushare",
-				Token:           "test-token",
-				CheckpointTable: "sync_checkpoint",
-				APINames:        []string{"daily"},
+				DataSourceName: "tushare",
+				Token:          "test-token",
+				APINames:       []string{"daily"},
 			},
 			wantErr: true,
 			errType: workflows.ErrEmptyTargetDBPath,
 		},
 		{
-			name: "Missing CheckpointTable",
+			name: "Empty APINames",
 			params: workflows.RealtimeDataSyncParams{
 				DataSourceName: "tushare",
 				Token:          "test-token",
 				TargetDBPath:   "/tmp/stock.db",
-				APINames:       []string{"daily"},
-			},
-			wantErr: true,
-			errType: workflows.ErrEmptyCheckpointTable,
-		},
-		{
-			name: "Empty APINames",
-			params: workflows.RealtimeDataSyncParams{
-				DataSourceName:  "tushare",
-				Token:           "test-token",
-				TargetDBPath:    "/tmp/stock.db",
-				CheckpointTable: "sync_checkpoint",
-				APINames:        []string{},
+				APINames:       []string{},
 			},
 			wantErr: true,
 			errType: workflows.ErrEmptyAPINames,

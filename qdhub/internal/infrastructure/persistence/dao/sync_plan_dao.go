@@ -27,11 +27,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 // Create inserts a new sync plan record.
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
-		selected_apis, resolved_apis, execution_graph, cron_expression, default_execute_params,
+		plan_mode, selected_apis, resolved_apis, execution_graph, cron_expression, schedule_start_cron, schedule_end_cron, pull_interval_seconds, default_execute_params,
 		incremental_mode, last_successful_end_date, incremental_start_date_api, incremental_start_date_column,
 		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
-		:selected_apis, :resolved_apis, :execution_graph, :cron_expression, :default_execute_params,
+		:plan_mode, :selected_apis, :resolved_apis, :execution_graph, :cron_expression, :schedule_start_cron, :schedule_end_cron, :pull_interval_seconds, :default_execute_params,
 		:incremental_mode, :last_successful_end_date, :incremental_start_date_api, :incremental_start_date_column,
 		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
@@ -68,8 +68,9 @@ func (d *SyncPlanDAO) GetByID(tx *sqlx.Tx, id shared.ID) (*sync.SyncPlan, error)
 func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `UPDATE sync_plan SET
 		name = :name, description = :description, data_store_id = :data_store_id,
-		selected_apis = :selected_apis, resolved_apis = :resolved_apis,
+		plan_mode = :plan_mode, selected_apis = :selected_apis, resolved_apis = :resolved_apis,
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
+		schedule_start_cron = :schedule_start_cron, schedule_end_cron = :schedule_end_cron, pull_interval_seconds = :pull_interval_seconds,
 		default_execute_params = :default_execute_params,
 		incremental_mode = :incremental_mode, last_successful_end_date = :last_successful_end_date,
 		incremental_start_date_api = :incremental_start_date_api, incremental_start_date_column = :incremental_start_date_column,
@@ -243,18 +244,19 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	}
 
 	row := &SyncPlanRow{
-		ID:                     entity.ID.String(),
-		Name:                   entity.Name,
-		Description:            entity.Description,
-		DataSourceID:           entity.DataSourceID.String(),
-		SelectedAPIs:           selectedAPIs,
-		ResolvedAPIs:           resolvedAPIs,
-		ExecutionGraph:         executionGraph,
-		DefaultExecuteParams:   defaultExecuteParams,
-		IncrementalMode:        entity.IncrementalMode,
-		Status:                 entity.Status.String(),
-		CreatedAt:              entity.CreatedAt.ToTime(),
-		UpdatedAt:              entity.UpdatedAt.ToTime(),
+		ID:                   entity.ID.String(),
+		Name:                 entity.Name,
+		Description:          entity.Description,
+		DataSourceID:         entity.DataSourceID.String(),
+		PlanMode:             entity.Mode.String(),
+		SelectedAPIs:         selectedAPIs,
+		ResolvedAPIs:         resolvedAPIs,
+		ExecutionGraph:       executionGraph,
+		DefaultExecuteParams: defaultExecuteParams,
+		IncrementalMode:      entity.IncrementalMode,
+		Status:               entity.Status.String(),
+		CreatedAt:            entity.CreatedAt.ToTime(),
+		UpdatedAt:            entity.UpdatedAt.ToTime(),
 	}
 	if entity.LastSuccessfulEndDate != nil {
 		row.LastSuccessfulEndDate = sql.NullString{String: *entity.LastSuccessfulEndDate, Valid: true}
@@ -282,6 +284,13 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	if entity.IncrementalStartDateColumn != nil {
 		row.IncrementalStartDateColumn = sql.NullString{String: *entity.IncrementalStartDateColumn, Valid: true}
 	}
+	if entity.ScheduleStartCron != nil {
+		row.ScheduleStartCron = sql.NullString{String: *entity.ScheduleStartCron, Valid: true}
+	}
+	if entity.ScheduleEndCron != nil {
+		row.ScheduleEndCron = sql.NullString{String: *entity.ScheduleEndCron, Valid: true}
+	}
+	row.PullIntervalSeconds = entity.PullIntervalSeconds
 
 	return row, nil
 }
@@ -293,9 +302,15 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 		Name:         row.Name,
 		Description:  row.Description,
 		DataSourceID: shared.ID(row.DataSourceID),
+		Mode:         sync.PlanMode(row.PlanMode),
 		Status:       sync.PlanStatus(row.Status),
 		CreatedAt:    shared.Timestamp(row.CreatedAt),
 		UpdatedAt:    shared.Timestamp(row.UpdatedAt),
+	}
+
+	// 向后兼容：旧数据没有 plan_mode 列或值为空时，默认为 batch 模式
+	if entity.Mode == "" {
+		entity.Mode = sync.PlanModeBatch
 	}
 
 	if row.DataStoreID.Valid {
@@ -346,6 +361,13 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 	if row.IncrementalStartDateColumn.Valid {
 		entity.IncrementalStartDateColumn = &row.IncrementalStartDateColumn.String
 	}
+	if row.ScheduleStartCron.Valid {
+		entity.ScheduleStartCron = &row.ScheduleStartCron.String
+	}
+	if row.ScheduleEndCron.Valid {
+		entity.ScheduleEndCron = &row.ScheduleEndCron.String
+	}
+	entity.PullIntervalSeconds = row.PullIntervalSeconds
 
 	return entity, nil
 }
@@ -607,6 +629,25 @@ func (d *SyncExecutionDAO) Update(tx *sqlx.Tx, entity *sync.SyncExecution) error
 		return fmt.Errorf("failed to update sync execution: %w", err)
 	}
 	return nil
+}
+
+// GetRunningByPlanID returns the current running execution for a plan, if any (status = 'running').
+func (d *SyncExecutionDAO) GetRunningByPlanID(tx *sqlx.Tx, planID shared.ID) (*sync.SyncExecution, error) {
+	query := `SELECT * FROM sync_execution WHERE sync_plan_id = ? AND status = 'running' ORDER BY rowid DESC LIMIT 1`
+	var row SyncExecutionRow
+	var err error
+	if tx != nil {
+		err = tx.Get(&row, query, planID.String())
+	} else {
+		err = d.DB().Get(&row, query, planID.String())
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get running execution by plan: %w", err)
+	}
+	return d.toEntity(&row)
 }
 
 // GetByPlanID retrieves all sync executions for a plan.

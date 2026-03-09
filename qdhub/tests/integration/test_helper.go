@@ -123,6 +123,28 @@ func setupIntegrationDB(t *testing.T) (*persistence.DB, func()) {
 		t.Fatalf("Failed to execute 016_api_sync_strategy_fixed_params migration: %v", err)
 	}
 
+	// Sync plan mode (batch/realtime) and pull_interval / schedule window
+	planModeSQL, err := os.ReadFile("../../migrations/006_sync_plan_mode_realtime.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 006_sync_plan_mode_realtime migration: %v", err)
+	}
+	_, err = db.Exec(string(planModeSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 006_sync_plan_mode_realtime migration: %v", err)
+	}
+	pullIntervalSQL, err := os.ReadFile("../../migrations/020_sync_plan_pull_interval_and_schedule_window.up.sql")
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to read 020_sync_plan_pull_interval_and_schedule_window migration: %v", err)
+	}
+	_, err = db.Exec(string(pullIntervalSQL))
+	if err != nil {
+		db.Close()
+		t.Fatalf("Failed to execute 020_sync_plan_pull_interval_and_schedule_window migration: %v", err)
+	}
+
 	cleanup := func() {
 		db.Close()
 		os.Remove(dsn)

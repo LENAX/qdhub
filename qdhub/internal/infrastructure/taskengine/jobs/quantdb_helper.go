@@ -16,9 +16,6 @@ func GetQuantDBForPath(tc *task.TaskContext, targetDBPath string) (datastore.Qua
 	if targetDBPath == "" {
 		return nil, datastore.ErrQuantDBPathRequired
 	}
-	if tc.GetRegistry() == nil {
-		return nil, fmt.Errorf("QuantDBFactory dependency not found (Registry is nil)")
-	}
 	factoryInterface, ok := tc.GetDependency("QuantDBFactory")
 	if !ok || factoryInterface == nil {
 		return nil, fmt.Errorf("QuantDBFactory dependency not found")

@@ -218,6 +218,11 @@ type SyncPlan struct {
 	DataSourceID shared.ID  `json:"data_source_id"`
 	DataStoreID  shared.ID  `json:"data_store_id"`
 
+	// PlanMode 控制同步模式：
+	//   - batch: 现有批量同步（默认）
+	//   - realtime: 新增实时同步（流式工作流）
+	Mode PlanMode `json:"mode"`
+
 	// 用户配置
 	SelectedAPIs []string `json:"selected_apis,omitempty"`
 
@@ -227,6 +232,11 @@ type SyncPlan struct {
 
 	// 调度配置
 	CronExpression *string `json:"cron_expression,omitempty"`
+	// 运行时段（仅 realtime 模式）：在 start 与 end 之间自动启动，之外自动停止
+	ScheduleStartCron *string `json:"schedule_start_cron,omitempty"` // 如 "0 0 9 * * 1-5" 工作日 9:00 启动
+	ScheduleEndCron   *string `json:"schedule_end_cron,omitempty"`   // 如 "0 30 15 * * 1-5" 工作日 15:30 停止
+	// Pull 模式拉取间隔（秒），0 表示使用默认 60；仅 realtime 模式生效
+	PullIntervalSeconds int `json:"pull_interval_seconds,omitempty"`
 
 	// 默认执行参数（用于定时触发）
 	DefaultExecuteParams *ExecuteParams `json:"default_execute_params,omitempty"`
@@ -263,6 +273,7 @@ func NewSyncPlan(name, description string, dataSourceID shared.ID, selectedAPIs 
 		Name:         name,
 		Description:  description,
 		DataSourceID: dataSourceID,
+		Mode:         PlanModeBatch,
 		SelectedAPIs: selectedAPIs,
 		Status:       PlanStatusDraft,
 		CreatedAt:    now,
@@ -290,6 +301,27 @@ func (sp *SyncPlan) SetCronExpression(cronExpr string) {
 	sp.UpdatedAt = shared.Now()
 }
 
+// SetScheduleWindow sets the running window crons (start/end) for realtime mode; empty string clears.
+func (sp *SyncPlan) SetScheduleWindow(startCron, endCron string) {
+	if startCron == "" {
+		sp.ScheduleStartCron = nil
+	} else {
+		sp.ScheduleStartCron = &startCron
+	}
+	if endCron == "" {
+		sp.ScheduleEndCron = nil
+	} else {
+		sp.ScheduleEndCron = &endCron
+	}
+	sp.UpdatedAt = shared.Now()
+}
+
+// SetPullIntervalSeconds sets the pull interval in seconds for realtime mode (0 = use default 60).
+func (sp *SyncPlan) SetPullIntervalSeconds(seconds int) {
+	sp.PullIntervalSeconds = seconds
+	sp.UpdatedAt = shared.Now()
+}
+
 // SetDefaultExecuteParams sets the default execute params for scheduled runs.
 func (sp *SyncPlan) SetDefaultExecuteParams(p *ExecuteParams) {
 	sp.DefaultExecuteParams = p
@@ -312,7 +344,9 @@ func (sp *SyncPlan) SetLastSuccessfulEndDate(endDate string) {
 	sp.UpdatedAt = shared.Now()
 }
 
-// SetIncrementalStartDateSource sets the optional API (table name) and column for querying "data latest date" from target DuckDB (MAX(column)).
+// SetIncrementalStartDateSource sets the optional table name and date column for incremental sync.
+// SyncPlan 增量不依赖 sync_checkpoint 表：执行时在目标 DuckDB 上执行 MAX(column) FROM table 得到「表中最新日期」，
+// 与 LastSuccessfulEndDate 一起决定本次同步的起始日，结束日由执行日当天决定。
 func (sp *SyncPlan) SetIncrementalStartDateSource(api, column string) {
 	if api == "" && column == "" {
 		sp.IncrementalStartDateAPI = nil
@@ -646,6 +680,46 @@ const (
 // String returns the string representation of the plan status.
 func (ps PlanStatus) String() string {
 	return string(ps)
+}
+
+// PlanMode represents sync plan execution mode.
+// batch    - 现有批量同步模式，通过 BatchDataSync 工作流按时间/代码维度拉取历史数据。
+// realtime - 新增实时同步模式，通过流式工作流与 RealtimeAdapter 获取实时行情。
+type PlanMode string
+
+const (
+	PlanModeBatch    PlanMode = "batch"
+	PlanModeRealtime PlanMode = "realtime"
+)
+
+// String returns the string representation of the plan mode.
+func (pm PlanMode) String() string {
+	return string(pm)
+}
+
+// IsValid returns whether the plan mode is valid.
+func (pm PlanMode) IsValid() bool {
+	return pm == PlanModeBatch || pm == PlanModeRealtime
+}
+
+// RealtimeAllowedAPIs 白名单：仅这些 API 支持在 PlanModeRealtime 下运行。
+// 注意：ETF 实时分钟行情与 rt_min 共用策略，因此复用 "rt_min"，不单独列出。
+var RealtimeAllowedAPIs = []string{
+	"rt_min",
+	"realtime_quote",
+	"realtime_tick",
+	"realtime_list",
+	"rt_idx_min",
+}
+
+// IsRealtimeAPI checks whether the given apiName is allowed in realtime mode.
+func IsRealtimeAPI(apiName string) bool {
+	for _, v := range RealtimeAllowedAPIs {
+		if v == apiName {
+			return true
+		}
+	}
+	return false
 }
 
 // ExecStatus represents execution status.

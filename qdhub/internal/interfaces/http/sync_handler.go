@@ -81,6 +81,11 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 		return
 	}
 
+	mode := sync.PlanMode(req.PlanMode)
+	if mode == "" {
+		mode = sync.PlanModeBatch
+	}
+
 	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
 		Name:                        req.Name,
 		Description:                 req.Description,
@@ -92,6 +97,10 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 		IncrementalMode:             req.IncrementalMode,
 		IncrementalStartDateAPI:     req.IncrementalStartDateAPI,
 		IncrementalStartDateColumn:  req.IncrementalStartDateColumn,
+		PlanMode:                    mode,
+		ScheduleStartCron:           req.ScheduleStartCron,
+		ScheduleEndCron:             req.ScheduleEndCron,
+		PullIntervalSeconds:         req.PullIntervalSeconds,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -180,6 +189,12 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		s := *req.IncrementalStartDateColumn
 		incrCol = &s
 	}
+
+	var planMode *sync.PlanMode
+	if req.PlanMode != nil {
+		m := sync.PlanMode(*req.PlanMode)
+		planMode = &m
+	}
 	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
 		Name:                        req.Name,
 		Description:                 req.Description,
@@ -190,6 +205,10 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		IncrementalMode:            req.IncrementalMode,
 		IncrementalStartDateAPI:    incrAPI,
 		IncrementalStartDateColumn: incrCol,
+		PlanMode:                   planMode,
+		ScheduleStartCron:          req.ScheduleStartCron,
+		ScheduleEndCron:            req.ScheduleEndCron,
+		PullIntervalSeconds:        req.PullIntervalSeconds,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -598,6 +617,11 @@ type CreateSyncPlanReq struct {
 	IncrementalMode             bool                `json:"incremental_mode"`
 	IncrementalStartDateAPI     string              `json:"incremental_start_date_api"`
 	IncrementalStartDateColumn  string              `json:"incremental_start_date_column"`
+	// PlanMode: "batch"（默认）或 "realtime"
+	PlanMode             string              `json:"plan_mode"`
+	ScheduleStartCron    string              `json:"schedule_start_cron"` // 运行时段：启动 cron（仅 realtime）
+	ScheduleEndCron      string              `json:"schedule_end_cron"`   // 运行时段：停止 cron
+	PullIntervalSeconds  int                 `json:"pull_interval_seconds"` // Pull 间隔（秒），0=默认 60
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
@@ -611,6 +635,11 @@ type UpdateSyncPlanReq struct {
 	IncrementalMode             *bool               `json:"incremental_mode"`
 	IncrementalStartDateAPI     *string             `json:"incremental_start_date_api"`
 	IncrementalStartDateColumn  *string             `json:"incremental_start_date_column"`
+	// PlanMode: "batch" 或 "realtime"
+	PlanMode             *string             `json:"plan_mode"`
+	ScheduleStartCron    *string             `json:"schedule_start_cron"`
+	ScheduleEndCron      *string             `json:"schedule_end_cron"`
+	PullIntervalSeconds  *int                `json:"pull_interval_seconds"`
 }
 
 // ExecuteSyncPlanReq represents the request body for triggering a sync plan.

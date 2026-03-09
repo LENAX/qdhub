@@ -664,8 +664,8 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	// 8. 创建 WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
+	// 8. 创建 WorkflowExecutor（此处只验证内建工作流，不涉及实时 Adapter，传 nil）
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
 
 	// 9. 创建 MetadataApplicationService
 	metadataAppService := impl.NewMetadataApplicationService(

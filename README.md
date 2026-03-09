@@ -213,7 +213,7 @@ qdhub/
 
 - `docker-compose.yml`：后端 + 前端服务与数据卷。
 - `docker-compose.image.yml`：仅用镜像拉取与运行（阿里云等环境）。
-- `DEPLOY.md`：**阿里云部署说明**（镜像构建推送、ECS 仅用镜像运行、Nginx HTTPS）。
+- `DEPLOY.md`：**阿里云部署说明**（CI 自动构建推送、本地构建、ECS 仅用镜像运行、Nginx HTTPS）。
 
 ---
 
@@ -294,7 +294,7 @@ make docs               # 重新生成 Swagger 文档
 
 ## 部署
 
-- **阿里云 ECS（仅用镜像、不上传源码）**：构建并推送镜像后在 ECS 上只保留 `docker-compose.image.yml` 与 `.env`，`pull` 后 `up`。步骤、环境变量与 Nginx HTTPS 示例见 **[DEPLOY.md](./DEPLOY.md)**。
+- **阿里云 ECS（仅用镜像、不上传源码）**：push tag 触发 CI 自动构建推送，或本地构建后推送到 ACR；ECS 上只保留 `docker-compose.image.yml` 与 `.env`，`pull` 后 `up`。步骤、环境变量与 Nginx HTTPS 示例见 **[DEPLOY.md](./DEPLOY.md)**。
 
 ---
 

@@ -28,8 +28,14 @@ func (e *ScheduledPlanExecutor) SetSyncService(svc contracts.SyncApplicationServ
 	e.syncSvc = svc
 }
 
-// ExecuteScheduledJob implements JobHandler. Runs when cron triggers for a plan.
+// ExecuteScheduledJob implements JobHandler. Runs when cron triggers for a plan (or running-window reconciler).
 func (e *ScheduledPlanExecutor) ExecuteScheduledJob(ctx context.Context, jobID string) error {
+	if jobID == ReconcileRunningWindowJobID {
+		if e.syncSvc != nil {
+			return e.syncSvc.ReconcileRunningWindow(ctx)
+		}
+		return nil
+	}
 	if e.syncSvc == nil {
 		return fmt.Errorf("scheduled plan executor: sync service not injected")
 	}

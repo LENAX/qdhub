@@ -146,12 +146,15 @@ WITH concept_daily_stats AS (
     SELECT d.trade_date, cd.concept_code, c.name AS concept_name,
            COUNT(DISTINCT cd.ts_code) AS stock_count,
            AVG(d.pct_chg) AS avg_pct_chg,
-           COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8 THEN d.ts_code END) AS limit_up_count,
+           COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8
+                                 AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%%')
+                               THEN d.ts_code END) AS limit_up_count,
            COALESCE(SUM(d.vol), 0) AS total_volume,
            COALESCE(SUM(mf.net_mf_amount), 0) AS net_inflow
     FROM daily d
     JOIN concept_detail cd ON d.ts_code = cd.ts_code
     JOIN concept c ON cd.concept_code = c.code
+    LEFT JOIN stock_basic s ON d.ts_code = s.ts_code
     LEFT JOIN moneyflow mf ON d.ts_code = mf.ts_code AND d.trade_date = mf.trade_date
     WHERE d.trade_date BETWEEN ? AND ?
     GROUP BY d.trade_date, cd.concept_code, c.name
@@ -237,10 +240,18 @@ func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) 
 	if ldOk, _ := r.db.TableExists(ctx, "limit_list_d"); ldOk {
 		ldSQL := `
 SELECT trade_date,
-       COUNT(DISTINCT CASE WHEN "limit" = 'U' THEN ts_code END) AS limit_up_sealed,
-       COUNT(DISTINCT CASE WHEN "limit" = 'Z' THEN ts_code END) AS limit_up_opened,
-       COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z') THEN ts_code END) AS limit_up_from_limit,
-       COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_from_pct,
+       COUNT(DISTINCT CASE WHEN "limit" = 'U'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'Z'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_opened,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z')
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_from_pct,
        COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_sealed,
        COUNT(DISTINCT CASE WHEN "limit" IN ('D') THEN ts_code END) AS limit_down_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
@@ -289,12 +300,16 @@ GROUP BY trade_date ORDER BY trade_date`
 					LimitDownOpened: 0,
 				})
 			}
-			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数
+			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数（同样默认排除 ST/*ST）
 			if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
 				thsSQL := `
 SELECT trade_date,
-       SUM(CASE WHEN COALESCE(open_num, 0) = 0 THEN 1 ELSE 0 END) AS limit_up_sealed,
-       SUM(CASE WHEN COALESCE(open_num, 0) > 0 THEN 1 ELSE 0 END) AS limit_up_opened
+       SUM(CASE WHEN COALESCE(open_num, 0) = 0
+                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                THEN 1 ELSE 0 END) AS limit_up_sealed,
+       SUM(CASE WHEN COALESCE(open_num, 0) > 0
+                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                THEN 1 ELSE 0 END) AS limit_up_opened
 FROM limit_list_ths
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date`
@@ -320,7 +335,24 @@ GROUP BY trade_date`
 		}
 	}
 	// 兜底：从 daily 表统计（无封板/打开区分）
-	sql := `
+	sbOk, _ := r.db.TableExists(ctx, "stock_basic")
+	sql := ""
+	if sbOk {
+		sql = `
+SELECT d.trade_date,
+       COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8
+                             AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%')
+                           THEN d.ts_code END) AS limit_up_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg <= -9.8 THEN d.ts_code END) AS limit_down_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg > 0 THEN d.ts_code END) AS up_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg < 0 THEN d.ts_code END) AS down_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg = 0 THEN d.ts_code END) AS flat_count
+FROM daily d
+LEFT JOIN stock_basic s ON d.ts_code = s.ts_code
+WHERE d.trade_date BETWEEN ? AND ?
+GROUP BY d.trade_date ORDER BY d.trade_date`
+	} else {
+		sql = `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8 THEN ts_code END) AS limit_up_count,
        COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_count,
@@ -330,6 +362,7 @@ SELECT trade_date,
 FROM daily
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
+	}
 	rows, err := r.db.Query(ctx, sql, startDate, endDate)
 	if err != nil {
 		return nil, err
@@ -410,9 +443,13 @@ ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
 	}
 	out := make([]analysis.LimitStock, 0, len(rows))
 	for _, m := range rows {
+		name := str(m, "name")
+		if limitVal == "U" && isSTStock(name) {
+			continue
+		}
 		out = append(out, analysis.LimitStock{
 			TsCode:          str(m, "ts_code"),
-			Name:            str(m, "name"),
+			Name:            name,
 			LimitTime:       str(m, "limit_time"),
 			LastLimitTime:   str(m, "last_limit_time"),
 			LimitReason:     str(m, "limit_reason"),
@@ -714,6 +751,7 @@ FROM stock_basic s
 LEFT JOIN limit_list_d l ON s.ts_code = l.ts_code AND l.trade_date = ? AND l.pct_chg >= 9.8
 LEFT JOIN daily d ON s.ts_code = d.ts_code AND d.trade_date = ?
 WHERE s.industry IS NOT NULL
+  AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%%')
 GROUP BY %s
 HAVING limit_up_count > 0
 ORDER BY limit_up_count DESC`, dim, dim, dim)
@@ -751,8 +789,12 @@ ORDER BY l.first_time`, cond)
 	}
 	stocks := make([]analysis.LimitStock, 0, len(rows))
 	for _, m := range rows {
+		name := str(m, "name")
+		if isSTStock(name) {
+			continue
+		}
 		stocks = append(stocks, analysis.LimitStock{
-			TsCode: str(m, "ts_code"), Name: str(m, "name"), LimitTime: str(m, "limit_time"),
+			TsCode: str(m, "ts_code"), Name: name, LimitTime: str(m, "limit_time"),
 			LimitReason: str(m, "limit_reason"), ConsecutiveDays: 0, FirstLimitDate: tradeDate,
 			Close: float(m, "close"), PctChg: float(m, "pct_chg"),
 			TurnoverRate: float(m, "turnover_rate"), Amount: float(m, "amount"),
@@ -789,11 +831,14 @@ func (s *sectorLimitStocksReaderImpl) GetBySectorAndDate(ctx context.Context, se
 func (r *Readers) GetConceptHeat(ctx context.Context, tradeDate string) ([]analysis.ConceptHeat, error) {
 	sql := `
 SELECT cd.concept_code, c.name AS concept_name, COUNT(DISTINCT cd.ts_code) AS stock_count,
-       COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8 THEN d.ts_code END) AS limit_up_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8
+                             AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%')
+                           THEN d.ts_code END) AS limit_up_count,
        AVG(d.pct_chg) AS avg_pct_chg
 FROM concept_detail cd
 JOIN concept c ON cd.concept_code = c.code
 LEFT JOIN daily d ON cd.ts_code = d.ts_code AND d.trade_date = ?
+LEFT JOIN stock_basic s ON cd.ts_code = s.ts_code
 GROUP BY cd.concept_code, c.name
 ORDER BY limit_up_count DESC, avg_pct_chg DESC`
 	rows, err := r.db.Query(ctx, sql, tradeDate)
@@ -1127,8 +1172,12 @@ WHERE l.trade_date = ? AND l.pct_chg >= 9.8 ORDER BY l.first_time`
 	}
 	out := make([]analysis.LimitUpStock, 0, len(rows))
 	for _, m := range rows {
+		name := str(m, "name")
+		if isSTStock(name) {
+			continue
+		}
 		out = append(out, analysis.LimitUpStock{
-			TsCode: str(m, "ts_code"), Name: str(m, "name"), TradeDate: str(m, "trade_date"),
+			TsCode: str(m, "ts_code"), Name: name, TradeDate: str(m, "trade_date"),
 			LimitTime: str(m, "limit_time"), Reason: str(m, "reason"), ConsecutiveDays: 0,
 			Close: float(m, "close"), PctChg: float(m, "pct_chg"), Volume: float(m, "volume"),
 			Amount: float(m, "amount"), TurnoverRate: float(m, "turnover_rate"),

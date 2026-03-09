@@ -2,27 +2,29 @@
 package workflows
 
 import (
-	"errors"
-
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/task"
 	"github.com/LENAX/task-engine/pkg/core/workflow"
 )
 
-// 增量实时同步工作流错误
-var (
-	ErrEmptyCheckpointTable = errors.New("checkpoint_table is required")
-)
-
 // RealtimeDataSyncParams 增量实时同步工作流参数
+//
+// 设计说明：数据源的实时 API 通常始终提供最新数据，因此本工作流不对日期范围做校验或要求。
+// 时间范围（start_date/end_date 或表+日期列）仅用于「补充历史实时数据」的可选场景；
+// 不配置时视为仅同步最新数据（下游按“最新一日”处理）。
 type RealtimeDataSyncParams struct {
 	DataSourceName  string   // 数据源名称（必填）
 	Token           string   // API Token（必填）
 	TargetDBPath    string   // 目标数据库路径（必填）
-	CheckpointTable string   // 检查点表名（必填，用于记录同步位置）
 	APINames        []string // 需要同步的 API 列表（必填，不能为空）
 	MaxStocks       int      // 最大股票数量（用于限制子任务，0=不限制）
 	CronExpr        string   // Cron 表达式（可选，用于定时调度）
+
+	// 时间范围（可选，仅用于补充历史）：不配置时不同步历史，仅拉最新
+	StartDate string // 可选，起始日（20060102）
+	EndDate   string // 可选，结束日；未传时由 FetchLatestTradingDate 提供
+	IncrementalStartDateTable  string // 可选，用于 MAX(列) 的表名
+	IncrementalStartDateColumn string // 可选，日期列名（如 trade_date）
 }
 
 // Validate 验证参数
@@ -35,9 +37,6 @@ func (p *RealtimeDataSyncParams) Validate() error {
 	}
 	if p.TargetDBPath == "" {
 		return ErrEmptyTargetDBPath
-	}
-	if p.CheckpointTable == "" {
-		return ErrEmptyCheckpointTable
 	}
 	if len(p.APINames) == 0 {
 		return ErrEmptyAPINames
@@ -55,9 +54,7 @@ type RealtimeDataSyncWorkflowBuilder struct {
 func NewRealtimeDataSyncWorkflowBuilder(registry task.FunctionRegistry) *RealtimeDataSyncWorkflowBuilder {
 	return &RealtimeDataSyncWorkflowBuilder{
 		registry: registry,
-		params: RealtimeDataSyncParams{
-			CheckpointTable: "sync_checkpoint", // 默认检查点表名
-		},
+		params:   RealtimeDataSyncParams{},
 	}
 }
 
@@ -80,9 +77,12 @@ func (b *RealtimeDataSyncWorkflowBuilder) WithTargetDB(path string) *RealtimeDat
 	return b
 }
 
-// WithCheckpointTable 设置检查点表名
-func (b *RealtimeDataSyncWorkflowBuilder) WithCheckpointTable(tableName string) *RealtimeDataSyncWorkflowBuilder {
-	b.params.CheckpointTable = tableName
+// WithSyncRange 设置同步范围：起始/结束日或表+日期列（与 SyncPlan 增量一致）
+func (b *RealtimeDataSyncWorkflowBuilder) WithSyncRange(startDate, endDate, table, column string) *RealtimeDataSyncWorkflowBuilder {
+	b.params.StartDate = startDate
+	b.params.EndDate = endDate
+	b.params.IncrementalStartDateTable = table
+	b.params.IncrementalStartDateColumn = column
 	return b
 }
 
@@ -108,37 +108,26 @@ func (b *RealtimeDataSyncWorkflowBuilder) WithCronExpr(cronExpr string) *Realtim
 
 // Build 构建增量实时同步工作流
 //
-// 工作流结构：
-// Level 0（串行执行）：
-//   - GetSyncCheckpoint - 获取上次同步检查点
+// 工作流结构（不依赖 checkpoint 表，与 SyncPlan 增量逻辑一致）：
+// Level 0：
+//   - GetSyncRangeFromTarget - 从目标库表+日期列计算 start_date（或使用传入的 start_date）
 //
 // Level 1（依赖 Level 0）：
-//   - FetchLatestTradingDate - 获取最新交易日
+//   - FetchLatestTradingDate - 获取最新交易日作为 end_date
 //
 // Level 2（依赖 Level 1，并行执行模板任务）：
 //   - IncrementalSync_{api_name} [模板任务] - 根据 APINames 动态生成增量同步子任务
-//
-// Level 3（依赖 Level 2）：
-//   - UpdateSyncCheckpoint - 更新同步检查点
 //
 // 事务支持：启用 SAGA 事务，同步失败时按 sync_batch_id 回滚数据
 //
 // 参数占位符支持：如果参数为空，将使用占位符（如 ${data_source_name}），
 // 执行时通过 workflow.ReplaceParams() 替换为实际值
-//
-// 返回错误：
-//   - ErrEmptyAPINames: api_names 不能为空（仅在非占位符模式下验证）
-//   - ErrEmptyDataSourceName: data_source_name 必填（仅在非占位符模式下验证）
-//   - ErrEmptyToken: token 必填（仅在非占位符模式下验证）
-//   - ErrEmptyTargetDBPath: target_db_path 必填（仅在非占位符模式下验证）
-//   - ErrEmptyCheckpointTable: checkpoint_table 必填（仅在非占位符模式下验证）
 func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	params := b.params
 
 	// 检查是否使用占位符模式（所有必填参数都为空）
-	usePlaceholders := params.DataSourceName == "" && params.Token == "" && 
-		params.TargetDBPath == "" && params.CheckpointTable == "" &&
-		len(params.APINames) == 0
+	usePlaceholders := params.DataSourceName == "" && params.Token == "" &&
+		params.TargetDBPath == "" && len(params.APINames) == 0
 
 	// 仅在非占位符模式下验证参数
 	if !usePlaceholders {
@@ -149,7 +138,6 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	var tasks []*task.Task
 
-	// 如果参数为空，使用占位符
 	dataSourceName := params.DataSourceName
 	if dataSourceName == "" {
 		dataSourceName = "${data_source_name}"
@@ -162,50 +150,52 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	if targetDBPath == "" {
 		targetDBPath = "${target_db_path}"
 	}
-	checkpointTable := params.CheckpointTable
-	if checkpointTable == "" {
-		checkpointTable = "${checkpoint_table}"
-	}
 
-	// 基础参数
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
 		"token":            token,
 		"target_db_path":   targetDBPath,
-		"checkpoint_table": checkpointTable,
 	}
 
-	// ==================== Level 0: 获取同步检查点 ====================
-
-	// 处理 API 名称列表
-	apiNames := params.APINames
-	if len(apiNames) == 0 {
-		// 如果为空，使用占位符（注意：这需要特殊处理，因为占位符是字符串，不是数组）
-		// 这里我们创建一个特殊的占位符任务，执行时会通过参数替换处理
-		apiNames = []string{"${api_names}"} // 注意：这需要执行时解析为数组
+	// 同步范围参数（表+列或 start/end）；空时使用占位符，执行时 ReplaceParams 替换
+	rangeParams := map[string]interface{}{
+		"start_date":                        params.StartDate,
+		"end_date":                          params.EndDate,
+		"incremental_start_date_table":      params.IncrementalStartDateTable,
+		"incremental_start_date_column":     params.IncrementalStartDateColumn,
+	}
+	if rangeParams["start_date"] == "" {
+		rangeParams["start_date"] = "${start_date}"
+	}
+	if rangeParams["end_date"] == "" {
+		rangeParams["end_date"] = "${end_date}"
+	}
+	if rangeParams["incremental_start_date_table"] == "" {
+		rangeParams["incremental_start_date_table"] = "${incremental_start_date_table}"
+	}
+	if rangeParams["incremental_start_date_column"] == "" {
+		rangeParams["incremental_start_date_column"] = "${incremental_start_date_column}"
 	}
 
-	// Task: 获取同步检查点
-	getSyncCheckpointTask, err := builder.NewTaskBuilder("GetSyncCheckpoint", "获取上次同步检查点", b.registry).
-		WithJobFunction("GetSyncCheckpoint", mergeParams(baseParams, map[string]interface{}{
-			"api_names": apiNames,
-		})).
+	// ==================== Level 0: 从目标库计算同步范围（不依赖 checkpoint） ====================
+
+	getSyncRangeTask, err := builder.NewTaskBuilder("GetSyncRangeFromTarget", "从目标库计算同步起始日", b.registry).
+		WithJobFunction("GetSyncRangeFromTarget", mergeParams(baseParams, rangeParams)).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		Build()
 	if err != nil {
 		return nil, err
 	}
-	tasks = append(tasks, getSyncCheckpointTask)
+	tasks = append(tasks, getSyncRangeTask)
 
 	// ==================== Level 1: 获取最新交易日 ====================
 
-	// Task: 获取最新交易日
 	fetchLatestTradingDateTask, err := builder.NewTaskBuilder("FetchLatestTradingDate", "获取最新交易日", b.registry).
 		WithJobFunction("FetchLatestTradingDate", mergeParams(baseParams, map[string]interface{}{
-			"exchange": "SSE", // 默认上交所
+			"exchange": "SSE",
 		})).
-		WithDependency("GetSyncCheckpoint").
+		WithDependency("GetSyncRangeFromTarget").
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		Build()
@@ -216,7 +206,11 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// ==================== Level 2: 增量同步模板任务 ====================
 
-	// 为每个 API 创建增量同步模板任务
+	apiNames := params.APINames
+	if len(apiNames) == 0 {
+		apiNames = []string{"${api_names}"}
+	}
+
 	for _, apiName := range apiNames {
 		taskName := "IncrementalSync_" + apiName
 		templateTask, err := builder.NewTaskBuilder(taskName, "增量同步"+apiName+"数据（模板任务）", b.registry).
@@ -225,11 +219,11 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				"param_key":     "ts_code",
 				"max_sub_tasks": params.MaxStocks,
 			})).
-			WithDependency("FetchLatestTradingDate"). // 依赖最新交易日
-			WithDependency("GetSyncCheckpoint").      // 依赖检查点（获取上次同步位置）
+			WithDependency("FetchLatestTradingDate").
+			WithDependency("GetSyncRangeFromTarget").
 			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-			WithTemplate(true). // 标记为模板任务
+			WithTemplate(true).
 			Build()
 		if err != nil {
 			return nil, err
@@ -237,31 +231,8 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		tasks = append(tasks, templateTask)
 	}
 
-	// ==================== Level 3: 更新同步检查点 ====================
-
-	// 构建依赖列表（所有增量同步任务）
-	syncTaskDeps := make([]string, 0, len(params.APINames))
-	for _, apiName := range params.APINames {
-		syncTaskDeps = append(syncTaskDeps, "IncrementalSync_"+apiName)
-	}
-
-	// Task: 更新同步检查点
-	updateCheckpointTask, err := builder.NewTaskBuilder("UpdateSyncCheckpoint", "更新同步检查点", b.registry).
-		WithJobFunction("UpdateSyncCheckpoint", mergeParams(baseParams, map[string]interface{}{
-			"api_names": params.APINames,
-		})).
-		WithDependencies(syncTaskDeps). // 依赖所有增量同步任务
-		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-		WithCompensationFunction("CompensateUpdateCheckpoint"). // 补偿：回滚检查点
-		Build()
-	if err != nil {
-		return nil, err
-	}
-	tasks = append(tasks, updateCheckpointTask)
-
 	// 构建工作流
-	wfBuilder := builder.NewWorkflowBuilder("RealtimeDataSync", "增量实时同步工作流 - 支持断点续传和定时调度")
+	wfBuilder := builder.NewWorkflowBuilder("RealtimeDataSync", "增量实时同步工作流 - 同步范围由表+日期列或起止日，支持定时调度")
 	for _, t := range tasks {
 		wfBuilder.WithTask(t)
 	}

@@ -63,8 +63,8 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 	// Create MetadataRepository for WorkflowExecutor
 	metadataRepo := repository.NewMetadataRepository(db)
 
-	// Create WorkflowExecutor
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo)
+	// Create WorkflowExecutor（无需实时 Adapter，传 nil）
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
 
 	t.Run("ExecuteMetadataCrawl - converts parameters correctly", func(t *testing.T) {
 		req := workflow.MetadataCrawlRequest{
@@ -168,13 +168,12 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 
 	t.Run("ExecuteRealtimeDataSync - converts parameters correctly", func(t *testing.T) {
 		req := workflow.RealtimeDataSyncRequest{
-			DataSourceName:  "tushare",
-			Token:           "test-token",
-			TargetDBPath:    "/tmp/test.duckdb",
-			CheckpointTable: "sync_checkpoint",
-			APINames:        []string{"realtime_quote"},
-			MaxStocks:       50,
-			CronExpr:        "0 * * * * *",
+			DataSourceName: "tushare",
+			Token:          "test-token",
+			TargetDBPath:   "/tmp/test.duckdb",
+			APINames:       []string{"realtime_quote"},
+			MaxStocks:      50,
+			CronExpr:       "0 * * * * *",
 		}
 
 		instanceID, err := workflowExecutor.ExecuteRealtimeDataSync(ctx, req)
@@ -187,13 +186,12 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 		assert.NotNil(t, status, "Status should not be nil")
 	})
 
-	t.Run("ExecuteRealtimeDataSync - uses default checkpoint table", func(t *testing.T) {
+	t.Run("ExecuteRealtimeDataSync - incremental without range params", func(t *testing.T) {
 		req := workflow.RealtimeDataSyncRequest{
-			DataSourceName:  "tushare",
-			Token:           "test-token",
-			TargetDBPath:    "/tmp/test.duckdb",
-			CheckpointTable: "", // Empty, should use default
-			APINames:        []string{"realtime_quote"},
+			DataSourceName: "tushare",
+			Token:          "test-token",
+			TargetDBPath:   "/tmp/test.duckdb",
+			APINames:       []string{"realtime_quote"},
 		}
 
 		instanceID, err := workflowExecutor.ExecuteRealtimeDataSync(ctx, req)

@@ -314,3 +314,20 @@ func TestExecuteSyncPlanRequest_Params(t *testing.T) {
 	assert.Equal(t, "20240101", req.StartDate)
 	assert.Equal(t, "20240131", req.EndDate)
 }
+
+// TestCreateSyncPlanRequest_PullIntervalAndScheduleWindow 测试创建请求支持 pull_interval、schedule_start_cron、schedule_end_cron
+func TestCreateSyncPlanRequest_PullIntervalAndScheduleWindow(t *testing.T) {
+	req := contracts.CreateSyncPlanRequest{
+		Name:                 "Realtime",
+		DataSourceID:         shared.NewID(),
+		SelectedAPIs:         []string{"realtime_quote"},
+		PlanMode:             sync.PlanModeRealtime,
+		PullIntervalSeconds:  60,
+		ScheduleStartCron:    "0 0 9 * * 1-5",
+		ScheduleEndCron:      "0 30 15 * * 1-5",
+	}
+	assert.Equal(t, 60, req.PullIntervalSeconds)
+	assert.Equal(t, "0 0 9 * * 1-5", req.ScheduleStartCron)
+	assert.Equal(t, "0 30 15 * * 1-5", req.ScheduleEndCron)
+	assert.Equal(t, sync.PlanModeRealtime, req.PlanMode)
+}

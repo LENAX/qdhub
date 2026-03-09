@@ -109,18 +109,21 @@ type DataTypeMappingRuleRow struct {
 
 // APISyncStrategyRow represents api_sync_strategies table row.
 type APISyncStrategyRow struct {
-	ID               string         `db:"id"`
-	DataSourceID     string         `db:"data_source_id"`
-	APIName          string         `db:"api_name"`
-	PreferredParam   string         `db:"preferred_param"`
-	SupportDateRange int            `db:"support_date_range"` // 0: false, 1: true
-	RequiredParams   sql.NullString `db:"required_params"`    // JSON array
-	Dependencies     sql.NullString `db:"dependencies"`       // JSON array
-	FixedParams      sql.NullString `db:"fixed_params"`       // JSON object
-	FixedParamKeys   sql.NullString `db:"fixed_param_keys"`   // JSON array
-	Description      sql.NullString `db:"description"`
-	CreatedAt        time.Time      `db:"created_at"`
-	UpdatedAt        time.Time      `db:"updated_at"`
+	ID                        string         `db:"id"`
+	DataSourceID              string         `db:"data_source_id"`
+	APIName                   string         `db:"api_name"`
+	PreferredParam            string         `db:"preferred_param"`
+	SupportDateRange          int            `db:"support_date_range"` // 0: false, 1: true
+	RequiredParams            sql.NullString `db:"required_params"`   // JSON array
+	Dependencies              sql.NullString `db:"dependencies"`      // JSON array
+	FixedParams               sql.NullString `db:"fixed_params"`      // JSON object
+	FixedParamKeys            sql.NullString `db:"fixed_param_keys"`   // JSON array
+	RealtimeTsCodeChunkSize   int            `db:"realtime_ts_code_chunk_size"`
+	RealtimeTsCodeFormat      string         `db:"realtime_ts_code_format"`
+	IterateParams             sql.NullString `db:"iterate_params"` // JSON object map[string][]string
+	Description               sql.NullString `db:"description"`
+	CreatedAt                 time.Time     `db:"created_at"`
+	UpdatedAt                 time.Time     `db:"updated_at"`
 }
 
 // ==================== Sync Domain Models ====================
@@ -148,10 +151,14 @@ type SyncPlanRow struct {
 	Description          string         `db:"description"`
 	DataSourceID         string         `db:"data_source_id"`
 	DataStoreID          sql.NullString `db:"data_store_id"`
+	PlanMode             string         `db:"plan_mode"`
 	SelectedAPIs         string         `db:"selected_apis"`
 	ResolvedAPIs         string         `db:"resolved_apis"`
 	ExecutionGraph       string         `db:"execution_graph"`
 	CronExpression       sql.NullString `db:"cron_expression"`
+	ScheduleStartCron    sql.NullString `db:"schedule_start_cron"`
+	ScheduleEndCron      sql.NullString `db:"schedule_end_cron"`
+	PullIntervalSeconds int           `db:"pull_interval_seconds"`
 	DefaultExecuteParams           string         `db:"default_execute_params"` // JSON: ExecuteParams
 	IncrementalMode                bool           `db:"incremental_mode"`
 	LastSuccessfulEndDate          sql.NullString `db:"last_successful_end_date"`

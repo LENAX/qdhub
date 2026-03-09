@@ -91,14 +91,26 @@ type BatchDataSyncRequest struct {
 }
 
 // RealtimeDataSyncRequest 实时同步请求参数
+// 当 DataSourceID 非空时走流式工作流（RealtimeSyncWorkflowBuilder）；否则走增量工作流（不依赖 checkpoint，与 SyncPlan 一致）。
 type RealtimeDataSyncRequest struct {
-	DataSourceName  string   // 数据源名称（必填）
-	Token           string   // API Token（必填）
-	TargetDBPath    string   // 目标数据库路径（必填）
-	CheckpointTable string   // 检查点表名（可选，默认: "sync_checkpoint"）
-	APINames        []string // 需要同步的 API 列表（必填）
-	MaxStocks       int      // 最大股票数量（可选，0表示不限制）
-	CronExpr        string   // Cron 表达式（可选）
+	DataSourceName string   // 数据源名称（必填）
+	Token          string   // API Token（必填）
+	TargetDBPath   string   // 目标数据库路径（必填）
+	APINames       []string // 需要同步的 API 列表（必填）
+	MaxStocks      int      // 最大股票数量（可选，增量模式用，0表示不限制）
+	CronExpr       string   // Cron 表达式（可选）
+
+	// 时间范围（可选）：实时 API 通常提供最新数据，此处仅用于补充历史；不传则不校验、按最新处理
+	StartDate                    string // 可选，起始日 20060102
+	EndDate                      string // 可选，结束日；未传时由工作流内 FetchLatestTradingDate 提供
+	IncrementalStartDateTable    string // 可选，用于 MAX(列) 的表名
+	IncrementalStartDateColumn   string // 可选，日期列名（如 trade_date）
+
+	// 流式实时模式（PlanMode=realtime 时由 ExecuteSyncPlan 填充）
+	DataSourceID     shared.ID // 数据源 ID，非空时使用流式工作流并从 DB 拉策略
+	TsCodes          []string // 股票代码列表（从 stock_basic 读取，用于 ts_code 分片）
+	IndexCodes       []string // 指数代码列表（从 index_basic 读取，用于 rt_idx_min 等）
+	PullIntervalSecs int      // Pull 拉取间隔（秒），0 用默认 60
 }
 
 // APISyncConfig API 同步配置（用于 SyncPlan 执行）

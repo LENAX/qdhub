@@ -367,6 +367,12 @@ type APISyncStrategy struct {
 	FixedParams      map[string]any        `json:"fixed_params,omitempty"`
 	// FixedParamKeys 中的 key 将始终以 FixedParams 为准，上游调用方即便传了同名参数也会被忽略。
 	FixedParamKeys   []string              `json:"fixed_param_keys,omitempty"`
+	// 实时同步专用：ts_code 分片大小（0 表示非实时或不分片）
+	RealtimeTsCodeChunkSize int `json:"realtime_ts_code_chunk_size,omitempty"`
+	// 实时同步专用：comma_separated / single
+	RealtimeTsCodeFormat string `json:"realtime_ts_code_format,omitempty"`
+	// 需要迭代的参数及值列表（如 src: ["sina"]），存 DB 为 JSON
+	IterateParams    map[string][]string   `json:"iterate_params,omitempty"`
 	Description      string                `json:"description"`
 	CreatedAt        shared.Timestamp      `json:"created_at"`
 	UpdatedAt        shared.Timestamp      `json:"updated_at"`
@@ -426,6 +432,27 @@ func (s *APISyncStrategy) IsDirectSync() bool {
 // NeedsStockSplit 是否需要按股票代码拆分任务
 func (s *APISyncStrategy) NeedsStockSplit() bool {
 	return s.PreferredParam == SyncParamTsCode
+}
+
+// MarshalIterateParamsJSON 序列化 IterateParams 为 JSON 字符串
+func (s *APISyncStrategy) MarshalIterateParamsJSON() (string, error) {
+	if len(s.IterateParams) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(s.IterateParams)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// UnmarshalIterateParamsJSON 从 JSON 字符串反序列化 IterateParams
+func (s *APISyncStrategy) UnmarshalIterateParamsJSON(jsonStr string) error {
+	if jsonStr == "" {
+		s.IterateParams = nil
+		return nil
+	}
+	return json.Unmarshal([]byte(jsonStr), &s.IterateParams)
 }
 
 // ==================== 枚举类型 ====================

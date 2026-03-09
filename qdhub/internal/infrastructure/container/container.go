@@ -29,6 +29,8 @@ import (
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasourcevalidator"
 	"qdhub/internal/infrastructure/datasource/tushare"
+	"qdhub/internal/infrastructure/datasource/tushare/realtime"
+	"qdhub/internal/infrastructure/realtimebuffer"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
@@ -877,6 +879,11 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
 	log.Printf("[Container] ✅ CommonDataCache (memory, TTL 24h) registered")
 
+	// 实时同步：Adapter 注册表（sina/eastmoney）+ Buffer 按实例管理
+	taskEngineDeps.RealtimeAdapterRegistry = realtime.NewRegistryWithDefaults()
+	taskEngineDeps.RealtimeBufferRegistry = realtimebuffer.NewDefaultRegistry(256)
+	log.Printf("[Container] ✅ RealtimeAdapterRegistry & RealtimeBufferRegistry registered")
+
 	// 可选：若配置了默认 DuckDB 路径，通过共享 Factory 获取连接（避免独立 DuckDB 引擎实例）
 	if c.config.DefaultDuckDBPath != "" {
 		log.Printf("[Container] DefaultDuckDBPath from config: '%s' (optional)", c.config.DefaultDuckDBPath)
@@ -903,7 +910,12 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 
 	// Create WorkflowExecutor (domain service for executing built-in workflows)
 	// This avoids direct dependency between application services
-	c.WorkflowExecutor = taskengine.NewWorkflowExecutor(c.WorkflowRepo, c.TaskEngineAdapter, c.MetadataRepo)
+	c.WorkflowExecutor = taskengine.NewWorkflowExecutor(
+		c.WorkflowRepo,
+		c.TaskEngineAdapter,
+		c.MetadataRepo,
+		taskEngineDeps.RealtimeAdapterRegistry,
+	)
 
 	logrus.Info("Task Engine initialized")
 	return nil
@@ -1055,6 +1067,14 @@ func (c *Container) restoreScheduledPlans(ctx context.Context) error {
 	}
 
 	logrus.Infof("Restored %d scheduled plan(s)", restored)
+
+	// 运行时段协调：每分钟检查一次，对配置了 schedule_start_cron/schedule_end_cron 的 realtime 计划自动启停
+	if cs, ok := c.PlanScheduler.(*scheduler.CronScheduler); ok {
+		if err := cs.ScheduleRepeatingJob(scheduler.ReconcileRunningWindowJobID, "0 * * * * *"); err != nil {
+			logrus.Warnf("Failed to schedule running-window reconciler: %v", err)
+		}
+	}
+
 	return nil
 }
 

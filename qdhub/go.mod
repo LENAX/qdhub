@@ -3,7 +3,7 @@ module qdhub
 go 1.24.2
 
 require (
-	github.com/LENAX/task-engine v1.0.14
+	github.com/LENAX/task-engine v1.0.15
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/casbin/casbin/v2 v2.128.0
 	github.com/gin-contrib/authz v1.0.6

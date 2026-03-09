@@ -117,3 +117,34 @@ func TestGenerateTimeWindowSubTasksJob_MissingParams(t *testing.T) {
 		t.Error("expected error for missing data_source_name and api_name")
 	}
 }
+
+func TestGetSyncRangeFromTargetJob_RequiresTargetDBPath(t *testing.T) {
+	tc := mockTaskContext(map[string]interface{}{})
+
+	_, err := jobs.GetSyncRangeFromTargetJob(tc)
+	if err == nil {
+		t.Error("expected error for missing target_db_path")
+	}
+	if err != nil && err.Error() != "target_db_path is required" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetSyncRangeFromTargetJob_ReturnsStartDateFromParams(t *testing.T) {
+	tc := mockTaskContext(map[string]interface{}{
+		"target_db_path": "/tmp/test.duckdb",
+		"start_date":     "20250115",
+	})
+
+	out, err := jobs.GetSyncRangeFromTargetJob(tc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m, ok := out.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map, got %T", out)
+	}
+	if m["start_date"] != "20250115" {
+		t.Errorf("expected start_date 20250115, got %v", m["start_date"])
+	}
+}

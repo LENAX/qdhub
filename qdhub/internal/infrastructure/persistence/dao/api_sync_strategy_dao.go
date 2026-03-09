@@ -26,9 +26,11 @@ func NewAPISyncStrategyDAO(db *sqlx.DB) *APISyncStrategyDAO {
 // Create inserts a new API sync strategy record.
 func (d *APISyncStrategyDAO) Create(tx *sqlx.Tx, entity *metadata.APISyncStrategy) error {
 	query := `INSERT INTO api_sync_strategies (id, data_source_id, api_name, preferred_param, 
-		support_date_range, required_params, dependencies, fixed_params, fixed_param_keys, description, created_at, updated_at)
+		support_date_range, required_params, dependencies, fixed_params, fixed_param_keys,
+		realtime_ts_code_chunk_size, realtime_ts_code_format, iterate_params, description, created_at, updated_at)
 		VALUES (:id, :data_source_id, :api_name, :preferred_param, 
-		:support_date_range, :required_params, :dependencies, :fixed_params, :fixed_param_keys, :description, :created_at, :updated_at)`
+		:support_date_range, :required_params, :dependencies, :fixed_params, :fixed_param_keys,
+		:realtime_ts_code_chunk_size, :realtime_ts_code_format, :iterate_params, :description, :created_at, :updated_at)`
 
 	row, err := d.toRow(entity)
 	if err != nil {
@@ -65,7 +67,8 @@ func (d *APISyncStrategyDAO) Update(tx *sqlx.Tx, entity *metadata.APISyncStrateg
 		preferred_param = :preferred_param, support_date_range = :support_date_range,
 		required_params = :required_params, dependencies = :dependencies,
 		fixed_params = :fixed_params, fixed_param_keys = :fixed_param_keys,
-		description = :description, updated_at = :updated_at
+		realtime_ts_code_chunk_size = :realtime_ts_code_chunk_size, realtime_ts_code_format = :realtime_ts_code_format,
+		iterate_params = :iterate_params, description = :description, updated_at = :updated_at
 		WHERE id = :id`
 
 	row, err := d.toRow(entity)
@@ -235,6 +238,16 @@ func (d *APISyncStrategyDAO) toRow(entity *metadata.APISyncStrategy) (*APISyncSt
 		row.FixedParamKeys = sql.NullString{String: string(data), Valid: true}
 	}
 
+	row.RealtimeTsCodeChunkSize = entity.RealtimeTsCodeChunkSize
+	row.RealtimeTsCodeFormat = entity.RealtimeTsCodeFormat
+	if len(entity.IterateParams) > 0 {
+		data, err := entity.MarshalIterateParamsJSON()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal iterate params: %w", err)
+		}
+		row.IterateParams = sql.NullString{String: data, Valid: true}
+	}
+
 	return row, nil
 }
 
@@ -284,6 +297,14 @@ func (d *APISyncStrategyDAO) toEntity(row *APISyncStrategyRow) (*metadata.APISyn
 			return nil, fmt.Errorf("failed to unmarshal fixed param keys: %w", err)
 		}
 		entity.FixedParamKeys = keys
+	}
+
+	entity.RealtimeTsCodeChunkSize = row.RealtimeTsCodeChunkSize
+	entity.RealtimeTsCodeFormat = row.RealtimeTsCodeFormat
+	if row.IterateParams.Valid && row.IterateParams.String != "" {
+		if err := entity.UnmarshalIterateParamsJSON(row.IterateParams.String); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal iterate params: %w", err)
+		}
 	}
 
 	return entity, nil
