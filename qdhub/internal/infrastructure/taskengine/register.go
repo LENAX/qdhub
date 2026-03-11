@@ -92,6 +92,8 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"RealtimeSyncDataHandler", jobs.RealtimeSyncDataHandlerJob, "实时数据落库（从 buffer 消费）"},
 		{"RealtimeCloseBuffer", jobs.RealtimeCloseBufferJob, "关闭实时 buffer（所有 Collector 完成后调用）"},
 		{"RealtimeQuoteStreamHandler", jobs.RealtimeQuoteStreamHandlerJob, "Streaming 模式实时行情流处理（从 DataBuffer Pop 的 data 落库）"},
+		{"TushareTickDBBatchWrite", jobs.TushareTickDBBatchWriteJob, "tushare tick 批量落库（1000条/30s flush）"},
+		{"TushareTickFrontendPush", jobs.TushareTickFrontendPushJob, "tushare tick 前端缓存更新（LatestQuoteStore）"},
 
 		// ==================== 建表 Jobs ====================
 		{"CreateTableFromMetadata", jobs.CreateTableFromMetadataJob, "根据 Metadata 创建数据表"},

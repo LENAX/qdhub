@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -14,6 +17,7 @@ import (
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/realtimebuffer"
+	"qdhub/internal/infrastructure/realtimestore"
 )
 
 const defaultRealtimeSrc = "sina"
@@ -312,4 +316,169 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 	return map[string]interface{}{"total_rows": n}, nil
+}
+
+type tushareBatchState struct {
+	firstArrival time.Time
+	rows         []map[string]any
+}
+
+var (
+	tushareBatchMu     sync.Mutex
+	tushareBatchByAPI  = make(map[string]*tushareBatchState)
+	tushareBatchSize   = 1000
+	tushareBatchMaxAge = 30 * time.Second
+)
+
+// TushareTickDBBatchWriteJob 作为 db_sink 的 DataHandler：
+// 按 api_name 聚合批次，满足 1000 条或等待超时 30s 时批量写入 DuckDB。
+func TushareTickDBBatchWriteJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	apiName := tc.GetParamString("api_name")
+	if strings.TrimSpace(apiName) == "" {
+		apiName = "ts_realtime_mkt_tick"
+	}
+	targetDBPath := tc.GetParamString("target_db_path")
+	if targetDBPath == "" {
+		targetDBPath = inferTargetDBPathFromData(tc.GetParam("data"))
+	}
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("TushareTickDBBatchWrite: target_db_path is required")
+	}
+
+	rows := normalizeRealtimeRows(tc.GetParam("data"))
+	if len(rows) == 0 {
+		return map[string]interface{}{"flushed_rows": 0, "batched_rows": 0}, nil
+	}
+
+	now := time.Now()
+	tushareBatchMu.Lock()
+	state := tushareBatchByAPI[apiName]
+	if state == nil {
+		state = &tushareBatchState{firstArrival: now, rows: make([]map[string]any, 0, tushareBatchSize)}
+		tushareBatchByAPI[apiName] = state
+	}
+	for _, r := range rows {
+		delete(r, "target_db_path")
+		state.rows = append(state.rows, r)
+	}
+
+	shouldFlush := len(state.rows) >= tushareBatchSize || now.Sub(state.firstArrival) >= tushareBatchMaxAge
+	if !shouldFlush {
+		batched := len(state.rows)
+		tushareBatchMu.Unlock()
+		return map[string]interface{}{"flushed_rows": 0, "batched_rows": batched}, nil
+	}
+	toFlush := make([]map[string]any, len(state.rows))
+	copy(toFlush, state.rows)
+	state.rows = state.rows[:0]
+	state.firstArrival = now
+	tushareBatchMu.Unlock()
+
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("TushareTickDBBatchWrite: get QuantDB: %w", err)
+	}
+	defer quantDB.Close()
+	if err := ensureTushareTickTable(ctx, quantDB, apiName); err != nil {
+		return nil, err
+	}
+
+	n, err := writeRealtimeBatchToDuckDB(ctx, quantDB, apiName, "tushare_ws", toFlush)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"flushed_rows": n,
+		"batched_rows": 0,
+	}, nil
+}
+
+// TushareTickFrontendPushJob 作为 frontend_sink 的 DataHandler：
+// 将最新行情按 ts_code 写入进程内 LatestQuoteStore，供 ws 接口推送。
+func TushareTickFrontendPushJob(tc *task.TaskContext) (interface{}, error) {
+	rows := normalizeRealtimeRows(tc.GetParam("data"))
+	if len(rows) == 0 {
+		return map[string]interface{}{"updated": 0}, nil
+	}
+	store := realtimestore.DefaultLatestQuoteStore()
+	updated := 0
+	for _, row := range rows {
+		tsCode, _ := row["ts_code"].(string)
+		tsCode = strings.TrimSpace(tsCode)
+		if tsCode == "" {
+			continue
+		}
+		delete(row, "target_db_path")
+		cp := make(map[string]interface{}, len(row))
+		for k, v := range row {
+			cp[k] = v
+		}
+		store.Update(tsCode, cp)
+		updated++
+	}
+	return map[string]interface{}{"updated": updated}, nil
+}
+
+func ensureTushareTickTable(
+	ctx context.Context,
+	quantDB interface {
+		TableExists(ctx context.Context, tableName string) (bool, error)
+		Execute(ctx context.Context, sql string, args ...any) (int64, error)
+	},
+	apiName string,
+) error {
+	tableName := safeTableName(apiName)
+	if tableName == "" {
+		return fmt.Errorf("invalid api_name: %s", apiName)
+	}
+	exists, err := quantDB.TableExists(ctx, tableName)
+	if err != nil {
+		return fmt.Errorf("check table exists %s: %w", tableName, err)
+	}
+	if exists {
+		return nil
+	}
+	ddl := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		code VARCHAR,
+		ts_code VARCHAR,
+		name VARCHAR,
+		trade_time TIMESTAMP,
+		pre_price DOUBLE,
+		price DOUBLE,
+		open DOUBLE,
+		high DOUBLE,
+		low DOUBLE,
+		close DOUBLE,
+		open_int DOUBLE,
+		volume DOUBLE,
+		amount DOUBLE,
+		num DOUBLE,
+		ask_price1 DOUBLE,
+		ask_volume1 DOUBLE,
+		bid_price1 DOUBLE,
+		bid_volume1 DOUBLE,
+		ask_price2 DOUBLE,
+		ask_volume2 DOUBLE,
+		bid_price2 DOUBLE,
+		bid_volume2 DOUBLE,
+		ask_price3 DOUBLE,
+		ask_volume3 DOUBLE,
+		bid_price3 DOUBLE,
+		bid_volume3 DOUBLE,
+		ask_price4 DOUBLE,
+		ask_volume4 DOUBLE,
+		bid_price4 DOUBLE,
+		bid_volume4 DOUBLE,
+		ask_price5 DOUBLE,
+		ask_volume5 DOUBLE,
+		bid_price5 DOUBLE,
+		bid_volume5 DOUBLE,
+		sync_batch_id VARCHAR,
+		created_at TIMESTAMP
+	)`, tableName)
+	if _, err := quantDB.Execute(ctx, ddl); err != nil {
+		return fmt.Errorf("create table %s: %w", tableName, err)
+	}
+	return nil
 }

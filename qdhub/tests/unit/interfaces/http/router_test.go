@@ -166,6 +166,7 @@ func (m *FullMockSyncService) HandleExecutionCallback(ctx context.Context, req c
 func (m *FullMockSyncService) HandleExecutionCallbackByWorkflowInstance(ctx context.Context, workflowInstID string, success bool, recordCount int64, errMsg *string) error {
 	return nil
 }
+func (m *FullMockSyncService) ReconcileRunningWindow(ctx context.Context) error { return nil }
 
 func (m *FullMockSyncService) GetExecutionProgress(ctx context.Context, executionID shared.ID) (*contracts.SyncExecutionProgress, error) {
 	return &contracts.SyncExecutionProgress{}, nil

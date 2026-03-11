@@ -3,7 +3,9 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	taskrealtime "github.com/LENAX/task-engine/pkg/core/realtime"
 	"github.com/LENAX/task-engine/pkg/core/task"
@@ -211,6 +213,31 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		return "", fmt.Errorf("realtime adapter registry is nil")
 	}
 
+	if containsAPI(req.APINames, "ts_realtime_mkt_tick") {
+		topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
+		collector := &realtime.TushareWSTickCollector{
+			Token:        req.Token,
+			TargetDBPath: req.TargetDBPath,
+			Topic:        topic,
+			Codes:        codes,
+		}
+		builder := workflows.NewTushareWSStreamingBuilder(registry, workflows.TushareWSStreamingParams{
+			DataSourceName: req.DataSourceName,
+			Token:          req.Token,
+			TargetDBPath:   req.TargetDBPath,
+			APIName:        "ts_realtime_mkt_tick",
+		}, "tushare_ws_tick", collector)
+		wf, err := builder.Build()
+		if err != nil {
+			return "", fmt.Errorf("build tushare ws streaming workflow: %w", err)
+		}
+		controller, err := e.taskEngineAdapter.SubmitDynamicWorkflow(ctx, wf)
+		if err != nil {
+			return "", fmt.Errorf("submit tushare ws streaming workflow: %w", err)
+		}
+		return shared.ID(controller), nil
+	}
+
 	params := workflows.RealtimeMarketStreamingParams{
 		DataSourceID:    req.DataSourceID,
 		DataSourceName:  req.DataSourceName,
@@ -262,6 +289,81 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		return "", fmt.Errorf("submit realtime streaming workflow: %w", err)
 	}
 	return shared.ID(controller), nil
+}
+
+func containsAPI(apiNames []string, target string) bool {
+	for _, n := range apiNames {
+		if n == target {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveTushareWSFixedParams(fixedByAPI map[string]map[string]interface{}) (string, []string) {
+	topic := "HQ_STK_TICK"
+	codes := []string{"3*.SZ", "0*.SZ", "6*.SH"}
+	if fixedByAPI == nil {
+		return topic, codes
+	}
+	fp := fixedByAPI["ts_realtime_mkt_tick"]
+	if fp == nil {
+		return topic, codes
+	}
+	if v, ok := fp["topic"].(string); ok && strings.TrimSpace(v) != "" {
+		topic = strings.TrimSpace(v)
+	}
+	if v, ok := fp["codes"]; ok {
+		if parsed := parseCodes(v); len(parsed) > 0 {
+			codes = parsed
+		}
+	}
+	return topic, codes
+}
+
+func parseCodes(raw interface{}) []string {
+	switch v := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, s := range v {
+			if t := strings.TrimSpace(s); t != "" {
+				out = append(out, t)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				if t := strings.TrimSpace(s); t != "" {
+					out = append(out, t)
+				}
+			}
+		}
+		return out
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return nil
+		}
+		// 兼容 JSON 数组字符串
+		if strings.HasPrefix(s, "[") {
+			var arr []string
+			if err := json.Unmarshal([]byte(s), &arr); err == nil {
+				return parseCodes(arr)
+			}
+		}
+		parts := strings.Split(s, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if t := strings.TrimSpace(p); t != "" {
+				out = append(out, t)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // executeRealtimeIncremental 执行增量实时工作流（RealtimeDataSync，不依赖 checkpoint，与 SyncPlan 一致）

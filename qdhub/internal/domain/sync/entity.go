@@ -711,6 +711,7 @@ var RealtimeAllowedAPIs = []string{
 	"realtime_tick",
 	"realtime_list",
 	"rt_idx_min",
+	"ts_realtime_mkt_tick",
 }
 
 // IsRealtimeAPI checks whether the given apiName is allowed in realtime mode.

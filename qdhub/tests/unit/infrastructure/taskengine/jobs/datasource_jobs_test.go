@@ -1,6 +1,7 @@
 package jobs_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/LENAX/task-engine/pkg/core/task"
@@ -11,13 +12,14 @@ import (
 // mockTaskContext creates a mock TaskContext for testing
 // Note: Without a valid Registry, GetDependency will panic, so we only test parameter validation
 func mockTaskContext(params map[string]interface{}) *task.TaskContext {
-	tc := &task.TaskContext{
-		TaskID:             "test-task-id",
-		TaskName:           "TestTask",
-		WorkflowInstanceID: "test-workflow-instance-id",
-		Params:             params,
-	}
-	return tc
+	return task.NewTaskContext(
+		context.Background(),
+		"test-task-id",
+		"TestTask",
+		"test-workflow-id",
+		"test-workflow-instance-id",
+		params,
+	)
 }
 
 func TestQueryDataJob_MissingParams(t *testing.T) {

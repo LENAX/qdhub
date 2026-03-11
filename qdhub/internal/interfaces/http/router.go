@@ -53,6 +53,7 @@ type Server struct {
 	syncHandler      *SyncHandler
 	workflowHandler  *WorkflowHandler
 	analysisHandler  *AnalysisHandler
+	realtimeWSHandler *RealtimeWSHandler
 
 	// Auth components
 	jwtManager *authinfra.JWTManager
@@ -95,6 +96,7 @@ func NewServer(
 		dataStoreHandler: NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
 		syncHandler:      NewSyncHandler(syncSvc),
 		workflowHandler:  NewWorkflowHandler(workflowSvc),
+		realtimeWSHandler: NewRealtimeWSHandler(nil),
 		jwtManager:       jwtManager,
 		enforcer:         enforcer,
 		debugDBDSN:       debugDBDSN,
@@ -160,6 +162,9 @@ func (s *Server) setupRoutes() {
 			s.metadataHandler.RegisterRoutes(protected)
 			s.dataStoreHandler.RegisterRoutes(protected)
 			s.syncHandler.RegisterRoutes(protected)
+			if s.realtimeWSHandler != nil {
+				s.realtimeWSHandler.RegisterRoutes(protected)
+			}
 			s.workflowHandler.RegisterRoutes(protected)
 			if s.analysisHandler != nil {
 				s.analysisHandler.RegisterRoutes(protected)
