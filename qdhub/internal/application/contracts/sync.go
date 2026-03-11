@@ -176,6 +176,11 @@ type SyncExecutionProgress struct {
 	PlanID             shared.ID
 	WorkflowInstanceID shared.ID
 
+	// Plan-level schedule window (mainly for realtime plans)
+	// Copied from SyncPlan so that progress API can expose current config directly.
+	ScheduleStartCron *string
+	ScheduleEndCron   *string
+
 	// High-level status (normalized)
 	Status sync.ExecStatus
 
