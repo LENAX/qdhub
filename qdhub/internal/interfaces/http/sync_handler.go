@@ -665,6 +665,9 @@ type SyncPlanProgressResponse struct {
 	ExecutionID        string     `json:"execution_id,omitempty"`
 	WorkflowInstanceID string     `json:"workflow_instance_id,omitempty"`
 	Status             string     `json:"status"`
+	// Schedule window config copied from SyncPlan (mainly for realtime plans).
+	ScheduleStartCron  *string    `json:"schedule_start_cron,omitempty"`
+	ScheduleEndCron    *string    `json:"schedule_end_cron,omitempty"`
 	Progress           float64    `json:"progress"`
 	TaskCount          int        `json:"task_count"`
 	CompletedTask      int        `json:"completed_task"`
@@ -690,6 +693,8 @@ func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanPro
 		ExecutionID:        p.ExecutionID.String(),
 		WorkflowInstanceID: p.WorkflowInstanceID.String(),
 		Status:             p.Status.String(),
+		ScheduleStartCron:  p.ScheduleStartCron,
+		ScheduleEndCron:    p.ScheduleEndCron,
 		Progress:           p.Progress,
 		TaskCount:          p.TaskCount,
 		CompletedTask:      p.CompletedTask,

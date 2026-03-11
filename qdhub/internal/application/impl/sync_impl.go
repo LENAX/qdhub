@@ -629,6 +629,20 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		if pullSecs <= 0 {
 			pullSecs = 60
 		}
+		// 从 api_sync_strategies 加载各 API 的 fixed_params，供流式工作流使用（如 ts_realtime_mkt_tick 的 topic/codes）
+		var fixedParamsByAPI map[string]map[string]interface{}
+		if strategies, listErr := s.metadataRepo.ListAPISyncStrategiesByAPINames(ctx, plan.DataSourceID, apiNames); listErr == nil && len(strategies) > 0 {
+			fixedParamsByAPI = make(map[string]map[string]interface{}, len(strategies))
+			for _, st := range strategies {
+				if st.FixedParams != nil && len(st.FixedParams) > 0 {
+					m := make(map[string]interface{}, len(st.FixedParams))
+					for k, v := range st.FixedParams {
+						m[k] = v
+					}
+					fixedParamsByAPI[st.APIName] = m
+				}
+			}
+		}
 		instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, workflow.RealtimeDataSyncRequest{
 			DataSourceName:     ds.Name,
 			Token:              token.TokenValue,
@@ -638,6 +652,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			TsCodes:            tsCodes,
 			IndexCodes:         indexCodes,
 			PullIntervalSecs:   pullSecs,
+			FixedParamsByAPI:   fixedParamsByAPI,
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
@@ -1503,6 +1518,15 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "sync execution not found", nil)
 	}
 
+	// Load plan once so we can expose schedule window (ScheduleStartCron/ScheduleEndCron) via progress DTO.
+	plan, err := s.syncPlanRepo.Get(exec.SyncPlanID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync plan for execution: %w", err)
+	}
+	if plan == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "sync plan not found for execution", nil)
+	}
+
 	var wfStatus *workflow.WorkflowStatus
 	instanceNotFound := false
 	if s.taskEngineAdapter != nil && !exec.WorkflowInstID.IsEmpty() {
@@ -1531,6 +1555,8 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		ExecutionID:        exec.ID,
 		PlanID:             exec.SyncPlanID,
 		WorkflowInstanceID: exec.WorkflowInstID,
+		ScheduleStartCron:  plan.ScheduleStartCron,
+		ScheduleEndCron:    plan.ScheduleEndCron,
 		Status:             exec.Status,
 		RecordCount:        exec.RecordCount,
 		ErrorMessage:       exec.ErrorMessage,
@@ -1705,6 +1731,15 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 
 // GetPlanProgress retrieves aggregated progress for the latest execution of a sync plan.
 func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID shared.ID) (*contracts.SyncExecutionProgress, error) {
+	// Always load plan so we can expose current schedule window config even when it has never been executed.
+	plan, err := s.syncPlanRepo.Get(planID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync plan: %w", err)
+	}
+	if plan == nil {
+		return nil, shared.NewDomainError(shared.ErrCodeNotFound, "sync plan not found", nil)
+	}
+
 	execs, err := s.syncPlanRepo.GetExecutionsByPlan(planID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sync executions for plan: %w", err)
@@ -1713,8 +1748,10 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 	if len(execs) == 0 {
 		// Plan has never been executed - return a pending progress
 		return &contracts.SyncExecutionProgress{
-			PlanID: planID,
-			Status: sync.ExecStatusPending,
+			PlanID:            planID,
+			Status:            sync.ExecStatusPending,
+			ScheduleStartCron: plan.ScheduleStartCron,
+			ScheduleEndCron:   plan.ScheduleEndCron,
 		}, nil
 	}
 

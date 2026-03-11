@@ -233,8 +233,9 @@ type SyncPlan struct {
 	// 调度配置
 	CronExpression *string `json:"cron_expression,omitempty"`
 	// 运行时段（仅 realtime 模式）：在 start 与 end 之间自动启动，之外自动停止
-	ScheduleStartCron *string `json:"schedule_start_cron,omitempty"` // 如 "0 0 9 * * 1-5" 工作日 9:00 启动
-	ScheduleEndCron   *string `json:"schedule_end_cron,omitempty"`   // 如 "0 30 15 * * 1-5" 工作日 15:30 停止
+	// 去掉 omitempty，便于前端在 /sync-plans 与 /sync-plans/:id 中始终看到字段（未配置时为 null）。
+	ScheduleStartCron *string `json:"schedule_start_cron"` // 如 "0 0 9 * * 1-5" 工作日 9:00 启动
+	ScheduleEndCron   *string `json:"schedule_end_cron"`   // 如 "0 30 15 * * 1-5" 工作日 15:30 停止
 	// Pull 模式拉取间隔（秒），0 表示使用默认 60；仅 realtime 模式生效
 	PullIntervalSeconds int `json:"pull_interval_seconds,omitempty"`
 

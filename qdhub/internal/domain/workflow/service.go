@@ -111,6 +111,10 @@ type RealtimeDataSyncRequest struct {
 	TsCodes          []string // 股票代码列表（从 stock_basic 读取，用于 ts_code 分片）
 	IndexCodes       []string // 指数代码列表（从 index_basic 读取，用于 rt_idx_min 等）
 	PullIntervalSecs int      // Pull 拉取间隔（秒），0 用默认 60
+
+	// FixedParamsByAPI 各 API 的 Fixed Params（来自 api_sync_strategies），供流式工作流使用。
+	// 例如 ts_realtime_mkt_tick 的 topic、codes 在此配置，默认由 migration 021 写入。
+	FixedParamsByAPI map[string]map[string]interface{}
 }
 
 // APISyncConfig API 同步配置（用于 SyncPlan 执行）
