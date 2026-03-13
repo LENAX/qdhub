@@ -80,26 +80,13 @@ func (b *TushareWSStreamingBuilder) Build() (*workflow.Workflow, error) {
 		return nil, fmt.Errorf("build db sink task: %w", err)
 	}
 
-	frontendSinkTask, err := builder.NewRealtimeTaskBuilder("tushare_frontend_sink", "tushare 实时数据前端缓存", b.registry).
-		WithContinuousMode().
-		WithTaskType(taskrealtime.TaskTypeStreamProcessor).
-		WithSubscriberName("frontend_sink").
-		WithBufferPolicyNonBlockingDrop(1024).
-		WithFlushInterval(500 * time.Millisecond).
-		WithJobFunction("TushareTickFrontendPush", map[string]interface{}{}).
-		Build()
-	if err != nil {
-		return nil, fmt.Errorf("build frontend sink task: %w", err)
-	}
-
 	wf, err := builder.NewWorkflowBuilder("tushare_ws_realtime", "tushare WS 全市场 tick").
 		WithStreamingMode().
 		WithBroadcastEnabled(true).
-		WithWalEnabled(true).
+		WithWalEnabled(false).
 		WithDataCollector(b.collectorName, b.collector).
 		WithRealtimeTask(collectorTask).
 		WithRealtimeTask(dbSinkTask).
-		WithRealtimeTask(frontendSinkTask).
 		Build()
 	if err != nil {
 		return nil, fmt.Errorf("build tushare ws streaming workflow: %w", err)

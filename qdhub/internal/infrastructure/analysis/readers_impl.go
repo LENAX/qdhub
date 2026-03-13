@@ -78,12 +78,13 @@ var (
 // 复权因子缺失时用 ffill（该日之前最近一日的 adj_factor），避免除权前日被填成除权后因子导致前复权出现 -99% 异常；无前值则用 1.0。
 func (r *Readers) GetDailyWithAdjFactor(ctx context.Context, tsCode, startDate, endDate string) ([]analysis.RawDailyRow, error) {
 	sql := `
-SELECT d.trade_date, d.open, d.high, d.low, d.close, d.vol, d.amount, d.pre_close, d.change, d.pct_chg,
+SELECT d.trade_date, COALESCE(s.name, '') AS name, d.open, d.high, d.low, d.close, d.vol, d.amount, d.pre_close, d.change, d.pct_chg,
        COALESCE(a.adj_factor,
                 (SELECT a2.adj_factor FROM adj_factor a2 WHERE a2.ts_code = d.ts_code AND a2.trade_date < d.trade_date ORDER BY a2.trade_date DESC LIMIT 1),
                 1.0) AS adj_factor
 FROM daily d
 LEFT JOIN adj_factor a ON d.ts_code = a.ts_code AND d.trade_date = a.trade_date
+LEFT JOIN stock_basic s ON d.ts_code = s.ts_code
 WHERE d.ts_code = ? AND d.trade_date >= ? AND d.trade_date <= ?
 ORDER BY d.trade_date`
 	rows, err := r.db.Query(ctx, sql, tsCode, startDate, endDate)
@@ -94,6 +95,7 @@ ORDER BY d.trade_date`
 	for _, m := range rows {
 		out = append(out, analysis.RawDailyRow{
 			TradeDate: str(m, "trade_date"),
+			Name:      str(m, "name"),
 			Open:      float(m, "open"),
 			High:      float(m, "high"),
 			Low:       float(m, "low"),
@@ -1169,35 +1171,93 @@ FROM top_list WHERE 1=1`
 }
 
 // GetMoneyFlow MoneyFlowReader
-// 使用 moneyflow_ths（同花顺个股资金流向）；无表时返回空列表
-// TradeDate 与 TsCode 至少填一个（由调用方保证）
+// 优先使用 moneyflow（Tushare 个股资金流向），含小/中/大/特大单的买入、卖出及净额，可支撑主力流入/流出、资金占比等展示。
+// 无 moneyflow 表时回退到 moneyflow_ths（同花顺，仅净额口径）；无表时返回空列表。
+// 支持单日 (TradeDate)、日期范围 (StartDate+EndDate)、股票代码 (TsCode) 三种过滤方式。
 func (r *Readers) GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error) {
 	limit, offset := req.Limit, req.Offset
 	if limit <= 0 {
 		limit = 100
 	}
-	ok, _ := r.db.TableExists(ctx, "moneyflow_ths")
-	if !ok {
+	var conds []string
+	var args []any
+	if req.TradeDate != nil && *req.TradeDate != "" {
+		conds = append(conds, "trade_date = ?")
+		args = append(args, *req.TradeDate)
+	} else if req.StartDate != nil && *req.StartDate != "" && req.EndDate != nil && *req.EndDate != "" {
+		conds = append(conds, "trade_date >= ? AND trade_date <= ?")
+		args = append(args, *req.StartDate, *req.EndDate)
+	}
+	if req.TsCode != nil && *req.TsCode != "" {
+		conds = append(conds, "ts_code = ?")
+		args = append(args, *req.TsCode)
+	}
+
+	// 优先：moneyflow 表（完整买卖 + 特大单，单位万元）
+	okMf, _ := r.db.TableExists(ctx, "moneyflow")
+	if okMf {
+		sql := `SELECT m.trade_date, m.ts_code,
+       COALESCE(s.name, '') AS name,
+       COALESCE(m.buy_sm_amount, 0) AS buy_sm_amount, COALESCE(m.sell_sm_amount, 0) AS sell_sm_amount,
+       COALESCE(m.buy_md_amount, 0) AS buy_md_amount, COALESCE(m.sell_md_amount, 0) AS sell_md_amount,
+       COALESCE(m.buy_lg_amount, 0) AS buy_lg_amount, COALESCE(m.sell_lg_amount, 0) AS sell_lg_amount,
+       COALESCE(m.buy_elg_amount, 0) AS buy_elg_amount, COALESCE(m.sell_elg_amount, 0) AS sell_elg_amount,
+       COALESCE(m.net_mf_amount, 0) AS net_mf_amount
+FROM moneyflow m
+LEFT JOIN stock_basic s ON m.ts_code = s.ts_code`
+		if len(conds) > 0 {
+			// 限定列名为 m. 避免与 stock_basic 的 ts_code 等歧义
+			q := make([]string, len(conds))
+			for i, c := range conds {
+				q[i] = strings.Replace(strings.Replace(c, "trade_date", "m.trade_date", -1), "ts_code", "m.ts_code", -1)
+			}
+			sql += " WHERE " + q[0]
+			for _, c := range q[1:] {
+				sql += " AND " + c
+			}
+		}
+		sql += " ORDER BY m.trade_date ASC, m.net_mf_amount DESC NULLS LAST LIMIT ? OFFSET ?"
+		fullArgs := append(args, limit, offset)
+		rows, err := r.db.Query(ctx, sql, fullArgs...)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]analysis.MoneyFlow, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, analysis.MoneyFlow{
+				TradeDate:     str(m, "trade_date"),
+				TsCode:        str(m, "ts_code"),
+				Name:          str(m, "name"),
+				BuySmAmount:   float(m, "buy_sm_amount"),
+				SellSmAmount:  float(m, "sell_sm_amount"),
+				BuyMdAmount:   float(m, "buy_md_amount"),
+				SellMdAmount:  float(m, "sell_md_amount"),
+				BuyLgAmount:   float(m, "buy_lg_amount"),
+				SellLgAmount:  float(m, "sell_lg_amount"),
+				BuyElgAmount:  float(m, "buy_elg_amount"),
+				SellElgAmount: float(m, "sell_elg_amount"),
+				NetMfAmount:   float(m, "net_mf_amount"),
+				NetMfRatio:    0,
+			})
+		}
+		return out, nil
+	}
+
+	// 回退：moneyflow_ths（同花顺，仅净额）
+	okThs, _ := r.db.TableExists(ctx, "moneyflow_ths")
+	if !okThs {
 		return nil, nil
 	}
-	// moneyflow_ths 仅含 buy_*、net_amount 等，无 sell_*、buy_elg/sell_elg，见 tushare doc_id=348
 	sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name,
        buy_sm_amount, buy_md_amount, buy_lg_amount, net_amount AS net_mf_amount
 FROM moneyflow_ths`
-	var where string
-	var args []any
-	if req.TradeDate != nil && *req.TradeDate != "" {
-		where = " WHERE trade_date = ?"
-		args = []any{*req.TradeDate}
-		if req.TsCode != nil && *req.TsCode != "" {
-			where += " AND ts_code = ?"
-			args = append(args, *req.TsCode)
+	if len(conds) > 0 {
+		sql += " WHERE " + conds[0]
+		for _, c := range conds[1:] {
+			sql += " AND " + c
 		}
-	} else {
-		where = " WHERE ts_code = ?"
-		args = []any{*req.TsCode}
 	}
-	sql += where + " ORDER BY net_amount DESC LIMIT ? OFFSET ?"
+	sql += " ORDER BY trade_date ASC, net_amount DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
@@ -1207,12 +1267,19 @@ FROM moneyflow_ths`
 	for _, m := range rows {
 		netAmt := float(m, "net_mf_amount")
 		out = append(out, analysis.MoneyFlow{
-			TradeDate:    str(m, "trade_date"), TsCode: str(m, "ts_code"), Name: str(m, "name"),
-			BuySmAmount:  float(m, "buy_sm_amount"), SellSmAmount: 0,
-			BuyMdAmount:  float(m, "buy_md_amount"), SellMdAmount: 0,
-			BuyLgAmount:  float(m, "buy_lg_amount"), SellLgAmount: 0,
-			BuyElgAmount: 0, SellElgAmount: 0,
-			NetMfAmount: netAmt, NetMfRatio: 0,
+			TradeDate:     str(m, "trade_date"),
+			TsCode:        str(m, "ts_code"),
+			Name:          str(m, "name"),
+			BuySmAmount:   float(m, "buy_sm_amount"),
+			SellSmAmount:  0,
+			BuyMdAmount:   float(m, "buy_md_amount"),
+			SellMdAmount:  0,
+			BuyLgAmount:   float(m, "buy_lg_amount"),
+			SellLgAmount:  0,
+			BuyElgAmount:  0,
+			SellElgAmount: 0,
+			NetMfAmount:   netAmt,
+			NetMfRatio:    0,
 		})
 	}
 	return out, nil
@@ -1747,11 +1814,12 @@ func (r *Readers) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string
 	}
 	start := tradeDate[:4] + "-" + tradeDate[4:6] + "-" + tradeDate[6:8] + " 00:00:00"
 	end := tradeDate[:4] + "-" + tradeDate[4:6] + "-" + tradeDate[6:8] + " 23:59:59"
+	// DuckDB: trade_time 为 TIMESTAMP，需将字符串参数显式转为 TIMESTAMP 再比较
 	sql := `SELECT ts_code, name, trade_time, pre_price, price, open, high, low, close, volume, amount,
 		ask_price1, ask_volume1, bid_price1, bid_volume1, ask_price2, ask_volume2, bid_price2, bid_volume2,
 		ask_price3, ask_volume3, bid_price3, bid_volume3, ask_price4, ask_volume4, bid_price4, bid_volume4,
 		ask_price5, ask_volume5, bid_price5, bid_volume5
-		FROM ts_realtime_mkt_tick WHERE ts_code = ? AND trade_time >= ? AND trade_time <= ?
+		FROM ts_realtime_mkt_tick WHERE ts_code = ? AND trade_time >= CAST(? AS TIMESTAMP) AND trade_time <= CAST(? AS TIMESTAMP)
 		ORDER BY trade_time ASC`
 	rows, err := r.db.Query(ctx, sql, tsCode, start, end)
 	if err != nil {

@@ -5,6 +5,7 @@ import "context"
 // RawDailyRow 原始日线行（含复权因子），供 K 线复权计算使用
 type RawDailyRow struct {
 	TradeDate string  // YYYYMMDD
+	Name      string  // 股票名称（来自 stock_basic，可为空）
 	Open      float64 // 开盘价
 	High      float64 // 最高价
 	Low       float64 // 最低价

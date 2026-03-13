@@ -12,6 +12,8 @@ import (
 	coreRealtime "github.com/LENAX/task-engine/pkg/core/realtime"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
+
+	"qdhub/internal/infrastructure/realtimestore"
 )
 
 var tushareWSDialer = &websocket.Dialer{
@@ -162,6 +164,14 @@ func (c *TushareWSTickCollector) runOnce(
 		if len(rows) == 0 {
 			continue
 		}
+
+		store := realtimestore.DefaultLatestQuoteStore()
+		for _, row := range rows {
+			if tsCode, _ := row["ts_code"].(string); tsCode != "" {
+				store.Update(tsCode, row)
+			}
+		}
+
 		event := coreRealtime.NewRealtimeEvent(coreRealtime.EventDataArrived, "", "", &coreRealtime.DataArrivedPayload{
 			Data:   rows,
 			Source: "tushare_ws",
@@ -197,6 +207,8 @@ func (c *TushareWSTickCollector) parseRows(msg []byte) ([]map[string]interface{}
 	if row == nil {
 		return nil, nil
 	}
+	// Tushare WS naming quirk: 'price' is actually pre_close, 'pre_price' is the current price
+	row["price"], row["pre_price"] = row["pre_price"], row["price"]
 	if c.TargetDBPath != "" {
 		row["target_db_path"] = c.TargetDBPath
 	}

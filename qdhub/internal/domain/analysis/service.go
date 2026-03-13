@@ -162,10 +162,12 @@ type DragonTigerRequest struct {
 }
 
 // MoneyFlowRequest 资金流向查询请求
-// TradeDate 与 TsCode 至少填一个，不可同时为空
+// TradeDate / StartDate+EndDate / TsCode 至少填一个，不可同时为空
 type MoneyFlowRequest struct {
-	TradeDate *string // 交易日期（可选，与 TsCode 二选一或同时填）
-	TsCode    *string // 证券代码（可选，与 TradeDate 二选一或同时填）
+	TradeDate *string // 单日查询（可选，与 StartDate/EndDate、TsCode 三选一或组合）
+	StartDate *string // 范围起始日 YYYYMMDD（与 EndDate 配合使用）
+	EndDate   *string // 范围截止日 YYYYMMDD（与 StartDate 配合使用）
+	TsCode    *string // 证券代码（可选）
 	Market    *string // 市场类型
 	Limit     int     // 返回数量限制
 	Offset    int     // 偏移量

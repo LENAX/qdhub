@@ -433,11 +433,15 @@ func (h *AnalysisHandler) GetRealtimeTicks(c *gin.Context) {
 }
 
 // GetIntradayTicks handles GET /api/v1/analysis/intraday-ticks
+// 历史分时数据：参数 ts_code、date（或 trade_date），返回当日已有分笔数据，按 trade_time 升序
 func (h *AnalysisHandler) GetIntradayTicks(c *gin.Context) {
 	tsCode := c.Query("ts_code")
 	tradeDate := c.Query("trade_date")
+	if tradeDate == "" {
+		tradeDate = c.Query("date")
+	}
 	if tsCode == "" || tradeDate == "" {
-		BadRequest(c, "ts_code and trade_date required")
+		BadRequest(c, "ts_code and date (or trade_date) required")
 		return
 	}
 	list, err := h.svc.GetIntradayTicks(c.Request.Context(), tsCode, tradeDate)
@@ -445,7 +449,7 @@ func (h *AnalysisHandler) GetIntradayTicks(c *gin.Context) {
 		HandleError(c, err)
 		return
 	}
-	Success(c, gin.H{"items": list})
+	Success(c, gin.H{"ts_code": tsCode, "date": tradeDate, "items": list})
 }
 
 // GetIntradayKline handles GET /api/v1/analysis/intraday-kline
@@ -843,12 +847,14 @@ func (h *AnalysisHandler) GetDragonTigerList(c *gin.Context) {
 
 // GetMoneyFlow handles GET /api/v1/analysis/money-flow
 // @Summary      Get money flow
-// @Description  Get main/net money flow for a trade date
+// @Description  Get main/net money flow by date, date range, or stock code
 // @Tags         Analysis
 // @Accept       json
 // @Produce      json
-// @Param        trade_date  query     string  false  "Trade date YYYYMMDD (trade_date or ts_code at least one)"
-// @Param        ts_code     query     string  false  "Stock code (trade_date or ts_code at least one)"
+// @Param        trade_date  query     string  false  "Trade date YYYYMMDD (single day)"
+// @Param        start_date  query     string  false  "Start date YYYYMMDD (range query, use with end_date)"
+// @Param        end_date    query     string  false  "End date YYYYMMDD (range query, use with start_date)"
+// @Param        ts_code     query     string  false  "Stock code"
 // @Param        market      query     string  false  "Market"
 // @Param        limit       query     int     false  "Limit" default(100)
 // @Param        offset      query     int     false  "Offset" default(0)
@@ -858,24 +864,37 @@ func (h *AnalysisHandler) GetDragonTigerList(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /analysis/money-flow [get]
 func (h *AnalysisHandler) GetMoneyFlow(c *gin.Context) {
-	var tradeDate, tsCode *string
+	var tradeDate, tsCode, startDate, endDate *string
 	if v := c.Query("trade_date"); v != "" {
 		tradeDate = &v
+	}
+	if v := c.Query("start_date"); v != "" {
+		startDate = &v
+	}
+	if v := c.Query("end_date"); v != "" {
+		endDate = &v
 	}
 	if v := c.Query("ts_code"); v != "" {
 		tsCode = &v
 	}
-	if (tradeDate == nil || *tradeDate == "") && (tsCode == nil || *tsCode == "") {
-		BadRequest(c, "trade_date or ts_code required (at least one)")
+
+	hasDate := tradeDate != nil
+	hasRange := startDate != nil && endDate != nil
+	hasTsCode := tsCode != nil
+
+	if !hasDate && !hasRange && !hasTsCode {
+		BadRequest(c, "trade_date, start_date+end_date, or ts_code required (at least one)")
 		return
 	}
+
 	var market *string
 	if v := c.Query("market"); v != "" {
 		market = &v
 	}
 	req := analysis.MoneyFlowRequest{
-		TradeDate: tradeDate, TsCode: tsCode, Market: market,
-		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
+		TradeDate: tradeDate, StartDate: startDate, EndDate: endDate,
+		TsCode: tsCode, Market: market,
+		Limit: defaultInt(c.Query("limit"), 5000), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.GetMoneyFlow(c.Request.Context(), req)
 	if err != nil {

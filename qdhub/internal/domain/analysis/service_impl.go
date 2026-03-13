@@ -163,6 +163,7 @@ func applyAdjustAndToKLineData(rows []RawDailyRow, adj AdjustType) []KLineData {
 		}
 		out = append(out, KLineData{
 			TradeDate: r.TradeDate,
+			Name:      r.Name,
 			Open:      round2(r.Open * ratio),
 			High:      round2(r.High * ratio),
 			Low:       round2(r.Low * ratio),

@@ -748,9 +748,9 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	return executionID, nil
 }
 
-// supplementDependenciesFromStrategies supplements allAPIDependencies with data from api_sync_strategies.
-// When api_metadata.param_dependencies is empty, we infer ParamDependency from the strategy's
-// preferred_param and support_date_range to ensure the DependencyResolver assigns the correct SyncMode.
+// supplementDependenciesFromStrategies 用 api_sync_strategies 的 preferred_param/support_date_range
+// 覆盖或补充 allAPIDependencies，使同步计划按用户配置的策略执行（如 moneyflow 改为 trade_date 后按日期同步）。
+// 若某 API 在 api_sync_strategies 中有配置且 preferred_param 非 none，则以其为准，覆盖 api_metadata.param_dependencies。
 func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
 	ctx context.Context,
 	dataSourceID shared.ID,
@@ -773,13 +773,10 @@ func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
 	}
 
 	for _, strategy := range strategies {
-		if len(allAPIDependencies[strategy.APIName]) > 0 {
-			continue
-		}
 		deps := strategyToParamDependencies(strategy)
 		if len(deps) > 0 {
 			allAPIDependencies[strategy.APIName] = deps
-			logrus.Infof("[ResolveSyncPlan] Supplemented param_dependencies for %s from api_sync_strategies (preferred_param=%s, support_date_range=%v)",
+			logrus.Infof("[ResolveSyncPlan] param_dependencies for %s from api_sync_strategies (preferred_param=%s, support_date_range=%v)",
 				strategy.APIName, strategy.PreferredParam, strategy.SupportDateRange)
 		}
 	}

@@ -50,6 +50,7 @@ type IntradayKlineRow struct {
 // KLineData K线数据（值对象）
 type KLineData struct {
 	TradeDate string  `json:"trade_date"` // 交易日期 YYYYMMDD
+	Name      string  `json:"name,omitempty"` // 股票名称
 	Open      float64 `json:"open"`       // 开盘价
 	High      float64 `json:"high"`       // 最高价
 	Low       float64 `json:"low"`        // 最低价
