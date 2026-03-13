@@ -24,6 +24,7 @@ import (
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
+	"qdhub/internal/domain/watchlist"
 	"qdhub/internal/domain/workflow"
 	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/datasource"
@@ -183,6 +184,10 @@ type Container struct {
 	UserRoleRepo auth.UserRoleRepository
 	JWTManager   *authinfra.JWTManager
 	Enforcer     *casbin.Enforcer
+
+	// Watchlist (user stock watchlist, same DB as auth)
+	WatchlistRepo watchlist.Repository
+	WatchlistSvc  contracts.WatchlistApplicationService
 }
 
 // Config holds container configuration.
@@ -823,6 +828,8 @@ func (c *Container) initRepositories() error {
 	c.UserRepo = userRepoImpl
 	c.UserRoleRepo = userRepoImpl // UserRepositoryImpl implements both interfaces
 
+	c.WatchlistRepo = repository.NewWatchlistRepository(c.DB)
+
 	logrus.Info("Repositories initialized")
 	return nil
 }
@@ -983,6 +990,12 @@ func (c *Container) initAuth() error {
 		logrus.Info("Default RBAC policies initialized")
 	} else {
 		logrus.Info("Existing RBAC policies loaded from database")
+		if err := authinfra.EnsureWatchlistPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure watchlist policies: %w", err)
+		}
+		if err := authinfra.EnsureWSPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure ws policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -1037,6 +1050,9 @@ func (c *Container) initApplicationServices() error {
 		passwordHasher,
 		c.JWTManager,
 	)
+
+	// Watchlist service (user stock watchlist)
+	c.WatchlistSvc = impl.NewWatchlistApplicationService(c.WatchlistRepo)
 
 	// Deferred injection: executor needs SyncSvc (breaks init cycle)
 	c.planExecutor.SetSyncService(c.SyncSvc)
@@ -1150,6 +1166,11 @@ func (c *Container) initHTTPServer() error {
 		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
 	}
 
+	var watchlistHandler *httpserver.WatchlistHandler
+	if c.WatchlistSvc != nil {
+		watchlistHandler = httpserver.NewWatchlistHandler(c.WatchlistSvc, c.AnalysisSvc)
+	}
+	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc)
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
@@ -1159,6 +1180,8 @@ func (c *Container) initHTTPServer() error {
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,
+		watchlistHandler,
+		realtimeWSHandler,
 		c.JWTManager,
 		c.Enforcer,
 		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库

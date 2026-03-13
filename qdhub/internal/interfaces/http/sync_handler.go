@@ -100,6 +100,8 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 		PlanMode:                    mode,
 		ScheduleStartCron:           req.ScheduleStartCron,
 		ScheduleEndCron:             req.ScheduleEndCron,
+		SchedulePauseStartCron:      req.SchedulePauseStartCron,
+		SchedulePauseEndCron:        req.SchedulePauseEndCron,
 		PullIntervalSeconds:         req.PullIntervalSeconds,
 	})
 	if err != nil {
@@ -208,6 +210,8 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		PlanMode:                   planMode,
 		ScheduleStartCron:          req.ScheduleStartCron,
 		ScheduleEndCron:            req.ScheduleEndCron,
+		SchedulePauseStartCron:     req.SchedulePauseStartCron,
+		SchedulePauseEndCron:       req.SchedulePauseEndCron,
 		PullIntervalSeconds:        req.PullIntervalSeconds,
 	})
 	if err != nil {
@@ -619,9 +623,11 @@ type CreateSyncPlanReq struct {
 	IncrementalStartDateColumn  string              `json:"incremental_start_date_column"`
 	// PlanMode: "batch"（默认）或 "realtime"
 	PlanMode             string              `json:"plan_mode"`
-	ScheduleStartCron    string              `json:"schedule_start_cron"` // 运行时段：启动 cron（仅 realtime）
-	ScheduleEndCron      string              `json:"schedule_end_cron"`   // 运行时段：停止 cron
-	PullIntervalSeconds  int                 `json:"pull_interval_seconds"` // Pull 间隔（秒），0=默认 60
+	ScheduleStartCron         string   `json:"schedule_start_cron"`         // 运行时段：启动 cron（仅 realtime）
+	ScheduleEndCron           string   `json:"schedule_end_cron"`           // 运行时段：停止 cron
+	SchedulePauseStartCron   string   `json:"schedule_pause_start_cron"`   // 午休暂停开始 cron，如 11:30
+	SchedulePauseEndCron     string   `json:"schedule_pause_end_cron"`    // 午休暂停结束 cron，如 13:00
+	PullIntervalSeconds      int      `json:"pull_interval_seconds"`      // Pull 间隔（秒），0=默认 60
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
@@ -637,9 +643,11 @@ type UpdateSyncPlanReq struct {
 	IncrementalStartDateColumn  *string             `json:"incremental_start_date_column"`
 	// PlanMode: "batch" 或 "realtime"
 	PlanMode             *string             `json:"plan_mode"`
-	ScheduleStartCron    *string             `json:"schedule_start_cron"`
-	ScheduleEndCron      *string             `json:"schedule_end_cron"`
-	PullIntervalSeconds  *int                `json:"pull_interval_seconds"`
+	ScheduleStartCron       *string   `json:"schedule_start_cron"`
+	ScheduleEndCron         *string   `json:"schedule_end_cron"`
+	SchedulePauseStartCron  *string   `json:"schedule_pause_start_cron"`
+	SchedulePauseEndCron    *string   `json:"schedule_pause_end_cron"`
+	PullIntervalSeconds     *int     `json:"pull_interval_seconds"`
 }
 
 // ExecuteSyncPlanReq represents the request body for triggering a sync plan.
@@ -666,9 +674,11 @@ type SyncPlanProgressResponse struct {
 	WorkflowInstanceID string     `json:"workflow_instance_id,omitempty"`
 	Status             string     `json:"status"`
 	// Schedule window config copied from SyncPlan (mainly for realtime plans).
-	ScheduleStartCron  *string    `json:"schedule_start_cron,omitempty"`
-	ScheduleEndCron    *string    `json:"schedule_end_cron,omitempty"`
-	Progress           float64    `json:"progress"`
+	ScheduleStartCron       *string `json:"schedule_start_cron,omitempty"`
+	ScheduleEndCron         *string `json:"schedule_end_cron,omitempty"`
+	SchedulePauseStartCron  *string `json:"schedule_pause_start_cron,omitempty"`
+	SchedulePauseEndCron    *string `json:"schedule_pause_end_cron,omitempty"`
+	Progress                float64 `json:"progress"`
 	TaskCount          int        `json:"task_count"`
 	CompletedTask      int        `json:"completed_task"`
 	FailedTask         int        `json:"failed_task"`
@@ -693,9 +703,11 @@ func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanPro
 		ExecutionID:        p.ExecutionID.String(),
 		WorkflowInstanceID: p.WorkflowInstanceID.String(),
 		Status:             p.Status.String(),
-		ScheduleStartCron:  p.ScheduleStartCron,
-		ScheduleEndCron:    p.ScheduleEndCron,
-		Progress:           p.Progress,
+		ScheduleStartCron:      p.ScheduleStartCron,
+		ScheduleEndCron:        p.ScheduleEndCron,
+		SchedulePauseStartCron: p.SchedulePauseStartCron,
+		SchedulePauseEndCron:   p.SchedulePauseEndCron,
+		Progress:               p.Progress,
 		TaskCount:          p.TaskCount,
 		CompletedTask:      p.CompletedTask,
 		FailedTask:         p.FailedTask,

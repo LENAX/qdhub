@@ -197,24 +197,15 @@ func normalizeRealtimeRows(raw interface{}) []map[string]any {
 
 // inferTargetDBPathFromData 尝试从 data 中的行元数据提取 target_db_path（由 QuotePullCollector 注入）。
 func inferTargetDBPathFromData(raw interface{}) string {
-	logrus.Infof("[RealtimeQuoteStreamHandler] infer target_db_path from data, raw_type=%T", raw)
 	rows := normalizeRealtimeRows(raw)
 	if len(rows) == 0 {
-		logrus.Infof("[RealtimeQuoteStreamHandler] no rows to infer target_db_path")
+		logrus.Debugf("[RealtimeQuoteStreamHandler] no rows to infer target_db_path")
 		return ""
 	}
-	logrus.Infof("[RealtimeQuoteStreamHandler] first row keys=%v", func() []string {
-		keys := make([]string, 0, len(rows[0]))
-		for k := range rows[0] {
-			keys = append(keys, k)
-		}
-		return keys
-	}())
 	if s, ok := rows[0]["target_db_path"].(string); ok && s != "" {
-		logrus.Infof("[RealtimeQuoteStreamHandler] inferred target_db_path=%s", s)
 		return s
 	}
-	logrus.Infof("[RealtimeQuoteStreamHandler] target_db_path not found in first row")
+	logrus.Debugf("[RealtimeQuoteStreamHandler] target_db_path not found in first row")
 	return ""
 }
 

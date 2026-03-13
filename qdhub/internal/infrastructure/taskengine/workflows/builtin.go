@@ -9,6 +9,7 @@ const (
 	BuiltInWorkflowIDCreateTables     = "builtin:create_tables"
 	BuiltInWorkflowIDBatchDataSync    = "builtin:batch_data_sync"
 	BuiltInWorkflowIDRealtimeDataSync = "builtin:realtime_data_sync"
+	BuiltInWorkflowIDNewsRealtimeSync = "builtin:news_realtime_sync"
 )
 
 // BuiltInWorkflowName 内建workflow的英文名称（用于API调用）
@@ -17,6 +18,7 @@ const (
 	BuiltInWorkflowNameCreateTables     = "create_tables"
 	BuiltInWorkflowNameBatchDataSync    = "batch_data_sync"
 	BuiltInWorkflowNameRealtimeDataSync = "realtime_data_sync"
+	BuiltInWorkflowNameNewsRealtimeSync = "news_realtime_sync"
 )
 
 // BuiltInWorkflowMeta 内建workflow元数据
@@ -57,6 +59,13 @@ func GetBuiltInWorkflows() []BuiltInWorkflowMeta {
 			Name:        "实时数据同步",
 			APIName:     BuiltInWorkflowNameRealtimeDataSync,
 			Description: "实时增量同步数据到目标数据库",
+			Category:    "sync",
+		},
+		{
+			ID:          BuiltInWorkflowIDNewsRealtimeSync,
+			Name:        "新闻实时同步",
+			APIName:     BuiltInWorkflowNameNewsRealtimeSync,
+			Description: "按 news_sync_checkpoint 每分钟/每小时增量拉取 Tushare 新闻快讯",
 			Category:    "sync",
 		},
 	}

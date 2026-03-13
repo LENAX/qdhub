@@ -53,12 +53,13 @@ func (e *WorkflowExecutorImpl) ExecuteBuiltInWorkflow(ctx context.Context, name 
 
 	// 2. Map API name to workflow builder name (English name used in builder)
 	// The workflow name in DB is the English name from builder (e.g., "MetadataCrawl")
-	builderNameMap := map[string]string{
-		workflows.BuiltInWorkflowNameMetadataCrawl:    "MetadataCrawl",
-		workflows.BuiltInWorkflowNameCreateTables:     "CreateTables",
-		workflows.BuiltInWorkflowNameBatchDataSync:    "BatchDataSync",
-		workflows.BuiltInWorkflowNameRealtimeDataSync: "RealtimeDataSync",
-	}
+		builderNameMap := map[string]string{
+			workflows.BuiltInWorkflowNameMetadataCrawl:    "MetadataCrawl",
+			workflows.BuiltInWorkflowNameCreateTables:     "CreateTables",
+			workflows.BuiltInWorkflowNameBatchDataSync:    "BatchDataSync",
+			workflows.BuiltInWorkflowNameRealtimeDataSync: "RealtimeDataSync",
+			workflows.BuiltInWorkflowNameNewsRealtimeSync: "NewsRealtimeSync",
+		}
 
 	workflowName, ok := builderNameMap[name]
 	if !ok {

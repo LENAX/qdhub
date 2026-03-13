@@ -177,6 +177,14 @@ func (i *BuiltInWorkflowInitializer) createWorkflowWithPlaceholders(meta workflo
 			WithMaxStocks(0).
 			Build()
 
+	case workflows.BuiltInWorkflowIDNewsRealtimeSync:
+		// 新闻实时同步：占位符模式，执行时替换 data_source_name / token / target_db_path
+		return i.workflowFactory.NewsRealtimeSync().
+			WithDataSource("", "").
+			WithTargetDB("").
+			WithFreq("1H").
+			Build()
+
 	default:
 		return nil, fmt.Errorf("unknown built-in workflow ID: %s", meta.ID)
 	}

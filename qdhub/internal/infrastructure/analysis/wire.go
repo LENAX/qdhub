@@ -23,6 +23,7 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		&conceptListReaderImpl{r},
 		&dragonTigerReaderImpl{r},
 		r,
+		r, // MoneyFlowConceptReader
 		r,
 		&newsReaderImpl{r},
 		&limitUpListReaderImpl{r},
@@ -36,5 +37,8 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		r,
 		r,
 		r, // TradeCalendarReader
+		r, // RealtimeTickReader
+		r, // IntradayTickReader
+		r, // IntradayKlineReader
 	)
 }

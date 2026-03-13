@@ -2,8 +2,10 @@ package realtime
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -11,6 +13,14 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 )
+
+var tushareWSDialer = &websocket.Dialer{
+	TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
+	HandshakeTimeout: 15 * time.Second,
+	ReadBufferSize:   1024 * 1024,
+	WriteBufferSize:  64 * 1024,
+	EnableCompression: true,
+}
 
 const (
 	tushareWSURL = "wss://ws.tushare.pro/listening"
@@ -52,8 +62,12 @@ func (c *TushareWSTickCollector) Run(
 		default:
 		}
 
+		start := time.Now()
 		if err := c.runOnce(ctx, cfg, publish); err != nil {
 			logrus.Warnf("[TushareWSTickCollector] stream stopped: %v", err)
+		}
+		if time.Since(start) > 30*time.Second {
+			backoff = time.Second
 		}
 
 		select {
@@ -72,11 +86,14 @@ func (c *TushareWSTickCollector) runOnce(
 	cfg *coreRealtime.ContinuousTaskConfig,
 	publish coreRealtime.PublishFunc,
 ) error {
-	conn, _, err := websocket.DefaultDialer.Dial(tushareWSURL, nil)
+	headers := http.Header{}
+	headers.Set("User-Agent", "Mozilla/5.0")
+	conn, _, err := tushareWSDialer.Dial(tushareWSURL, headers)
 	if err != nil {
 		return fmt.Errorf("dial ws: %w", err)
 	}
 	defer conn.Close()
+	conn.SetReadLimit(10 * 1024 * 1024)
 
 	topic := strings.TrimSpace(c.Topic)
 	if topic == "" {

@@ -130,6 +130,19 @@ type MoneyFlowReader interface {
 	GetMoneyFlow(ctx context.Context, req MoneyFlowRequest) ([]MoneyFlow, error)
 }
 
+// MoneyFlowConceptRequest 概念板块资金流查询
+type MoneyFlowConceptRequest struct {
+	TradeDate string  // 交易日期
+	Concept   *string // 概念名称或代码筛选（可选）
+	Limit     int
+	Offset    int
+}
+
+// MoneyFlowConceptReader 同花顺概念板块资金流入（moneyflow_cnt_ths）
+type MoneyFlowConceptReader interface {
+	GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error)
+}
+
 // PopularityRankReader 人气榜
 type PopularityRankReader interface {
 	GetRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
@@ -189,4 +202,19 @@ type FinancialReportReader interface {
 // TradeCalendarReader 交易日历（来自 trade_cal 表，cal_date + is_open）
 type TradeCalendarReader interface {
 	GetTradingDates(ctx context.Context, startDate, endDate string) ([]string, error)
+}
+
+// RealtimeTickReader 当日实时分笔（ts_realtime_mkt_tick，按 trade_time 倒序）
+type RealtimeTickReader interface {
+	GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]TickRow, error)
+}
+
+// IntradayTickReader 按日分时+盘口回放（ts_realtime_mkt_tick，按 trade_time 升序）
+type IntradayTickReader interface {
+	GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]TickRow, error)
+}
+
+// IntradayKlineReader 分钟 K 线（rt_min，按日）
+type IntradayKlineReader interface {
+	GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]IntradayKlineRow, error)
 }

@@ -529,7 +529,7 @@ func FetchAndParseAPIDetailJob(tc *task.TaskContext) (interface{}, error) {
 			"description": p.Description,
 		}
 		if p.Default != nil {
-			reqParams[i]["default"] = *p.Default
+			reqParams[i]["default"] = p.Default
 		}
 	}
 	result["request_params"] = reqParams
@@ -865,8 +865,8 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 					if desc, ok := pm["description"].(string); ok {
 						param.Description = desc
 					}
-					if def, ok := pm["default"].(string); ok {
-						param.Default = &def
+					if def, ok := pm["default"]; ok {
+						param.Default = def
 					}
 					params = append(params, param)
 				}
@@ -889,8 +889,8 @@ func SaveAPIMetadataBatchJob(tc *task.TaskContext) (interface{}, error) {
 				if desc, ok := pm["description"].(string); ok {
 					param.Description = desc
 				}
-				if def, ok := pm["default"].(string); ok {
-					param.Default = &def
+				if def, ok := pm["default"]; ok {
+					param.Default = def
 				}
 				params = append(params, param)
 			}

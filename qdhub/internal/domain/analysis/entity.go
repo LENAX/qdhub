@@ -1,6 +1,52 @@
 // Package analysis contains the analysis domain entities and value objects.
 package analysis
 
+// TickRow 分笔/盘口单条（ts_realtime_mkt_tick 表一行，用于实时分笔与历史回放）
+type TickRow struct {
+	TradeTime  string   `json:"trade_time"`
+	TsCode     string   `json:"ts_code"`
+	Name       string   `json:"name,omitempty"`
+	PrePrice   float64  `json:"pre_price"`
+	Price      float64  `json:"price"`
+	Open       float64  `json:"open"`
+	High       float64  `json:"high"`
+	Low        float64  `json:"low"`
+	Close      float64  `json:"close"`
+	Volume     float64  `json:"volume"`
+	Amount     float64  `json:"amount"`
+	AskPrice1  float64  `json:"ask_price1"`
+	AskVolume1 float64  `json:"ask_volume1"`
+	BidPrice1  float64  `json:"bid_price1"`
+	BidVolume1 float64  `json:"bid_volume1"`
+	AskPrice2  float64  `json:"ask_price2"`
+	AskVolume2 float64  `json:"ask_volume2"`
+	BidPrice2  float64  `json:"bid_price2"`
+	BidVolume2 float64  `json:"bid_volume2"`
+	AskPrice3  float64  `json:"ask_price3"`
+	AskVolume3 float64  `json:"ask_volume3"`
+	BidPrice3  float64  `json:"bid_price3"`
+	BidVolume3 float64  `json:"bid_volume3"`
+	AskPrice4  float64  `json:"ask_price4"`
+	AskVolume4 float64  `json:"ask_volume4"`
+	BidPrice4  float64  `json:"bid_price4"`
+	BidVolume4 float64  `json:"bid_volume4"`
+	AskPrice5  float64  `json:"ask_price5"`
+	AskVolume5 float64  `json:"ask_volume5"`
+	BidPrice5  float64  `json:"bid_price5"`
+	BidVolume5 float64  `json:"bid_volume5"`
+}
+
+// IntradayKlineRow 分钟 K 线单条（rt_min 表，用于当日分钟回放）
+type IntradayKlineRow struct {
+	Time   string  `json:"time"`    // 时间 HH:MM 或 YYYY-MM-DD HH:MM:SS
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Close  float64 `json:"close"`
+	Volume float64 `json:"volume"`
+	Amount float64 `json:"amount,omitempty"`
+}
+
 // KLineData K线数据（值对象）
 type KLineData struct {
 	TradeDate string  `json:"trade_date"` // 交易日期 YYYYMMDD
@@ -298,6 +344,15 @@ type MoneyFlow struct {
 	SellElgAmount float64 `json:"sell_elg_amount"`
 	NetMfAmount float64 `json:"net_mf_amount"`
 	NetMfRatio  float64 `json:"net_mf_ratio"`
+}
+
+// MoneyFlowConcept 同花顺概念板块资金流入（moneyflow_cnt_ths）
+type MoneyFlowConcept struct {
+	TradeDate     string  `json:"trade_date"`
+	ConceptCode   string  `json:"concept_code"`
+	ConceptName   string  `json:"concept_name"`
+	NetInflow     float64 `json:"net_inflow"`
+	NetInflowRatio float64 `json:"net_inflow_ratio,omitempty"`
 }
 
 // PopularityRank 人气榜（值对象）

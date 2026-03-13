@@ -714,6 +714,23 @@ func GenerateDatetimeRangeJob(tc *task.TaskContext) (interface{}, error) {
 	if endStr == "" {
 		endStr = tc.GetParamString("end_date")
 	}
+	// 支持从新闻同步上游任务注入：GetNewsSyncRange 输出 start_datetime/end_datetime
+	if startStr == "" || endStr == "" {
+		if cached := tc.GetParam("_cached_GetNewsSyncRange"); cached != nil {
+			if m, ok := cached.(map[string]interface{}); ok {
+				if startStr == "" {
+					if s, ok := m["start_datetime"].(string); ok {
+						startStr = s
+					}
+				}
+				if endStr == "" {
+					if s, ok := m["end_datetime"].(string); ok {
+						endStr = s
+					}
+				}
+			}
+		}
+	}
 	if strings.TrimSpace(startStr) == "" || strings.TrimSpace(endStr) == "" {
 		return nil, fmt.Errorf("start and end are required")
 	}
@@ -1397,6 +1414,101 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 		"old_checkpoints": oldCheckpoints,
 		"sync_date":       latestTradeDate,
 	}, nil
+}
+
+const newsSyncCheckpointTable = "news_sync_checkpoint"
+const newsAPIName = "news"
+
+// GetNewsSyncRangeJob 新闻实时同步：从 news_sync_checkpoint 表读取上次同步时间，输出 start_datetime/end_datetime。
+// 表在 target_db_path 对应的 DuckDB 中，若不存在则创建；无记录时 start = now-24h。
+//
+// Input params:
+//   - target_db_path: string - 目标 DuckDB 路径
+//
+// Output:
+//   - start_datetime: string - 本次同步起始时间（yyyy-mm-dd HH:MM:SS）
+//   - end_datetime: string   - 本次同步结束时间
+func GetNewsSyncRangeJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	targetDBPath := tc.GetParamString("target_db_path")
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is required")
+	}
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("get QuantDB: %w", err)
+	}
+	createSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS "%s" (
+			api_name VARCHAR PRIMARY KEY,
+			last_sync_datetime VARCHAR NOT NULL,
+			last_sync_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			record_count INTEGER DEFAULT 0
+		)
+	`, newsSyncCheckpointTable)
+	if _, err := quantDB.Execute(ctx, createSQL); err != nil {
+		return nil, fmt.Errorf("create news_sync_checkpoint: %w", err)
+	}
+	query := fmt.Sprintf(`SELECT last_sync_datetime FROM "%s" WHERE api_name = ?`, newsSyncCheckpointTable)
+	rows, err := quantDB.Query(ctx, query, newsAPIName)
+	if err != nil {
+		logrus.Warnf("[GetNewsSyncRange] query checkpoint: %v", err)
+	}
+	now := time.Now()
+	endDt := now.Format("2006-01-02 15:04:05")
+	startDt := now.Add(-24 * time.Hour).Format("2006-01-02 15:04:05")
+	if len(rows) > 0 {
+		if v, ok := rows[0]["last_sync_datetime"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				startDt = s
+			}
+		}
+	}
+	logrus.Printf("📍 [GetNewsSyncRange] news sync range: %s -> %s", startDt, endDt)
+	return map[string]interface{}{
+		"start_datetime": startDt,
+		"end_datetime":   endDt,
+	}, nil
+}
+
+// UpdateNewsCheckpointJob 新闻同步完成后更新 news_sync_checkpoint 的 last_sync_datetime。
+//
+// Input params:
+//   - target_db_path: string - 目标 DuckDB 路径
+// 上游 GetNewsSyncRangeJob 输出的 end_datetime 通过 _cached_GetNewsSyncRange 传入。
+func UpdateNewsCheckpointJob(tc *task.TaskContext) (interface{}, error) {
+	ctx := context.Background()
+	targetDBPath := tc.GetParamString("target_db_path")
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is required")
+	}
+	endDatetime := ""
+	if cached := tc.GetParam("_cached_GetNewsSyncRange"); cached != nil {
+		if m, ok := cached.(map[string]interface{}); ok {
+			if s, ok := m["end_datetime"].(string); ok {
+				endDatetime = s
+			}
+		}
+	}
+	if endDatetime == "" {
+		endDatetime = time.Now().Format("2006-01-02 15:04:05")
+	}
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("get QuantDB: %w", err)
+	}
+	upsertSQL := fmt.Sprintf(`
+		INSERT INTO "%s" (api_name, last_sync_datetime, last_sync_time, record_count)
+		VALUES (?, ?, CURRENT_TIMESTAMP, 0)
+		ON CONFLICT(api_name) DO UPDATE SET
+			last_sync_datetime = excluded.last_sync_datetime,
+			last_sync_time = CURRENT_TIMESTAMP
+	`, newsSyncCheckpointTable)
+	if _, err := quantDB.Execute(ctx, upsertSQL, newsAPIName, endDatetime); err != nil {
+		return nil, fmt.Errorf("update news_sync_checkpoint: %w", err)
+	}
+	logrus.Printf("✅ [UpdateNewsCheckpoint] last_sync_datetime=%s", endDatetime)
+	return map[string]interface{}{"updated": true, "end_datetime": endDatetime}, nil
 }
 
 // GenerateTimeWindowSubTasksJob 根据时间窗口和一维参数列表（如 src）生成 SyncAPIData 子任务。
@@ -2240,6 +2352,8 @@ func parseFreqToDuration(freq string) (time.Duration, error) {
 		base = 24 * time.Hour
 	case "H":
 		base = time.Hour
+	case "MIN", "M":
+		base = time.Minute
 	default:
 		return 0, fmt.Errorf("unsupported freq unit: %s", unit)
 	}

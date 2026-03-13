@@ -17,6 +17,7 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
 // SyncApplicationServiceImpl implements SyncApplicationService.
@@ -98,11 +99,8 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		mode = sync.PlanModeBatch
 	}
 	if mode == sync.PlanModeRealtime {
-		for _, api := range req.SelectedAPIs {
-			if !sync.IsRealtimeAPI(api) {
-				return nil, shared.NewDomainError(shared.ErrCodeValidation,
-					fmt.Sprintf("realtime plan only allows APIs: %v, got: %s", sync.RealtimeAllowedAPIs, api), nil)
-			}
+		if err := sync.ValidateRealtimePlanAPIs(req.SelectedAPIs); err != nil {
+			return nil, shared.NewDomainError(shared.ErrCodeValidation, err.Error(), nil)
 		}
 	}
 
@@ -130,6 +128,7 @@ func (s *SyncApplicationServiceImpl) CreateSyncPlan(ctx context.Context, req con
 		plan.SetIncrementalStartDateSource(req.IncrementalStartDateAPI, req.IncrementalStartDateColumn)
 	}
 	plan.SetScheduleWindow(req.ScheduleStartCron, req.ScheduleEndCron)
+	plan.SetSchedulePauseWindow(req.SchedulePauseStartCron, req.SchedulePauseEndCron)
 	plan.SetPullIntervalSeconds(req.PullIntervalSeconds)
 
 	// Persist
@@ -235,14 +234,6 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 		if !mode.IsValid() {
 			mode = sync.PlanModeBatch
 		}
-		if mode == sync.PlanModeRealtime {
-			for _, api := range plan.SelectedAPIs {
-				if !sync.IsRealtimeAPI(api) {
-					return shared.NewDomainError(shared.ErrCodeValidation,
-						fmt.Sprintf("realtime plan only allows APIs: %v, got: %s", sync.RealtimeAllowedAPIs, api), nil)
-				}
-			}
-		}
 		plan.Mode = mode
 	}
 	if req.ScheduleStartCron != nil || req.ScheduleEndCron != nil {
@@ -255,8 +246,25 @@ func (s *SyncApplicationServiceImpl) UpdateSyncPlan(ctx context.Context, id shar
 		}
 		plan.SetScheduleWindow(start, end)
 	}
+	if req.SchedulePauseStartCron != nil || req.SchedulePauseEndCron != nil {
+		pauseStart, pauseEnd := "", ""
+		if req.SchedulePauseStartCron != nil {
+			pauseStart = *req.SchedulePauseStartCron
+		}
+		if req.SchedulePauseEndCron != nil {
+			pauseEnd = *req.SchedulePauseEndCron
+		}
+		plan.SetSchedulePauseWindow(pauseStart, pauseEnd)
+	}
 	if req.PullIntervalSeconds != nil {
 		plan.SetPullIntervalSeconds(*req.PullIntervalSeconds)
+	}
+
+	// 实时计划约束：仅能绑定一个实时 API，不能混入批量/历史 API
+	if plan.Mode == sync.PlanModeRealtime {
+		if err := sync.ValidateRealtimePlanAPIs(plan.SelectedAPIs); err != nil {
+			return shared.NewDomainError(shared.ErrCodeValidation, err.Error(), nil)
+		}
 	}
 
 	plan.UpdatedAt = shared.Now()
@@ -581,25 +589,29 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		logrus.Infof("[ExecuteSyncPlan] IncrementalMode=true for plan %s, resolved date range: %s -> %s (requiresDate=%v)",
 			plan.ID, eff.StartDate, eff.EndDate, requiresDate)
 	}
-	// 日期范围校验仅针对批量模式：实时计划不做日期校验（实时 API 通常始终提供最新数据，时间范围仅用于补充历史）
-	if plan.Mode != sync.PlanModeRealtime && requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
+	// 日期范围校验仅针对批量模式：实时/新闻实时计划不做日期校验
+	if plan.Mode != sync.PlanModeRealtime && plan.Mode != sync.PlanModeNewsRealtime && requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
 		return "", shared.NewDomainError(shared.ErrCodeValidation,
 			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
 	}
 
-	// Get tasks
+	// Get tasks（新闻实时同步模式不依赖 tasks，仅用 DataSource/DataStore）
 	tasks, err := s.syncPlanRepo.GetTasksByPlan(planID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get tasks: %w", err)
 	}
-	if len(tasks) == 0 {
+	if len(tasks) == 0 && plan.Mode != sync.PlanModeNewsRealtime {
 		return "", shared.NewDomainError(shared.ErrCodeInvalidState, "no tasks found for plan", nil)
 	}
 
-	// Filter tasks by sync frequency
-	needSyncTasks, skipAPIs := s.filterTasksByFrequency(tasks)
-	if len(needSyncTasks) == 0 {
-		return "", shared.NewDomainError(shared.ErrCodeInvalidState, "all tasks are skipped due to sync frequency", nil)
+	// Filter tasks by sync frequency（新闻实时模式跳过，不依赖 needSyncTasks）
+	var needSyncTasks []*sync.SyncTask
+	var skipAPIs []string
+	if plan.Mode != sync.PlanModeNewsRealtime {
+		needSyncTasks, skipAPIs = s.filterTasksByFrequency(tasks)
+		if len(needSyncTasks) == 0 {
+			return "", shared.NewDomainError(shared.ErrCodeInvalidState, "all tasks are skipped due to sync frequency", nil)
+		}
 	}
 
 	// Get data source info
@@ -621,7 +633,19 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	}
 
 	var instanceID shared.ID
-	if plan.Mode == sync.PlanModeRealtime {
+	if plan.Mode == sync.PlanModeNewsRealtime {
+		// 新闻实时同步：使用 builtin:news_realtime_sync，从 plan 的 DataSource/DataStore 取 Token、TargetDBPath
+		params := map[string]interface{}{
+			"data_source_name": ds.Name,
+			"token":            token.TokenValue,
+			"target_db_path":   targetDBPath,
+		}
+		id, err := s.workflowExecutor.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameNewsRealtimeSync, params)
+		if err != nil {
+			return "", fmt.Errorf("failed to execute news realtime sync workflow: %w", err)
+		}
+		instanceID = id
+	} else if plan.Mode == sync.PlanModeRealtime {
 		// 实时同步：不校验、不依赖日期范围；实时 API 通常即最新数据，时间范围仅用于补充历史
 		apiNames := s.extractAPINames(needSyncTasks)
 		tsCodes, indexCodes := s.loadTsCodesFromTargetDB(ctx, eff.TargetDBPath)
@@ -1089,6 +1113,15 @@ func (s *SyncApplicationServiceImpl) ReconcileRunningWindow(ctx context.Context)
 			logrus.Warnf("[ReconcileRunningWindow] plan %s cron parse error: %v", plan.ID, err)
 			continue
 		}
+		// 若配置了午休/暂停窗口，在该时段内视为不在运行窗口
+		if inWindow && plan.SchedulePauseStartCron != nil && plan.SchedulePauseEndCron != nil {
+			inPause, errPause := isInScheduleWindow(now, *plan.SchedulePauseStartCron, *plan.SchedulePauseEndCron)
+			if errPause != nil {
+				logrus.Warnf("[ReconcileRunningWindow] plan %s pause cron parse error: %v", plan.ID, errPause)
+			} else if inPause {
+				inWindow = false
+			}
+		}
 		running, err := s.syncPlanRepo.GetRunningExecutionByPlanID(plan.ID)
 		if err != nil {
 			logrus.Warnf("[ReconcileRunningWindow] get running execution plan %s: %v", plan.ID, err)
@@ -1555,9 +1588,11 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 		ExecutionID:        exec.ID,
 		PlanID:             exec.SyncPlanID,
 		WorkflowInstanceID: exec.WorkflowInstID,
-		ScheduleStartCron:  plan.ScheduleStartCron,
-		ScheduleEndCron:    plan.ScheduleEndCron,
-		Status:             exec.Status,
+		ScheduleStartCron:      plan.ScheduleStartCron,
+		ScheduleEndCron:        plan.ScheduleEndCron,
+		SchedulePauseStartCron: plan.SchedulePauseStartCron,
+		SchedulePauseEndCron:   plan.SchedulePauseEndCron,
+		Status:                 exec.Status,
 		RecordCount:        exec.RecordCount,
 		ErrorMessage:       exec.ErrorMessage,
 		StartedAt:          exec.StartedAt,
@@ -1748,10 +1783,12 @@ func (s *SyncApplicationServiceImpl) GetPlanProgress(ctx context.Context, planID
 	if len(execs) == 0 {
 		// Plan has never been executed - return a pending progress
 		return &contracts.SyncExecutionProgress{
-			PlanID:            planID,
-			Status:            sync.ExecStatusPending,
-			ScheduleStartCron: plan.ScheduleStartCron,
-			ScheduleEndCron:   plan.ScheduleEndCron,
+			PlanID:                 planID,
+			Status:                 sync.ExecStatusPending,
+			ScheduleStartCron:      plan.ScheduleStartCron,
+			ScheduleEndCron:        plan.ScheduleEndCron,
+			SchedulePauseStartCron: plan.SchedulePauseStartCron,
+			SchedulePauseEndCron:   plan.SchedulePauseEndCron,
 		}, nil
 	}
 

@@ -25,6 +25,7 @@ type analysisServiceImpl struct {
 	conceptListReader           ConceptListReader
 	dragonTigerReader           DragonTigerReader
 	moneyFlowReader             MoneyFlowReader
+	moneyFlowConceptReader      MoneyFlowConceptReader
 	popularityRankReader        PopularityRankReader
 	newsReader                  NewsReader
 	limitUpListReader           LimitUpListReader
@@ -38,6 +39,9 @@ type analysisServiceImpl struct {
 	financialReportReader       FinancialReportReader
 	customQueryExecutor         CustomQueryExecutor
 	tradeCalendarReader         TradeCalendarReader
+	realtimeTickReader          RealtimeTickReader
+	intradayTickReader          IntradayTickReader
+	intradayKlineReader         IntradayKlineReader
 }
 
 // NewAnalysisService 构造分析领域服务，依赖各 Reader 与 CustomQueryExecutor
@@ -58,6 +62,7 @@ func NewAnalysisService(
 	conceptListReader ConceptListReader,
 	dragonTigerReader DragonTigerReader,
 	moneyFlowReader MoneyFlowReader,
+	moneyFlowConceptReader MoneyFlowConceptReader,
 	popularityRankReader PopularityRankReader,
 	newsReader NewsReader,
 	limitUpListReader LimitUpListReader,
@@ -71,6 +76,9 @@ func NewAnalysisService(
 	financialReportReader FinancialReportReader,
 	customQueryExecutor CustomQueryExecutor,
 	tradeCalendarReader TradeCalendarReader,
+	realtimeTickReader RealtimeTickReader,
+	intradayTickReader IntradayTickReader,
+	intradayKlineReader IntradayKlineReader,
 ) AnalysisService {
 	return &analysisServiceImpl{
 		kLineReader:                 kLineReader,
@@ -89,6 +97,7 @@ func NewAnalysisService(
 		conceptListReader:           conceptListReader,
 		dragonTigerReader:           dragonTigerReader,
 		moneyFlowReader:             moneyFlowReader,
+		moneyFlowConceptReader:      moneyFlowConceptReader,
 		popularityRankReader:        popularityRankReader,
 		newsReader:                  newsReader,
 		limitUpListReader:           limitUpListReader,
@@ -102,6 +111,9 @@ func NewAnalysisService(
 		financialReportReader:       financialReportReader,
 		customQueryExecutor:         customQueryExecutor,
 		tradeCalendarReader:         tradeCalendarReader,
+		realtimeTickReader:          realtimeTickReader,
+		intradayTickReader:          intradayTickReader,
+		intradayKlineReader:         intradayKlineReader,
 	}
 }
 
@@ -281,6 +293,10 @@ func (s *analysisServiceImpl) GetMoneyFlow(ctx context.Context, req MoneyFlowReq
 	return s.moneyFlowReader.GetMoneyFlow(ctx, req)
 }
 
+func (s *analysisServiceImpl) GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error) {
+	return s.moneyFlowConceptReader.GetMoneyFlowConcept(ctx, req)
+}
+
 func (s *analysisServiceImpl) GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error) {
 	return s.popularityRankReader.GetRank(ctx, req)
 }
@@ -376,6 +392,18 @@ func (s *analysisServiceImpl) ExecuteReadOnlyQuery(ctx context.Context, req Cust
 
 func (s *analysisServiceImpl) GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error) {
 	return s.tradeCalendarReader.GetTradingDates(ctx, startDate, endDate)
+}
+
+func (s *analysisServiceImpl) GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]TickRow, error) {
+	return s.realtimeTickReader.GetRealtimeTicks(ctx, tsCode, limit)
+}
+
+func (s *analysisServiceImpl) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]TickRow, error) {
+	return s.intradayTickReader.GetIntradayTicks(ctx, tsCode, tradeDate)
+}
+
+func (s *analysisServiceImpl) GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]IntradayKlineRow, error) {
+	return s.intradayKlineReader.GetIntradayKline(ctx, tsCode, tradeDate, period)
 }
 
 // GetTechnicalIndicators 基于复权后的 K 线在内存中计算简单技术指标（MA/RSI/MACD）

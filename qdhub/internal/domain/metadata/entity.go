@@ -304,11 +304,11 @@ func (t *Token) IsExpired() bool {
 
 // ParamMeta represents parameter metadata (value object).
 type ParamMeta struct {
-	Name        string  `json:"name"`
-	Type        string  `json:"type"`
-	Required    bool    `json:"required"`
-	Default     *string `json:"default,omitempty"`
-	Description string  `json:"description"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required"`
+	Default     any    `json:"default,omitempty"`
+	Description string `json:"description"`
 }
 
 // FieldMeta represents field metadata (value object).

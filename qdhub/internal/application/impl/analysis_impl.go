@@ -65,6 +65,9 @@ func (a *AnalysisApplicationServiceImpl) GetDragonTigerList(ctx context.Context,
 func (a *AnalysisApplicationServiceImpl) GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error) {
 	return a.svc.GetMoneyFlow(ctx, req)
 }
+func (a *AnalysisApplicationServiceImpl) GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error) {
+	return a.svc.GetMoneyFlowConcept(ctx, req)
+}
 func (a *AnalysisApplicationServiceImpl) GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return a.svc.GetPopularityRank(ctx, req)
 }
@@ -109,4 +112,13 @@ func (a *AnalysisApplicationServiceImpl) GetTradeCalendar(ctx context.Context, s
 }
 func (a *AnalysisApplicationServiceImpl) GetTechnicalIndicators(ctx context.Context, req analysis.TechnicalIndicatorCalcRequest) ([]analysis.TechnicalIndicator, error) {
 	return a.svc.GetTechnicalIndicators(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]analysis.TickRow, error) {
+	return a.svc.GetRealtimeTicks(ctx, tsCode, limit)
+}
+func (a *AnalysisApplicationServiceImpl) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]analysis.TickRow, error) {
+	return a.svc.GetIntradayTicks(ctx, tsCode, tradeDate)
+}
+func (a *AnalysisApplicationServiceImpl) GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]analysis.IntradayKlineRow, error) {
+	return a.svc.GetIntradayKline(ctx, tsCode, tradeDate, period)
 }

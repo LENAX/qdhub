@@ -47,12 +47,13 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler      *AuthHandler
-	metadataHandler  *MetadataHandler
-	dataStoreHandler *DataStoreHandler
-	syncHandler      *SyncHandler
-	workflowHandler  *WorkflowHandler
-	analysisHandler  *AnalysisHandler
+	authHandler       *AuthHandler
+	metadataHandler   *MetadataHandler
+	dataStoreHandler  *DataStoreHandler
+	syncHandler       *SyncHandler
+	workflowHandler   *WorkflowHandler
+	analysisHandler   *AnalysisHandler
+	watchlistHandler  *WatchlistHandler
 	realtimeWSHandler *RealtimeWSHandler
 
 	// Auth components
@@ -66,6 +67,8 @@ type Server struct {
 // NewServer creates a new HTTP server with the given configuration and services.
 // debugDBDSN 可选，非空时注册 GET /api/v1/debug/database 返回当前连接的 DB DSN，用于 e2e 排查连错库。
 // analysisSvc 可选，nil 时不注册 /analysis 路由。
+// watchlistHandler 可选，nil 时不注册 /watchlist 路由。
+// realtimeWSHandler 可选，nil 时不注册 /ws/realtime-quotes；非空时可注入 watchlist 实现收藏默认推送。
 func NewServer(
 	config ServerConfig,
 	authSvc contracts.AuthApplicationService,
@@ -75,6 +78,8 @@ func NewServer(
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
 	analysisSvc contracts.AnalysisApplicationService,
+	watchlistHandler *WatchlistHandler,
+	realtimeWSHandler *RealtimeWSHandler,
 	jwtManager *authinfra.JWTManager,
 	enforcer *casbin.Enforcer,
 	debugDBDSN string,
@@ -89,20 +94,23 @@ func NewServer(
 
 	// Create handlers
 	server := &Server{
-		config:           config,
-		engine:           engine,
-		authHandler:      NewAuthHandler(authSvc),
-		metadataHandler:  NewMetadataHandler(metadataSvc),
-		dataStoreHandler: NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
-		syncHandler:      NewSyncHandler(syncSvc),
-		workflowHandler:  NewWorkflowHandler(workflowSvc),
-		realtimeWSHandler: NewRealtimeWSHandler(nil),
-		jwtManager:       jwtManager,
-		enforcer:         enforcer,
-		debugDBDSN:       debugDBDSN,
+		config:            config,
+		engine:            engine,
+		authHandler:       NewAuthHandler(authSvc),
+		metadataHandler:   NewMetadataHandler(metadataSvc),
+		dataStoreHandler:  NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
+		syncHandler:       NewSyncHandler(syncSvc),
+		workflowHandler:   NewWorkflowHandler(workflowSvc),
+		realtimeWSHandler: realtimeWSHandler,
+		jwtManager:        jwtManager,
+		enforcer:          enforcer,
+		debugDBDSN:        debugDBDSN,
 	}
 	if analysisSvc != nil {
 		server.analysisHandler = NewAnalysisHandler(analysisSvc)
+	}
+	if watchlistHandler != nil {
+		server.watchlistHandler = watchlistHandler
 	}
 
 	// Setup routes
@@ -168,6 +176,9 @@ func (s *Server) setupRoutes() {
 			s.workflowHandler.RegisterRoutes(protected)
 			if s.analysisHandler != nil {
 				s.analysisHandler.RegisterRoutes(protected)
+			}
+			if s.watchlistHandler != nil {
+				s.watchlistHandler.RegisterRoutes(protected)
 			}
 		}
 	}

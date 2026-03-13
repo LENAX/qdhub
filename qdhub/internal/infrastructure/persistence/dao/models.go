@@ -153,13 +153,15 @@ type SyncPlanRow struct {
 	DataStoreID          sql.NullString `db:"data_store_id"`
 	PlanMode             string         `db:"plan_mode"`
 	SelectedAPIs         string         `db:"selected_apis"`
-	ResolvedAPIs         string         `db:"resolved_apis"`
-	ExecutionGraph       string         `db:"execution_graph"`
+	ResolvedAPIs         sql.NullString `db:"resolved_apis"`
+	ExecutionGraph       sql.NullString `db:"execution_graph"`
 	CronExpression       sql.NullString `db:"cron_expression"`
-	ScheduleStartCron    sql.NullString `db:"schedule_start_cron"`
-	ScheduleEndCron      sql.NullString `db:"schedule_end_cron"`
-	PullIntervalSeconds int           `db:"pull_interval_seconds"`
-	DefaultExecuteParams           string         `db:"default_execute_params"` // JSON: ExecuteParams
+	ScheduleStartCron       sql.NullString `db:"schedule_start_cron"`
+	ScheduleEndCron         sql.NullString `db:"schedule_end_cron"`
+	SchedulePauseStartCron  sql.NullString `db:"schedule_pause_start_cron"`
+	SchedulePauseEndCron    sql.NullString `db:"schedule_pause_end_cron"`
+	PullIntervalSeconds    int            `db:"pull_interval_seconds"`
+	DefaultExecuteParams sql.NullString `db:"default_execute_params"` // JSON: ExecuteParams
 	IncrementalMode                bool           `db:"incremental_mode"`
 	LastSuccessfulEndDate          sql.NullString `db:"last_successful_end_date"`
 	IncrementalStartDateAPI        sql.NullString `db:"incremental_start_date_api"`

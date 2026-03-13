@@ -25,6 +25,7 @@ type AnalysisApplicationService interface {
 	GetStockSnapshot(ctx context.Context, tradeDate string, adjustType analysis.AdjustType, tsCodes []string) ([]analysis.StockInfo, error)
 	GetDragonTigerList(ctx context.Context, req analysis.DragonTigerRequest) ([]analysis.DragonTigerList, error)
 	GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error)
+	GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error)
 	GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error)
 	ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)
 	GetLimitUpLadder(ctx context.Context, tradeDate string) ([]analysis.LimitUpLadder, error)
@@ -40,4 +41,7 @@ type AnalysisApplicationService interface {
 	ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQueryRequest) (*analysis.CustomQueryResult, error)
 	GetTradeCalendar(ctx context.Context, startDate, endDate string) ([]string, error)
 	GetTechnicalIndicators(ctx context.Context, req analysis.TechnicalIndicatorCalcRequest) ([]analysis.TechnicalIndicator, error)
+	GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]analysis.TickRow, error)
+	GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]analysis.TickRow, error)
+	GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]analysis.IntradayKlineRow, error)
 }

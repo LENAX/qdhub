@@ -129,6 +129,9 @@ type CreateSyncPlanRequest struct {
 	// 运行时段（仅 realtime）：cron 表达式，时段内自动启动、时段外自动停止
 	ScheduleStartCron           string
 	ScheduleEndCron             string
+	// 午休/暂停窗口（可选）：此时段内自动停止，如 11:30-13:00
+	SchedulePauseStartCron      string
+	SchedulePauseEndCron        string
 	// Pull 模式拉取间隔（秒），0 表示默认 60
 	PullIntervalSeconds         int
 }
@@ -148,6 +151,8 @@ type UpdateSyncPlanRequest struct {
 	PlanMode                    *sync.PlanMode
 	ScheduleStartCron           *string
 	ScheduleEndCron             *string
+	SchedulePauseStartCron      *string
+	SchedulePauseEndCron        *string
 	PullIntervalSeconds         *int
 }
 
@@ -178,8 +183,10 @@ type SyncExecutionProgress struct {
 
 	// Plan-level schedule window (mainly for realtime plans)
 	// Copied from SyncPlan so that progress API can expose current config directly.
-	ScheduleStartCron *string
-	ScheduleEndCron   *string
+	ScheduleStartCron       *string
+	ScheduleEndCron         *string
+	SchedulePauseStartCron  *string
+	SchedulePauseEndCron    *string
 
 	// High-level status (normalized)
 	Status sync.ExecStatus

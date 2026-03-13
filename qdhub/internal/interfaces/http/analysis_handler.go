@@ -1,8 +1,11 @@
 package http
 
 import (
+	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -48,8 +51,13 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.GET("/concept-rotation", h.GetConceptRotation)
 		g.GET("/dragon-tiger", h.GetDragonTigerList)
 		g.GET("/money-flow", h.GetMoneyFlow)
+		g.GET("/moneyflow-concept", h.GetMoneyFlowConcept)
 		g.GET("/popularity-rank", h.GetPopularityRank)
 		g.GET("/news", h.ListNews)
+		g.GET("/news/stream", h.StreamNews)
+		g.GET("/realtime-tick", h.GetRealtimeTicks)
+		g.GET("/intraday-ticks", h.GetIntradayTicks)
+		g.GET("/intraday-kline", h.GetIntradayKline)
 		g.POST("/factors", h.CalculateFactors)
 		g.POST("/custom-query/query", h.ExecuteReadOnlyQuery)
 	}
@@ -137,8 +145,12 @@ func (h *AnalysisHandler) ListStocks(c *gin.Context) {
 	if v := c.Query("query"); v != "" {
 		query = &v
 	}
+	var searchType *string
+	if v := c.Query("search_type"); v != "" {
+		searchType = &v
+	}
 	req := analysis.StockListRequest{
-		Market: market, Industry: industry, ListStatus: listStatus, Query: query,
+		Market: market, Industry: industry, ListStatus: listStatus, Query: query, SearchType: searchType,
 		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.ListStocks(c.Request.Context(), req)
@@ -402,6 +414,55 @@ func (h *AnalysisHandler) GetStockIndicators(c *gin.Context) {
 		return
 	}
 	Success(c, list)
+}
+
+// GetRealtimeTicks handles GET /api/v1/analysis/realtime-tick
+func (h *AnalysisHandler) GetRealtimeTicks(c *gin.Context) {
+	tsCode := c.Query("ts_code")
+	if tsCode == "" {
+		BadRequest(c, "ts_code required")
+		return
+	}
+	limit := defaultInt(c.Query("limit"), 500)
+	list, err := h.svc.GetRealtimeTicks(c.Request.Context(), tsCode, limit)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"items": list})
+}
+
+// GetIntradayTicks handles GET /api/v1/analysis/intraday-ticks
+func (h *AnalysisHandler) GetIntradayTicks(c *gin.Context) {
+	tsCode := c.Query("ts_code")
+	tradeDate := c.Query("trade_date")
+	if tsCode == "" || tradeDate == "" {
+		BadRequest(c, "ts_code and trade_date required")
+		return
+	}
+	list, err := h.svc.GetIntradayTicks(c.Request.Context(), tsCode, tradeDate)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"items": list})
+}
+
+// GetIntradayKline handles GET /api/v1/analysis/intraday-kline
+func (h *AnalysisHandler) GetIntradayKline(c *gin.Context) {
+	tsCode := c.Query("ts_code")
+	tradeDate := c.Query("trade_date")
+	period := c.DefaultQuery("period", "1m")
+	if tsCode == "" || tradeDate == "" {
+		BadRequest(c, "ts_code and trade_date required")
+		return
+	}
+	list, err := h.svc.GetIntradayKline(c.Request.Context(), tsCode, tradeDate, period)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"items": list})
 }
 
 // getFinancialTableData 通用财报查询，table 由调用方指定
@@ -764,6 +825,10 @@ func (h *AnalysisHandler) GetDragonTigerList(c *gin.Context) {
 	if v := c.Query("ts_code"); v != "" {
 		tsCode = &v
 	}
+	if (tradeDate == nil || *tradeDate == "") && (tsCode == nil || *tsCode == "") {
+		BadRequest(c, "trade_date or ts_code required (at least one)")
+		return
+	}
 	req := analysis.DragonTigerRequest{
 		TradeDate: tradeDate, TsCode: tsCode,
 		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
@@ -782,8 +847,8 @@ func (h *AnalysisHandler) GetDragonTigerList(c *gin.Context) {
 // @Tags         Analysis
 // @Accept       json
 // @Produce      json
-// @Param        trade_date  query     string  true   "Trade date YYYYMMDD"
-// @Param        ts_code     query     string  false  "Stock code"
+// @Param        trade_date  query     string  false  "Trade date YYYYMMDD (trade_date or ts_code at least one)"
+// @Param        ts_code     query     string  false  "Stock code (trade_date or ts_code at least one)"
 // @Param        market      query     string  false  "Market"
 // @Param        limit       query     int     false  "Limit" default(100)
 // @Param        offset      query     int     false  "Offset" default(0)
@@ -793,15 +858,18 @@ func (h *AnalysisHandler) GetDragonTigerList(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /analysis/money-flow [get]
 func (h *AnalysisHandler) GetMoneyFlow(c *gin.Context) {
-	tradeDate := c.Query("trade_date")
-	if tradeDate == "" {
-		BadRequest(c, "trade_date required")
-		return
+	var tradeDate, tsCode *string
+	if v := c.Query("trade_date"); v != "" {
+		tradeDate = &v
 	}
-	var tsCode, market *string
 	if v := c.Query("ts_code"); v != "" {
 		tsCode = &v
 	}
+	if (tradeDate == nil || *tradeDate == "") && (tsCode == nil || *tsCode == "") {
+		BadRequest(c, "trade_date or ts_code required (at least one)")
+		return
+	}
+	var market *string
 	if v := c.Query("market"); v != "" {
 		market = &v
 	}
@@ -810,6 +878,33 @@ func (h *AnalysisHandler) GetMoneyFlow(c *gin.Context) {
 		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.GetMoneyFlow(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	respTradeDate := ""
+	if tradeDate != nil {
+		respTradeDate = *tradeDate
+	}
+	Success(c, gin.H{"trade_date": respTradeDate, "items": list})
+}
+
+// GetMoneyFlowConcept handles GET /api/v1/analysis/moneyflow-concept
+func (h *AnalysisHandler) GetMoneyFlowConcept(c *gin.Context) {
+	tradeDate := c.Query("trade_date")
+	if tradeDate == "" {
+		BadRequest(c, "trade_date required")
+		return
+	}
+	var concept *string
+	if v := c.Query("concept"); v != "" {
+		concept = &v
+	}
+	req := analysis.MoneyFlowConceptRequest{
+		TradeDate: tradeDate, Concept: concept,
+		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
+	}
+	list, err := h.svc.GetMoneyFlowConcept(c.Request.Context(), req)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -859,7 +954,7 @@ func (h *AnalysisHandler) GetPopularityRank(c *gin.Context) {
 // @Security     BearerAuth
 // @Router       /analysis/news [get]
 func (h *AnalysisHandler) ListNews(c *gin.Context) {
-	var tsCode, category, startDate, endDate *string
+	var tsCode, category, startDate, endDate, sources *string
 	if v := c.Query("ts_code"); v != "" {
 		tsCode = &v
 	}
@@ -872,9 +967,14 @@ func (h *AnalysisHandler) ListNews(c *gin.Context) {
 	if v := c.Query("end_date"); v != "" {
 		endDate = &v
 	}
+	if v := c.Query("sources"); v != "" {
+		sources = &v
+	}
+	order := c.DefaultQuery("order", "time_desc")
 	req := analysis.NewsListRequest{
 		TsCode: tsCode, Category: category, StartDate: startDate, EndDate: endDate,
-		Limit: defaultInt(c.Query("limit"), 20), Offset: defaultInt(c.Query("offset"), 0),
+		Order: order, Sources: sources,
+		Limit: defaultInt(c.Query("limit"), 50), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.ListNews(c.Request.Context(), req)
 	if err != nil {
@@ -882,6 +982,79 @@ func (h *AnalysisHandler) ListNews(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// StreamNews handles GET /api/v1/analysis/news/stream (SSE)
+func (h *AnalysisHandler) StreamNews(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		BadRequest(c, "streaming not supported")
+		return
+	}
+
+	intervalSec := defaultInt(c.Query("interval_sec"), 10)
+	if intervalSec < 1 {
+		intervalSec = 10
+	}
+	limit := defaultInt(c.Query("limit"), 20)
+	var sources *string
+	if v := c.Query("sources"); v != "" {
+		sources = &v
+	}
+	since := c.Query("since")
+
+	ctx := c.Request.Context()
+	keepaliveTicker := time.NewTicker(15 * time.Second)
+	defer keepaliveTicker.Stop()
+	pollTicker := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer pollTicker.Stop()
+
+	sendNews := func() {
+		req := analysis.NewsListRequest{
+			Order: "time_desc", Sources: sources,
+			Limit: limit, Offset: 0,
+		}
+		list, err := h.svc.ListNews(ctx, req)
+		if err != nil {
+			c.Writer.Write([]byte("event: error\ndata: {\"error\":\"" + strings.ReplaceAll(err.Error(), "\"", "\\\"") + "\"}\n\n"))
+			flusher.Flush()
+			return
+		}
+		if since != "" {
+			filtered := list[:0]
+			for _, item := range list {
+				if item.PublishTime >= since {
+					filtered = append(filtered, item)
+				}
+			}
+			list = filtered
+		}
+		if len(list) == 0 {
+			return
+		}
+		data, _ := json.Marshal(list)
+		c.Writer.Write([]byte("event: news\ndata: "))
+		c.Writer.Write(data)
+		c.Writer.Write([]byte("\n\n"))
+		flusher.Flush()
+	}
+
+	sendNews()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-keepaliveTicker.C:
+			c.Writer.Write([]byte(": keepalive\n\n"))
+			flusher.Flush()
+		case <-pollTicker.C:
+			sendNews()
+		}
+	}
 }
 
 // CalculateFactors handles POST /api/v1/analysis/factors

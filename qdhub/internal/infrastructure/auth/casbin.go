@@ -85,6 +85,10 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"users", "read"},
 		{"users", "write"},
 		{"users", "delete"},
+		{"watchlist", "read"},
+		{"watchlist", "write"},
+		{"watchlist", "delete"},
+		{"ws", "read"},
 	}
 
 	// Operator role - read and execute, limited write
@@ -103,6 +107,10 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"workflows", "read"},
 		{"workflows", "execute"},
 		{"instances", "read"},
+		{"watchlist", "read"},
+		{"watchlist", "write"},
+		{"watchlist", "delete"},
+		{"ws", "read"},
 	}
 
 	// Viewer role - read only
@@ -117,6 +125,8 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"analysis", "read"},
 		{"workflows", "read"},
 		{"instances", "read"},
+		{"watchlist", "read"},
+		{"ws", "read"},
 	}
 
 	// 添加 g 规则：matcher 为 g(r.sub, p.sub)，需要 g(role, role) 为真，Enforce(role, resource, action) 才能通过
@@ -175,6 +185,60 @@ func EnsureAnalysisPolicies(enforcer *casbin.Enforcer) error {
 		if !ok {
 			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
 				return fmt.Errorf("add analysis policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
+}
+
+// EnsureWSPolicies adds ws (realtime WebSocket) resource policies if missing (for existing DBs created before ws was added).
+func EnsureWSPolicies(enforcer *casbin.Enforcer) error {
+	policies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "ws", "read"},
+		{"operator", "ws", "read"},
+		{"viewer", "ws", "read"},
+	}
+	for _, p := range policies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add ws policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
+}
+
+// EnsureWatchlistPolicies adds watchlist resource policies if missing (for existing DBs created before watchlist was added).
+func EnsureWatchlistPolicies(enforcer *casbin.Enforcer) error {
+	policies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "watchlist", "read"},
+		{"admin", "watchlist", "write"},
+		{"admin", "watchlist", "delete"},
+		{"operator", "watchlist", "read"},
+		{"operator", "watchlist", "write"},
+		{"operator", "watchlist", "delete"},
+		{"viewer", "watchlist", "read"},
+	}
+	for _, p := range policies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add watchlist policy %s %s %s: %w", p.role, p.resource, p.action, err)
 			}
 		}
 	}

@@ -339,7 +339,7 @@ func (p *Parser) parseTableAsParams(table *goquery.Selection) []metadata.ParamMe
 		if defaultIdx >= 0 && defaultIdx < len(cells) {
 			if cells[defaultIdx] != "" && cells[defaultIdx] != "-" {
 				defaultVal := cells[defaultIdx]
-				param.Default = &defaultVal
+				param.Default = defaultVal
 			}
 		}
 		if descIdx >= 0 && descIdx < len(cells) {
