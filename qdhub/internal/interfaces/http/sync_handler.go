@@ -87,20 +87,22 @@ func (h *SyncHandler) CreateSyncPlan(c *gin.Context) {
 	}
 
 	plan, err := h.syncSvc.CreateSyncPlan(c.Request.Context(), contracts.CreateSyncPlanRequest{
-		Name:                        req.Name,
-		Description:                 req.Description,
-		DataSourceID:                shared.ID(req.DataSourceID),
-		DataStoreID:                 shared.ID(req.DataStoreID),
-		SelectedAPIs:                req.SelectedAPIs,
-		CronExpression:              req.CronExpression,
-		DefaultExecuteParams:        req.DefaultExecuteParams,
-		IncrementalMode:             req.IncrementalMode,
-		IncrementalStartDateAPI:     req.IncrementalStartDateAPI,
-		IncrementalStartDateColumn:  req.IncrementalStartDateColumn,
-		PlanMode:                    mode,
-		ScheduleStartCron:           req.ScheduleStartCron,
-		ScheduleEndCron:             req.ScheduleEndCron,
-		PullIntervalSeconds:         req.PullIntervalSeconds,
+		Name:                       req.Name,
+		Description:                req.Description,
+		DataSourceID:               shared.ID(req.DataSourceID),
+		DataStoreID:                shared.ID(req.DataStoreID),
+		SelectedAPIs:               req.SelectedAPIs,
+		CronExpression:             req.CronExpression,
+		DefaultExecuteParams:       req.DefaultExecuteParams,
+		IncrementalMode:            req.IncrementalMode,
+		IncrementalStartDateAPI:    req.IncrementalStartDateAPI,
+		IncrementalStartDateColumn: req.IncrementalStartDateColumn,
+		PlanMode:                   mode,
+		ScheduleStartCron:          req.ScheduleStartCron,
+		ScheduleEndCron:            req.ScheduleEndCron,
+		SchedulePauseStartCron:     req.SchedulePauseStartCron,
+		SchedulePauseEndCron:       req.SchedulePauseEndCron,
+		PullIntervalSeconds:        req.PullIntervalSeconds,
 	})
 	if err != nil {
 		HandleError(c, err)
@@ -196,8 +198,8 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		planMode = &m
 	}
 	err := h.syncSvc.UpdateSyncPlan(c.Request.Context(), id, contracts.UpdateSyncPlanRequest{
-		Name:                        req.Name,
-		Description:                 req.Description,
+		Name:                       req.Name,
+		Description:                req.Description,
 		DataStoreID:                dataStoreID,
 		SelectedAPIs:               req.SelectedAPIs,
 		CronExpression:             req.CronExpression,
@@ -208,6 +210,8 @@ func (h *SyncHandler) UpdateSyncPlan(c *gin.Context) {
 		PlanMode:                   planMode,
 		ScheduleStartCron:          req.ScheduleStartCron,
 		ScheduleEndCron:            req.ScheduleEndCron,
+		SchedulePauseStartCron:     req.SchedulePauseStartCron,
+		SchedulePauseEndCron:       req.SchedulePauseEndCron,
 		PullIntervalSeconds:        req.PullIntervalSeconds,
 	})
 	if err != nil {
@@ -303,7 +307,10 @@ func (h *SyncHandler) ExecuteSyncPlan(c *gin.Context) {
 // Returns empty strings if input is empty.
 func parseOptionalDatetimeToDate(startDt, endDt string) (startDate, endDate string) {
 	const dateOnly = "20060102"
-	for _, s := range []struct{ in *string; out *string }{
+	for _, s := range []struct {
+		in  *string
+		out *string
+	}{
 		{&startDt, &startDate},
 		{&endDt, &endDate},
 	} {
@@ -607,39 +614,43 @@ func (h *SyncHandler) HandleCallback(c *gin.Context) {
 
 // CreateSyncPlanReq represents the request body for creating a sync plan.
 type CreateSyncPlanReq struct {
-	Name                 string              `json:"name" binding:"required"`
-	Description          string              `json:"description"`
-	DataSourceID         string              `json:"data_source_id" binding:"required"`
-	DataStoreID          string              `json:"data_store_id"`
-	SelectedAPIs         []string            `json:"selected_apis" binding:"required"`
-	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
-	IncrementalMode             bool                `json:"incremental_mode"`
-	IncrementalStartDateAPI     string              `json:"incremental_start_date_api"`
-	IncrementalStartDateColumn  string              `json:"incremental_start_date_column"`
+	Name                       string              `json:"name" binding:"required"`
+	Description                string              `json:"description"`
+	DataSourceID               string              `json:"data_source_id" binding:"required"`
+	DataStoreID                string              `json:"data_store_id"`
+	SelectedAPIs               []string            `json:"selected_apis" binding:"required"`
+	CronExpression             *string             `json:"cron_expression"`
+	DefaultExecuteParams       *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode            bool                `json:"incremental_mode"`
+	IncrementalStartDateAPI    string              `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn string              `json:"incremental_start_date_column"`
 	// PlanMode: "batch"（默认）或 "realtime"
-	PlanMode             string              `json:"plan_mode"`
-	ScheduleStartCron    string              `json:"schedule_start_cron"` // 运行时段：启动 cron（仅 realtime）
-	ScheduleEndCron      string              `json:"schedule_end_cron"`   // 运行时段：停止 cron
-	PullIntervalSeconds  int                 `json:"pull_interval_seconds"` // Pull 间隔（秒），0=默认 60
+	PlanMode               string `json:"plan_mode"`
+	ScheduleStartCron      string `json:"schedule_start_cron"`       // 运行时段：启动 cron（仅 realtime）
+	ScheduleEndCron        string `json:"schedule_end_cron"`         // 运行时段：停止 cron
+	SchedulePauseStartCron string `json:"schedule_pause_start_cron"` // 午休暂停开始 cron，如 11:30
+	SchedulePauseEndCron   string `json:"schedule_pause_end_cron"`   // 午休暂停结束 cron，如 13:00
+	PullIntervalSeconds    int    `json:"pull_interval_seconds"`     // Pull 间隔（秒），0=默认 60
 }
 
 // UpdateSyncPlanReq represents the request body for updating a sync plan.
 type UpdateSyncPlanReq struct {
-	Name                 *string             `json:"name"`
-	Description          *string             `json:"description"`
-	DataStoreID          *string             `json:"data_store_id"`
-	SelectedAPIs         *[]string           `json:"selected_apis"`
-	CronExpression       *string             `json:"cron_expression"`
-	DefaultExecuteParams        *sync.ExecuteParams `json:"default_execute_params"`
-	IncrementalMode             *bool               `json:"incremental_mode"`
-	IncrementalStartDateAPI     *string             `json:"incremental_start_date_api"`
-	IncrementalStartDateColumn  *string             `json:"incremental_start_date_column"`
+	Name                       *string             `json:"name"`
+	Description                *string             `json:"description"`
+	DataStoreID                *string             `json:"data_store_id"`
+	SelectedAPIs               *[]string           `json:"selected_apis"`
+	CronExpression             *string             `json:"cron_expression"`
+	DefaultExecuteParams       *sync.ExecuteParams `json:"default_execute_params"`
+	IncrementalMode            *bool               `json:"incremental_mode"`
+	IncrementalStartDateAPI    *string             `json:"incremental_start_date_api"`
+	IncrementalStartDateColumn *string             `json:"incremental_start_date_column"`
 	// PlanMode: "batch" 或 "realtime"
-	PlanMode             *string             `json:"plan_mode"`
-	ScheduleStartCron    *string             `json:"schedule_start_cron"`
-	ScheduleEndCron      *string             `json:"schedule_end_cron"`
-	PullIntervalSeconds  *int                `json:"pull_interval_seconds"`
+	PlanMode               *string `json:"plan_mode"`
+	ScheduleStartCron      *string `json:"schedule_start_cron"`
+	ScheduleEndCron        *string `json:"schedule_end_cron"`
+	SchedulePauseStartCron *string `json:"schedule_pause_start_cron"`
+	SchedulePauseEndCron   *string `json:"schedule_pause_end_cron"`
+	PullIntervalSeconds    *int    `json:"pull_interval_seconds"`
 }
 
 // ExecuteSyncPlanReq represents the request body for triggering a sync plan.
@@ -661,25 +672,27 @@ type ExecutionCallbackReq struct {
 // SyncPlanProgressResponse represents aggregated progress information for a sync plan.
 // It is the HTTP-level DTO returned by /sync-plans/:id/progress and progress-stream.
 type SyncPlanProgressResponse struct {
-	PlanID             string     `json:"plan_id"`
-	ExecutionID        string     `json:"execution_id,omitempty"`
-	WorkflowInstanceID string     `json:"workflow_instance_id,omitempty"`
-	Status             string     `json:"status"`
+	PlanID             string `json:"plan_id"`
+	ExecutionID        string `json:"execution_id,omitempty"`
+	WorkflowInstanceID string `json:"workflow_instance_id,omitempty"`
+	Status             string `json:"status"`
 	// Schedule window config copied from SyncPlan (mainly for realtime plans).
-	ScheduleStartCron  *string    `json:"schedule_start_cron,omitempty"`
-	ScheduleEndCron    *string    `json:"schedule_end_cron,omitempty"`
-	Progress           float64    `json:"progress"`
-	TaskCount          int        `json:"task_count"`
-	CompletedTask      int        `json:"completed_task"`
-	FailedTask         int        `json:"failed_task"`
-	RunningCount       int        `json:"running_count"`              // 正在运行的任务数（0 时也返回，与内部一致）
-	PendingCount       int        `json:"pending_count"`              // 挂起的任务数（0 时也返回）
-	RunningTaskIDs     []string   `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
-	PendingTaskIDs     []string   `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
-	RecordCount        int64      `json:"record_count"`
-	ErrorMessage       *string    `json:"error_message,omitempty"`
-	StartedAt          *time.Time `json:"started_at,omitempty"`
-	FinishedAt         *time.Time `json:"finished_at,omitempty"`
+	ScheduleStartCron      *string    `json:"schedule_start_cron,omitempty"`
+	ScheduleEndCron        *string    `json:"schedule_end_cron,omitempty"`
+	SchedulePauseStartCron *string    `json:"schedule_pause_start_cron,omitempty"`
+	SchedulePauseEndCron   *string    `json:"schedule_pause_end_cron,omitempty"`
+	Progress               float64    `json:"progress"`
+	TaskCount              int        `json:"task_count"`
+	CompletedTask          int        `json:"completed_task"`
+	FailedTask             int        `json:"failed_task"`
+	RunningCount           int        `json:"running_count"`              // 正在运行的任务数（0 时也返回，与内部一致）
+	PendingCount           int        `json:"pending_count"`              // 挂起的任务数（0 时也返回）
+	RunningTaskIDs         []string   `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
+	PendingTaskIDs         []string   `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
+	RecordCount            int64      `json:"record_count"`
+	ErrorMessage           *string    `json:"error_message,omitempty"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	FinishedAt             *time.Time `json:"finished_at,omitempty"`
 }
 
 // toSyncPlanProgressResponse converts application-level SyncExecutionProgress to HTTP response DTO.
@@ -689,22 +702,24 @@ func toSyncPlanProgressResponse(p *contracts.SyncExecutionProgress) *SyncPlanPro
 	}
 
 	resp := &SyncPlanProgressResponse{
-		PlanID:             p.PlanID.String(),
-		ExecutionID:        p.ExecutionID.String(),
-		WorkflowInstanceID: p.WorkflowInstanceID.String(),
-		Status:             p.Status.String(),
-		ScheduleStartCron:  p.ScheduleStartCron,
-		ScheduleEndCron:    p.ScheduleEndCron,
-		Progress:           p.Progress,
-		TaskCount:          p.TaskCount,
-		CompletedTask:      p.CompletedTask,
-		FailedTask:         p.FailedTask,
-		RunningCount:       p.RunningCount,
-		PendingCount:       p.PendingCount,
-		RunningTaskIDs:     p.RunningTaskIDs,
-		PendingTaskIDs:     p.PendingTaskIDs,
-		RecordCount:        p.RecordCount,
-		ErrorMessage:       p.ErrorMessage,
+		PlanID:                 p.PlanID.String(),
+		ExecutionID:            p.ExecutionID.String(),
+		WorkflowInstanceID:     p.WorkflowInstanceID.String(),
+		Status:                 p.Status.String(),
+		ScheduleStartCron:      p.ScheduleStartCron,
+		ScheduleEndCron:        p.ScheduleEndCron,
+		SchedulePauseStartCron: p.SchedulePauseStartCron,
+		SchedulePauseEndCron:   p.SchedulePauseEndCron,
+		Progress:               p.Progress,
+		TaskCount:              p.TaskCount,
+		CompletedTask:          p.CompletedTask,
+		FailedTask:             p.FailedTask,
+		RunningCount:           p.RunningCount,
+		PendingCount:           p.PendingCount,
+		RunningTaskIDs:         p.RunningTaskIDs,
+		PendingTaskIDs:         p.PendingTaskIDs,
+		RecordCount:            p.RecordCount,
+		ErrorMessage:           p.ErrorMessage,
 	}
 
 	// Convert timestamps to *time.Time (omit zero values)

@@ -132,7 +132,7 @@ func (d *WorkflowInstanceDAO) toRow(entity *qdhubworkflow.WorkflowInstance) (*Wo
 	if entity == nil {
 		return nil, nil
 	}
-	
+
 	// Task Engine WorkflowInstance doesn't have TriggerParams, TriggerType, EngineInstanceID, Progress
 	// These fields are qdhub-specific and may need to be stored separately
 	row := &WorkflowInstanceRow{
@@ -142,7 +142,7 @@ func (d *WorkflowInstanceDAO) toRow(entity *qdhubworkflow.WorkflowInstance) (*Wo
 		TriggerType:      "manual",  // Default
 		TriggerParams:    "{}",      // Empty JSON
 		Status:           entity.Status,
-		Progress:         0.0,       // Task Engine doesn't store progress in instance
+		Progress:         0.0, // Task Engine doesn't store progress in instance
 		StartedAt:        entity.StartTime,
 	}
 

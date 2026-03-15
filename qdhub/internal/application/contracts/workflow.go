@@ -35,4 +35,3 @@ type WorkflowApplicationService interface {
 	// GetTaskInstances retrieves all task instances for a workflow instance.
 	GetTaskInstances(ctx context.Context, workflowInstID shared.ID) ([]*workflow.TaskInstance, error)
 }
-

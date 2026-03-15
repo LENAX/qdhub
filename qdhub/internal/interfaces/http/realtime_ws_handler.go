@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,20 +11,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"qdhub/internal/application/contracts"
+	"qdhub/internal/domain/shared"
 	"qdhub/internal/infrastructure/realtimestore"
 )
 
 type RealtimeWSHandler struct {
-	store    *realtimestore.LatestQuoteStore
-	upgrader websocket.Upgrader
+	store        *realtimestore.LatestQuoteStore
+	watchlistSvc contracts.WatchlistApplicationService // 可选：为空时不做收藏联动
+	upgrader     websocket.Upgrader
 }
 
-func NewRealtimeWSHandler(store *realtimestore.LatestQuoteStore) *RealtimeWSHandler {
+// NewRealtimeWSHandler store 为 nil 时使用 DefaultLatestQuoteStore；watchlistSvc 为 nil 时未订阅或全市场仍推全市场
+func NewRealtimeWSHandler(store *realtimestore.LatestQuoteStore, watchlistSvc contracts.WatchlistApplicationService) *RealtimeWSHandler {
 	if store == nil {
 		store = realtimestore.DefaultLatestQuoteStore()
 	}
 	return &RealtimeWSHandler{
-		store: store,
+		store:        store,
+		watchlistSvc: watchlistSvc,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -45,6 +51,12 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+
+	// 连接时取当前用户 ID，用于「未订阅或全市场」时用收藏列表作为默认推送
+	var userID string
+	if v, ok := c.Get(UserIDKey); ok && v != nil {
+		userID, _ = v.(string)
+	}
 
 	var subMu sync.RWMutex
 	subs := map[string]struct{}{"full": {}}
@@ -95,8 +107,23 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 			}
 			subMu.RUnlock()
 
+			// 当为「全市场」且已登录且有收藏时，改为按收藏列表推送（subset）
+			pushCodes := current
+			pushFull := full
+			if full && h.watchlistSvc != nil && userID != "" {
+				entries, err := h.watchlistSvc.GetWatchlist(context.Background(), shared.ID(userID))
+				if err == nil && len(entries) > 0 {
+					codes := make([]string, 0, len(entries))
+					for _, e := range entries {
+						codes = append(codes, e.TsCode)
+					}
+					pushFull = false
+					pushCodes = codes
+				}
+			}
+
 			var payload map[string]interface{}
-			if full {
+			if pushFull {
 				payload = map[string]interface{}{
 					"type":      "snapshot",
 					"scope":     "full",
@@ -108,8 +135,8 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 					"type":      "snapshot",
 					"scope":     "subset",
 					"timestamp": time.Now().UnixMilli(),
-					"ts_codes":  current,
-					"items":     h.store.GetBatch(current),
+					"ts_codes":  pushCodes,
+					"items":     h.store.GetBatch(pushCodes),
 				}
 			}
 			b, err := json.Marshal(payload)

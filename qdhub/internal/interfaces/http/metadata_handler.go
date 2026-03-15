@@ -313,8 +313,8 @@ func (h *MetadataHandler) ValidateDataSourceToken(c *gin.Context) {
 
 	Success(c, gin.H{
 		"has_token": hasToken,
-		"valid":    valid,
-		"message":  message,
+		"valid":     valid,
+		"message":   message,
 	})
 }
 
@@ -677,18 +677,18 @@ type CreateAPISyncStrategyReq struct {
 	SupportDateRange bool                   `json:"support_date_range"`
 	RequiredParams   []string               `json:"required_params"`
 	Dependencies     []string               `json:"dependencies"`
-	FixedParams      map[string]interface{} `json:"fixed_params"`       // JSON object
-	FixedParamKeys   []string               `json:"fixed_param_keys"`   // keys that cannot be overridden
+	FixedParams      map[string]interface{} `json:"fixed_params"`     // JSON object
+	FixedParamKeys   []string               `json:"fixed_param_keys"` // keys that cannot be overridden
 	Description      string                 `json:"description"`
 }
 
 // UpdateAPISyncStrategyReq represents the request body for updating an API sync strategy.
 type UpdateAPISyncStrategyReq struct {
-	PreferredParam   *string                `json:"preferred_param"`
-	SupportDateRange *bool                  `json:"support_date_range"`
-	RequiredParams   *[]string              `json:"required_params"`
-	Dependencies     *[]string              `json:"dependencies"`
+	PreferredParam   *string                 `json:"preferred_param"`
+	SupportDateRange *bool                   `json:"support_date_range"`
+	RequiredParams   *[]string               `json:"required_params"`
+	Dependencies     *[]string               `json:"dependencies"`
 	FixedParams      *map[string]interface{} `json:"fixed_params"`
-	FixedParamKeys   *[]string              `json:"fixed_param_keys"`
-	Description      *string                `json:"description"`
+	FixedParamKeys   *[]string               `json:"fixed_param_keys"`
+	Description      *string                 `json:"description"`
 }

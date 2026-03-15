@@ -167,17 +167,17 @@ func convertEntityToStrategy(entity *metadata.APISyncStrategy) *APISyncStrategy 
 	}
 
 	strategy := &APISyncStrategy{
-		PreferredParam:            string(entity.PreferredParam),
-		SupportDateRange:          entity.SupportDateRange,
-		RequiredParams:            required,
-		Dependencies:              deps,
-		APIParamName:              base.APIParamName,
-		FixedParams:               entity.FixedParams,
-		FixedParamKeys:            entity.FixedParamKeys,
-		IterateParams:             iterateParams,
-		RealtimeTsCodeChunkSize:   entity.RealtimeTsCodeChunkSize,
-		RealtimeTsCodeFormat:      entity.RealtimeTsCodeFormat,
-		TimeWindow:                base.TimeWindow,
+		PreferredParam:          string(entity.PreferredParam),
+		SupportDateRange:        entity.SupportDateRange,
+		RequiredParams:          required,
+		Dependencies:            deps,
+		APIParamName:            base.APIParamName,
+		FixedParams:             entity.FixedParams,
+		FixedParamKeys:          entity.FixedParamKeys,
+		IterateParams:           iterateParams,
+		RealtimeTsCodeChunkSize: entity.RealtimeTsCodeChunkSize,
+		RealtimeTsCodeFormat:    entity.RealtimeTsCodeFormat,
+		TimeWindow:              base.TimeWindow,
 	}
 
 	// 如 fixed_params 中包含 time_window 配置，则覆盖默认的 TimeWindow
@@ -319,9 +319,9 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 			"src": {"sina", "cls", "eastmoney", "10jqka", "wallstreetcn", "yuncaijing", "fenghuang", "jinrongjie", "yicai"},
 		},
 		TimeWindow: &APITimeWindowStrategy{
-			Enabled:         true,
-			Freq:            "D",
-			DateParamKey:    "",
+			Enabled:          true,
+			Freq:             "D",
+			DateParamKey:     "",
 			UseTradeCalendar: false,
 		},
 	},
@@ -333,9 +333,9 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 			"src": {"新浪财经", "财联社", "新华网", "凤凰财经", "同花顺", "华尔街见闻", "中证网", "财新网", "第一财经"},
 		},
 		TimeWindow: &APITimeWindowStrategy{
-			Enabled:         true,
-			Freq:            "3H",
-			DateParamKey:    "",
+			Enabled:          true,
+			Freq:             "3H",
+			DateParamKey:     "",
 			UseTradeCalendar: false,
 		},
 	},
@@ -345,9 +345,9 @@ var defaultAPISyncStrategies = map[string]APISyncStrategy{
 		SupportDateRange: false,
 		APIParamName:     "date",
 		TimeWindow: &APITimeWindowStrategy{
-			Enabled:         true,
-			Freq:            "D",
-			DateParamKey:    "date",
+			Enabled:          true,
+			Freq:             "D",
+			DateParamKey:     "date",
 			UseTradeCalendar: false,
 		},
 	},
@@ -880,11 +880,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 						tasks = append(tasks, rangeTask)
 
 						templateParams := mergeParams(baseParams, map[string]interface{}{
-							"api_name":      apiName,
-							"upstream_task": rangeTaskName,
-							"window_field":  "windows",
+							"api_name":       apiName,
+							"upstream_task":  rangeTaskName,
+							"window_field":   "windows",
 							"date_param_key": "date",
-							"max_sub_tasks": params.MaxStocks,
+							"max_sub_tasks":  params.MaxStocks,
 						})
 
 						templateTask, errTpl := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按自然日逐日）", b.registry).

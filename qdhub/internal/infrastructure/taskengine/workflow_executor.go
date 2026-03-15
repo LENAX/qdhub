@@ -36,9 +36,9 @@ func NewWorkflowExecutor(
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry,
 ) workflow.WorkflowExecutor {
 	return &WorkflowExecutorImpl{
-		workflowRepo:           workflowRepo,
-		taskEngineAdapter:      taskEngineAdapter,
-		metadataRepo:           metadataRepo,
+		workflowRepo:            workflowRepo,
+		taskEngineAdapter:       taskEngineAdapter,
+		metadataRepo:            metadataRepo,
 		realtimeAdapterRegistry: realtimeAdapterRegistry,
 	}
 }
@@ -58,6 +58,7 @@ func (e *WorkflowExecutorImpl) ExecuteBuiltInWorkflow(ctx context.Context, name 
 		workflows.BuiltInWorkflowNameCreateTables:     "CreateTables",
 		workflows.BuiltInWorkflowNameBatchDataSync:    "BatchDataSync",
 		workflows.BuiltInWorkflowNameRealtimeDataSync: "RealtimeDataSync",
+		workflows.BuiltInWorkflowNameNewsRealtimeSync: "NewsRealtimeSync",
 	}
 
 	workflowName, ok := builderNameMap[name]
@@ -239,13 +240,13 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 	}
 
 	params := workflows.RealtimeMarketStreamingParams{
-		DataSourceID:    req.DataSourceID,
-		DataSourceName:  req.DataSourceName,
-		Token:           req.Token,
-		TargetDBPath:    req.TargetDBPath,
-		APINames:        req.APINames,
-		TsCodes:         req.TsCodes,
-		IndexCodes:      req.IndexCodes,
+		DataSourceID:     req.DataSourceID,
+		DataSourceName:   req.DataSourceName,
+		Token:            req.Token,
+		TargetDBPath:     req.TargetDBPath,
+		APINames:         req.APINames,
+		TsCodes:          req.TsCodes,
+		IndexCodes:       req.IndexCodes,
 		PullIntervalSecs: req.PullIntervalSecs,
 	}
 

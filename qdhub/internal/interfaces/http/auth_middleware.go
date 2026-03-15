@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gin-contrib/authz"
 	"github.com/casbin/casbin/v2"
+	"github.com/gin-contrib/authz"
+	"github.com/gin-gonic/gin"
 
 	authinfra "qdhub/internal/infrastructure/auth"
 )
@@ -21,23 +21,23 @@ const (
 // JWTAuthMiddleware returns a middleware that validates JWT tokens.
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract token from Authorization header
+		// Extract token: Authorization header (Bearer) 或 query ?token= （便于浏览器 WebSocket 无法带 Header 时使用）
+		var tokenString string
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			Error(c, http.StatusUnauthorized, 401, "authorization header required")
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
+		}
+		if tokenString == "" {
+			tokenString = strings.TrimSpace(c.Query("token"))
+		}
+		if tokenString == "" {
+			Error(c, http.StatusUnauthorized, 401, "authorization required (header Authorization: Bearer <token> or query token=)")
 			c.Abort()
 			return
 		}
-
-		// Check Bearer prefix
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			Error(c, http.StatusUnauthorized, 401, "invalid authorization header format")
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
 
 		// Get JWT manager from context (set by container)
 		jwtManager, exists := c.Get("jwt_manager")

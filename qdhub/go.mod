@@ -1,6 +1,6 @@
 module qdhub
 
-go 1.24.2
+go 1.26.1
 
 require (
 	github.com/LENAX/task-engine v1.0.16
@@ -11,6 +11,7 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/marcboeker/go-duckdb v1.8.5
@@ -26,6 +27,7 @@ require (
 	github.com/swaggo/swag v1.16.4
 	golang.org/x/crypto v0.44.0
 	golang.org/x/sync v0.19.0
+	golang.org/x/text v0.31.0
 	golang.org/x/time v0.14.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
@@ -68,7 +70,6 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -108,7 +109,6 @@ require (
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251008203120-078029d740a8 // indirect
-	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
@@ -116,4 +116,4 @@ require (
 )
 
 // 本地调试 task-engine 时使用，提交前请删除或注释
-// replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine
+replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine

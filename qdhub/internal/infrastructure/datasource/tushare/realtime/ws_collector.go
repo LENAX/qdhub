@@ -2,15 +2,27 @@ package realtime
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	coreRealtime "github.com/LENAX/task-engine/pkg/core/realtime"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
+
+	"qdhub/internal/infrastructure/realtimestore"
 )
+
+var tushareWSDialer = &websocket.Dialer{
+	TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+	HandshakeTimeout:  15 * time.Second,
+	ReadBufferSize:    1024 * 1024,
+	WriteBufferSize:   64 * 1024,
+	EnableCompression: true,
+}
 
 const (
 	tushareWSURL = "wss://ws.tushare.pro/listening"
@@ -52,8 +64,12 @@ func (c *TushareWSTickCollector) Run(
 		default:
 		}
 
+		start := time.Now()
 		if err := c.runOnce(ctx, cfg, publish); err != nil {
 			logrus.Warnf("[TushareWSTickCollector] stream stopped: %v", err)
+		}
+		if time.Since(start) > 30*time.Second {
+			backoff = time.Second
 		}
 
 		select {
@@ -72,11 +88,14 @@ func (c *TushareWSTickCollector) runOnce(
 	cfg *coreRealtime.ContinuousTaskConfig,
 	publish coreRealtime.PublishFunc,
 ) error {
-	conn, _, err := websocket.DefaultDialer.Dial(tushareWSURL, nil)
+	headers := http.Header{}
+	headers.Set("User-Agent", "Mozilla/5.0")
+	conn, _, err := tushareWSDialer.Dial(tushareWSURL, headers)
 	if err != nil {
 		return fmt.Errorf("dial ws: %w", err)
 	}
 	defer conn.Close()
+	conn.SetReadLimit(10 * 1024 * 1024)
 
 	topic := strings.TrimSpace(c.Topic)
 	if topic == "" {
@@ -145,6 +164,14 @@ func (c *TushareWSTickCollector) runOnce(
 		if len(rows) == 0 {
 			continue
 		}
+
+		store := realtimestore.DefaultLatestQuoteStore()
+		for _, row := range rows {
+			if tsCode, _ := row["ts_code"].(string); tsCode != "" {
+				store.Update(tsCode, row)
+			}
+		}
+
 		event := coreRealtime.NewRealtimeEvent(coreRealtime.EventDataArrived, "", "", &coreRealtime.DataArrivedPayload{
 			Data:   rows,
 			Source: "tushare_ws",
@@ -180,6 +207,8 @@ func (c *TushareWSTickCollector) parseRows(msg []byte) ([]map[string]interface{}
 	if row == nil {
 		return nil, nil
 	}
+	// Tushare WS naming quirk: 'price' is actually pre_close, 'pre_price' is the current price
+	row["price"], row["pre_price"] = row["pre_price"], row["price"]
 	if c.TargetDBPath != "" {
 		row["target_db_path"] = c.TargetDBPath
 	}

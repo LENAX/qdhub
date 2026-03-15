@@ -42,4 +42,3 @@ func TestNormalizeTushareTickRecord_MapBackfillsCodeFields(t *testing.T) {
 		t.Fatalf("expected ts_code backfilled, got %v", out["ts_code"])
 	}
 }
-

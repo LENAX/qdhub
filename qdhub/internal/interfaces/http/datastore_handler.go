@@ -338,7 +338,7 @@ func (h *DataStoreHandler) GetEffectiveRange(c *gin.Context) {
 		domainReq := datastore.EffectiveRangeRequest{
 			QualityAnalysisParams: toQualityParams(id, tableName, req.DateColumn, req.EntityColumn, req.PrimaryKeys),
 			EndDate:               req.EndDate,
-			RefTableName:           req.RefTableName,
+			RefTableName:          req.RefTableName,
 			RefDateColumn:         req.RefDateColumn,
 			RefDateColumnEnd:      req.RefDateColumnEnd,
 		}
@@ -517,12 +517,12 @@ type DimensionFilterReq struct {
 
 // QualityReportReq request body for quality-report
 type QualityReportReq struct {
-	DateColumn        string   `json:"date_column" binding:"required"`
-	EntityColumn      string   `json:"entity_column"`
-	PrimaryKeys       []string `json:"primary_keys"`
-	RefTableName      string   `json:"ref_table_name"`
-	RefDateColumn     string   `json:"ref_date_column"`
-	RefDateColumnEnd  string   `json:"ref_date_column_end"`
+	DateColumn       string   `json:"date_column" binding:"required"`
+	EntityColumn     string   `json:"entity_column"`
+	PrimaryKeys      []string `json:"primary_keys"`
+	RefTableName     string   `json:"ref_table_name"`
+	RefDateColumn    string   `json:"ref_date_column"`
+	RefDateColumnEnd string   `json:"ref_date_column_end"`
 }
 
 // EffectiveRangeReq request body for effective-range
@@ -549,7 +549,7 @@ type AnalyzeMissingReq struct {
 // AnalyzeDuplicatesReq request body for analyze-duplicates
 type AnalyzeDuplicatesReq struct {
 	DateColumn   string   `json:"date_column" binding:"required"`
-	EntityColumn string  `json:"entity_column"`
+	EntityColumn string   `json:"entity_column"`
 	PrimaryKeys  []string `json:"primary_keys" binding:"required"`
 }
 
@@ -562,9 +562,9 @@ type AnalyzeAnomaliesReq struct {
 
 // SingleDimensionStatsReq request body for dimension-stats (single dimension)
 type SingleDimensionStatsReq struct {
-	Dimension string             `json:"dimension" binding:"required"`
+	Dimension string              `json:"dimension" binding:"required"`
 	Filter    *DimensionFilterReq `json:"filter"`
-	Limit     int                `json:"limit"`
+	Limit     int                 `json:"limit"`
 }
 
 // ApplyFixReq request body for apply-fix

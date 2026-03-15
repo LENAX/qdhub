@@ -354,44 +354,71 @@ func (r *SyncPlanRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagina
 // rowToEntity converts database row to domain entity.
 func (r *SyncPlanRepositoryImpl) rowToEntity(row *dao.SyncPlanRow) (*sync.SyncPlan, error) {
 	entity := &sync.SyncPlan{
-		ID:           shared.ID(row.ID),
-		Name:         row.Name,
-		Description:  row.Description,
-		DataSourceID: shared.ID(row.DataSourceID),
-		Status:       sync.PlanStatus(row.Status),
-		CreatedAt:    shared.Timestamp(row.CreatedAt),
-		UpdatedAt:    shared.Timestamp(row.UpdatedAt),
+		ID:                  shared.ID(row.ID),
+		Name:                row.Name,
+		Description:         row.Description,
+		DataSourceID:        shared.ID(row.DataSourceID),
+		Mode:                sync.PlanMode(row.PlanMode),
+		Status:              sync.PlanStatus(row.Status),
+		PullIntervalSeconds: row.PullIntervalSeconds,
+		IncrementalMode:     row.IncrementalMode,
+		CreatedAt:           shared.Timestamp(row.CreatedAt),
+		UpdatedAt:           shared.Timestamp(row.UpdatedAt),
+	}
+	if entity.Mode == "" {
+		entity.Mode = sync.PlanModeBatch
 	}
 
 	if row.DataStoreID.Valid {
 		entity.DataStoreID = shared.ID(row.DataStoreID.String)
 	}
-
 	if row.CronExpression.Valid {
 		entity.CronExpression = &row.CronExpression.String
 	}
-
+	if row.ScheduleStartCron.Valid {
+		entity.ScheduleStartCron = &row.ScheduleStartCron.String
+	}
+	if row.ScheduleEndCron.Valid {
+		entity.ScheduleEndCron = &row.ScheduleEndCron.String
+	}
+	if row.SchedulePauseStartCron.Valid {
+		entity.SchedulePauseStartCron = &row.SchedulePauseStartCron.String
+	}
+	if row.SchedulePauseEndCron.Valid {
+		entity.SchedulePauseEndCron = &row.SchedulePauseEndCron.String
+	}
 	if row.LastExecutedAt.Valid {
 		entity.LastExecutedAt = &row.LastExecutedAt.Time
 	}
-
 	if row.NextExecuteAt.Valid {
 		entity.NextExecuteAt = &row.NextExecuteAt.Time
+	}
+	if row.LastSuccessfulEndDate.Valid {
+		entity.LastSuccessfulEndDate = &row.LastSuccessfulEndDate.String
+	}
+	if row.IncrementalStartDateAPI.Valid {
+		entity.IncrementalStartDateAPI = &row.IncrementalStartDateAPI.String
+	}
+	if row.IncrementalStartDateColumn.Valid {
+		entity.IncrementalStartDateColumn = &row.IncrementalStartDateColumn.String
 	}
 
 	if err := entity.UnmarshalSelectedAPIsJSON(row.SelectedAPIs); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal selected apis: %w", err)
 	}
-
-	if row.ResolvedAPIs != "" {
-		if err := entity.UnmarshalResolvedAPIsJSON(row.ResolvedAPIs); err != nil {
+	if row.ResolvedAPIs.Valid && row.ResolvedAPIs.String != "" {
+		if err := entity.UnmarshalResolvedAPIsJSON(row.ResolvedAPIs.String); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal resolved apis: %w", err)
 		}
 	}
-
-	if row.ExecutionGraph != "" {
-		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph); err != nil {
+	if row.ExecutionGraph.Valid && row.ExecutionGraph.String != "" {
+		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph.String); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal execution graph: %w", err)
+		}
+	}
+	if row.DefaultExecuteParams.Valid && row.DefaultExecuteParams.String != "" {
+		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams.String); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal default execute params: %w", err)
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Database   DatabaseConfig   `yaml:"database"`
+	QuantDB    QuantDBConfig    `yaml:"quantdb"`
 	TaskEngine TaskEngineConfig `yaml:"task_engine"`
 	DataSource DataSourceConfig `yaml:"datasources"`
 }
@@ -25,6 +26,21 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	Driver string `yaml:"driver"` // sqlite or postgres
 	DSN    string `yaml:"dsn"`
+}
+
+// QuantDBConfig holds quant database connection and writing settings.
+type QuantDBConfig struct {
+	WriteQueue WriteQueueConfig `yaml:"write_queue"`
+}
+
+// WriteQueueConfig holds write queue settings for QuantDB.
+type WriteQueueConfig struct {
+	Enabled            bool `yaml:"enabled"`
+	BatchSize          int  `yaml:"batch_size"`
+	MaxWaitSec         int  `yaml:"max_wait_sec"`
+	MemoryCheckEnabled bool `yaml:"memory_check_enabled"`
+	MemoryHighMB       int  `yaml:"memory_high_mb"`
+	MemoryCriticalMB   int  `yaml:"memory_critical_mb"`
 }
 
 // TaskEngineConfig holds task engine settings.
@@ -70,6 +86,16 @@ func Default() *Config {
 		Database: DatabaseConfig{
 			Driver: "sqlite",
 			DSN:    "./data/qdhub.db",
+		},
+		QuantDB: QuantDBConfig{
+			WriteQueue: WriteQueueConfig{
+				Enabled:            true,
+				BatchSize:          5000,
+				MaxWaitSec:         30,
+				MemoryCheckEnabled: true,
+				MemoryHighMB:       4096, // 4GB by default
+				MemoryCriticalMB:   6144, // 6GB by default
+			},
 		},
 		TaskEngine: TaskEngineConfig{
 			WorkerCount: 100,

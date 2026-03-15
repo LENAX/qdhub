@@ -115,3 +115,27 @@ type QuantDBFactory interface {
 	// Create creates a new QuantDB instance based on the configuration.
 	Create(config QuantDBConfig) (QuantDB, error)
 }
+
+// QuantDBBatchWriteRequest holds parameters for a batch write operation.
+type QuantDBBatchWriteRequest struct {
+	Path        string           // Target DuckDB path
+	TableName   string           // Table to write into
+	Data        []map[string]any // Data to write
+	SyncBatchID string           // Optional batch ID for rollback support
+}
+
+// QuantDBWriteQueue provides an asynchronous queue for batching writes to QuantDB.
+// It handles concurrent writes to the same DB path by serializing them and flushing
+// them according to a batch size or time limit.
+type QuantDBWriteQueue interface {
+	// Enqueue adds a write request to the queue. Returns an error if the queue rejects it
+	// (e.g., due to critical memory pressure). This method does not wait for the write to complete.
+	Enqueue(ctx context.Context, req QuantDBBatchWriteRequest) error
+
+	// EnqueueAndWait adds a write request and blocks until the data is actually written to the DB.
+	// Returns the number of rows inserted and any error that occurred during the write.
+	EnqueueAndWait(ctx context.Context, req QuantDBBatchWriteRequest) (int64, error)
+
+	// Close shuts down the queue and flushes all pending writes.
+	Close() error
+}

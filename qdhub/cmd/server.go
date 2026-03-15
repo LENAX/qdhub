@@ -80,6 +80,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 				} `yaml:"database"`
 				QuantDB struct {
 					DuckDBPath string `yaml:"duckdb_path"`
+					WriteQueue struct {
+						Enabled            *bool `yaml:"enabled"`
+						BatchSize          int   `yaml:"batch_size"`
+						MaxWaitSec         int   `yaml:"max_wait_sec"`
+						MemoryCheckEnabled *bool `yaml:"memory_check_enabled"`
+						MemoryHighMB       int   `yaml:"memory_high_mb"`
+						MemoryCriticalMB   int   `yaml:"memory_critical_mb"`
+					} `yaml:"write_queue"`
 				} `yaml:"quantdb"`
 				TaskEngine struct {
 					WorkerCount int `yaml:"worker_count"`
@@ -165,6 +173,46 @@ func runServer(cmd *cobra.Command, args []string) error {
 	config.DefaultDuckDBPath = duckDBPath
 	if taskEngineWorkerCount > 0 {
 		config.TaskEngineMaxConcurrency = taskEngineWorkerCount
+	}
+
+	// Apply write queue config if it was parsed
+	if configPath != "" {
+		data, err := os.ReadFile(configPath)
+		if err == nil {
+			var cfg struct {
+				QuantDB struct {
+					WriteQueue struct {
+						Enabled            *bool `yaml:"enabled"`
+						BatchSize          int   `yaml:"batch_size"`
+						MaxWaitSec         int   `yaml:"max_wait_sec"`
+						MemoryCheckEnabled *bool `yaml:"memory_check_enabled"`
+						MemoryHighMB       int   `yaml:"memory_high_mb"`
+						MemoryCriticalMB   int   `yaml:"memory_critical_mb"`
+					} `yaml:"write_queue"`
+				} `yaml:"quantdb"`
+			}
+			if err := yaml.Unmarshal(data, &cfg); err == nil {
+				wq := cfg.QuantDB.WriteQueue
+				if wq.Enabled != nil {
+					config.WriteQueue.Enabled = *wq.Enabled
+				}
+				if wq.BatchSize > 0 {
+					config.WriteQueue.BatchSize = wq.BatchSize
+				}
+				if wq.MaxWaitSec > 0 {
+					config.WriteQueue.MaxWaitSec = wq.MaxWaitSec
+				}
+				if wq.MemoryCheckEnabled != nil {
+					config.WriteQueue.MemoryCheckEnabled = *wq.MemoryCheckEnabled
+				}
+				if wq.MemoryHighMB > 0 {
+					config.WriteQueue.MemoryHighMB = wq.MemoryHighMB
+				}
+				if wq.MemoryCriticalMB > 0 {
+					config.WriteQueue.MemoryCriticalMB = wq.MemoryCriticalMB
+				}
+			}
+		}
 	}
 	if viper.IsSet("server.enable_swagger") {
 		config.EnableSwagger = viper.GetBool("server.enable_swagger")

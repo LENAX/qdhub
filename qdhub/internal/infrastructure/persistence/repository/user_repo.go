@@ -15,9 +15,9 @@ import (
 
 // UserRepositoryImpl implements auth.UserRepository and auth.UserRoleRepository.
 type UserRepositoryImpl struct {
-	db         *persistence.DB
-	tx         *sqlx.Tx
-	userDAO    *dao.UserDAO
+	db          *persistence.DB
+	tx          *sqlx.Tx
+	userDAO     *dao.UserDAO
 	userRoleDAO *dao.UserRoleDAO
 }
 

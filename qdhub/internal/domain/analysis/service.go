@@ -43,6 +43,8 @@ type AnalysisService interface {
 
 	// 资金流向
 	GetMoneyFlow(ctx context.Context, req MoneyFlowRequest) ([]MoneyFlow, error)
+	// 同花顺概念板块资金流入（moneyflow_cnt_ths）
+	GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error)
 
 	// 人气榜
 	GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
@@ -87,6 +89,13 @@ type AnalysisService interface {
 
 	// 技术指标：基于 K 线数据在内存中计算 MA/RSI/MACD 等
 	GetTechnicalIndicators(ctx context.Context, req TechnicalIndicatorCalcRequest) ([]TechnicalIndicator, error)
+
+	// 当日实时分笔（ts_realtime_mkt_tick，最近 N 条倒序）
+	GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]TickRow, error)
+	// 按日分时+盘口回放（ts_realtime_mkt_tick，按 trade_time 升序）
+	GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]TickRow, error)
+	// 分钟 K 线（rt_min，按日）
+	GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]IntradayKlineRow, error)
 }
 
 // CustomQueryRequest 自定义查询请求（只读 SQL）
@@ -120,7 +129,8 @@ type StockListRequest struct {
 	Area       *string // 地域
 	IsHS       *string // 是否沪深港通
 	ListStatus *string // 上市状态：L上市/D退市/P暂停
-	Query      *string // 关键词：按名称、ts_code、symbol 模糊查询
+	Query      *string // 关键词：按名称、ts_code、symbol、cnspell 模糊查询
+	SearchType *string // 可选：cnspell 表示仅按拼音缩写匹配 query
 	Limit      int     // 返回数量限制
 	Offset     int     // 偏移量
 }
@@ -152,9 +162,12 @@ type DragonTigerRequest struct {
 }
 
 // MoneyFlowRequest 资金流向查询请求
+// TradeDate / StartDate+EndDate / TsCode 至少填一个，不可同时为空
 type MoneyFlowRequest struct {
-	TradeDate string  // 交易日期
-	TsCode    *string // 证券代码（可选，不填则查询全市场）
+	TradeDate *string // 单日查询（可选，与 StartDate/EndDate、TsCode 三选一或组合）
+	StartDate *string // 范围起始日 YYYYMMDD（与 EndDate 配合使用）
+	EndDate   *string // 范围截止日 YYYYMMDD（与 StartDate 配合使用）
+	TsCode    *string // 证券代码（可选）
 	Market    *string // 市场类型
 	Limit     int     // 返回数量限制
 	Offset    int     // 偏移量
@@ -166,13 +179,15 @@ type PopularityRankRequest struct {
 	Limit    int    // 返回前N名
 }
 
-// NewsListRequest 新闻列表查询请求
+// NewsListRequest 新闻列表查询请求（支持财联社式电报流：按时间倒序、来源过滤）
 type NewsListRequest struct {
 	TsCode    *string // 关联股票代码（可选）
 	Category  *string // 分类
 	Keyword   *string // 关键词搜索
 	StartDate *string // 开始日期
 	EndDate   *string // 结束日期
+	Order     string  // 排序：time_desc（默认）/ time_asc
+	Sources   *string // 来源过滤，逗号分隔，如 "cls,sina"
 	Limit     int     // 返回数量限制
 	Offset    int     // 偏移量
 }

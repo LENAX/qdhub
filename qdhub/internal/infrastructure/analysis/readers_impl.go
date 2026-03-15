@@ -68,18 +68,23 @@ var (
 	_ analysis.FinancialReportReader       = (*Readers)(nil)
 	_ analysis.TradeCalendarReader         = (*Readers)(nil)
 	_ analysis.StockSnapshotReader         = (*Readers)(nil)
+	_ analysis.RealtimeTickReader          = (*Readers)(nil)
+	_ analysis.IntradayTickReader          = (*Readers)(nil)
+	_ analysis.IntradayKlineReader         = (*Readers)(nil)
+	_ analysis.MoneyFlowConceptReader      = (*Readers)(nil)
 )
 
 // GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算。
 // 复权因子缺失时用 ffill（该日之前最近一日的 adj_factor），避免除权前日被填成除权后因子导致前复权出现 -99% 异常；无前值则用 1.0。
 func (r *Readers) GetDailyWithAdjFactor(ctx context.Context, tsCode, startDate, endDate string) ([]analysis.RawDailyRow, error) {
 	sql := `
-SELECT d.trade_date, d.open, d.high, d.low, d.close, d.vol, d.amount, d.pre_close, d.change, d.pct_chg,
+SELECT d.trade_date, COALESCE(s.name, '') AS name, d.open, d.high, d.low, d.close, d.vol, d.amount, d.pre_close, d.change, d.pct_chg,
        COALESCE(a.adj_factor,
                 (SELECT a2.adj_factor FROM adj_factor a2 WHERE a2.ts_code = d.ts_code AND a2.trade_date < d.trade_date ORDER BY a2.trade_date DESC LIMIT 1),
                 1.0) AS adj_factor
 FROM daily d
 LEFT JOIN adj_factor a ON d.ts_code = a.ts_code AND d.trade_date = a.trade_date
+LEFT JOIN stock_basic s ON d.ts_code = s.ts_code
 WHERE d.ts_code = ? AND d.trade_date >= ? AND d.trade_date <= ?
 ORDER BY d.trade_date`
 	rows, err := r.db.Query(ctx, sql, tsCode, startDate, endDate)
@@ -90,6 +95,7 @@ ORDER BY d.trade_date`
 	for _, m := range rows {
 		out = append(out, analysis.RawDailyRow{
 			TradeDate: str(m, "trade_date"),
+			Name:      str(m, "name"),
 			Open:      float(m, "open"),
 			High:      float(m, "high"),
 			Low:       float(m, "low"),
@@ -232,13 +238,123 @@ func (r *Readers) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQ
 }
 
 // GetLimitStats 涨跌停统计
-// 优先用 limit_list_d（limit 字段 U/D/Z）直接统计涨跌停与封板/打开数；
-// 有 limit_list_ths 时用 open_num 补充涨停封板/打开更准确数据。
-// 涨停数量兜底：当 limit 字段不匹配 U/Z 时，用 pct_chg>=9.8 统计，避免显示不全。
+// 数据以 limit_list_d 为准：U=涨停封板、Z=炸板、D=跌停，open_times 在 D 时为开板次数；
+// 有 limit_list_ths 时仅用其 open_num 覆盖涨停封板/打开数，跌停仍以 limit_list_d 为准。
 func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
-	// 尝试从 limit_list_d 直接统计（U=涨停封板 D=跌停封板 Z=炸板）
-	if ldOk, _ := r.db.TableExists(ctx, "limit_list_d"); ldOk {
-		ldSQL := `
+	ldOk, _ := r.db.TableExists(ctx, "limit_list_d")
+	if !ldOk {
+		return r.getLimitStatsFromDaily(ctx, startDate, endDate)
+	}
+	// 优先：limit_list_d + open_times 区分跌停封板/开板（Tushare 文档：跌停为开板次数）
+	ldSQL := `
+SELECT trade_date,
+       COUNT(DISTINCT CASE WHEN "limit" = 'U'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'Z'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_opened,
+       COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z')
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_up_from_pct,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) = 0 THEN ts_code END) AS limit_down_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) > 0 THEN ts_code END) AS limit_down_opened,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
+FROM limit_list_d
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date ORDER BY trade_date`
+	ldRows, ldErr := r.db.Query(ctx, ldSQL, startDate, endDate)
+	if ldErr != nil || len(ldRows) == 0 {
+		// 仍以 limit_list_d 为准：若无 open_times 等导致上面 SQL 失败，用不依赖 open_times 的统计
+		ldRows, ldErr = r.queryLimitStatsFromLimitListD(ctx, startDate, endDate)
+	}
+	if ldErr == nil && len(ldRows) > 0 {
+		out := make([]analysis.LimitStats, 0, len(ldRows))
+		for _, m := range ldRows {
+			sealed := int_(m, "limit_up_sealed")
+			opened := int_(m, "limit_up_opened")
+			upFromLimit := int_(m, "limit_up_from_limit")
+			upFromPct := int_(m, "limit_up_from_pct")
+			total := sealed + opened
+			if total < upFromPct {
+				total = upFromPct
+			}
+			if total < upFromLimit {
+				total = upFromLimit
+			}
+			if total > 0 && sealed == 0 && opened == 0 {
+				sealed = total
+			}
+			dSealed := int_(m, "limit_down_sealed")
+			dOpened := int_(m, "limit_down_opened")
+			dFromLimit := int_(m, "limit_down_from_limit")
+			dFromPct := int_(m, "limit_down_from_pct")
+			dCount := dSealed + dOpened
+			if dCount < dFromPct {
+				dCount = dFromPct
+			}
+			if dCount < dFromLimit {
+				dCount = dFromLimit
+			}
+			// 跌停：分钟/高频数据未稳定前不按 open_times 区分，有跌停则封板率 100%、打开数 0
+			var dSealedVal, dOpenedVal int
+			if dCount > 0 {
+				dSealedVal = dCount
+				dOpenedVal = 0
+			}
+			out = append(out, analysis.LimitStats{
+				TradeDate:       str(m, "trade_date"),
+				LimitUpCount:    total,
+				LimitDownCount:  dCount,
+				LimitUpSealed:   sealed,
+				LimitUpOpened:   opened,
+				LimitDownSealed: dSealedVal,
+				LimitDownOpened: dOpenedVal,
+			})
+		}
+		// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数（同样默认排除 ST/*ST）
+		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+			thsSQL := `
+SELECT trade_date,
+       SUM(CASE WHEN COALESCE(open_num, 0) = 0
+                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                THEN 1 ELSE 0 END) AS limit_up_sealed,
+       SUM(CASE WHEN COALESCE(open_num, 0) > 0
+                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                THEN 1 ELSE 0 END) AS limit_up_opened
+FROM limit_list_ths
+WHERE trade_date BETWEEN ? AND ?
+GROUP BY trade_date`
+			thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
+			if thsErr == nil {
+				byDate := make(map[string]*struct{ sealed, opened int })
+				for _, m := range thsRows {
+					byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
+						sealed: int_(m, "limit_up_sealed"),
+						opened: int_(m, "limit_up_opened"),
+					}
+				}
+				for i := range out {
+					if v, ok := byDate[out[i].TradeDate]; ok {
+						out[i].LimitUpSealed = v.sealed
+						out[i].LimitUpOpened = v.opened
+						out[i].LimitUpCount = v.sealed + v.opened
+					}
+				}
+			}
+		}
+		return out, nil
+	}
+	return r.getLimitStatsFromDaily(ctx, startDate, endDate)
+}
+
+// queryLimitStatsFromLimitListD 仅用 limit_list_d 统计，跌停不区分 open_times（全部计为封板），用于无 open_times 列或首查失败时
+func (r *Readers) queryLimitStatsFromLimitListD(ctx context.Context, startDate, endDate string) ([]map[string]any, error) {
+	sql := `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN "limit" = 'U'
                              AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
@@ -253,88 +369,17 @@ SELECT trade_date,
                              AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_pct,
        COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_sealed,
-       COUNT(DISTINCT CASE WHEN "limit" IN ('D') THEN ts_code END) AS limit_down_from_limit,
+       0 AS limit_down_opened,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
 FROM limit_list_d
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
-		ldRows, ldErr := r.db.Query(ctx, ldSQL, startDate, endDate)
-		if ldErr == nil && len(ldRows) > 0 {
-			out := make([]analysis.LimitStats, 0, len(ldRows))
-			for _, m := range ldRows {
-				sealed := int_(m, "limit_up_sealed")
-				opened := int_(m, "limit_up_opened")
-				upFromLimit := int_(m, "limit_up_from_limit")
-				upFromPct := int_(m, "limit_up_from_pct")
-				total := sealed + opened
-				if total < upFromPct {
-					total = upFromPct
-				}
-				if total < upFromLimit {
-					total = upFromLimit
-				}
-				if total > 0 && sealed == 0 && opened == 0 {
-					sealed = total
-				}
-				dSealed := int_(m, "limit_down_sealed")
-				dFromLimit := int_(m, "limit_down_from_limit")
-				dFromPct := int_(m, "limit_down_from_pct")
-				dCount := dSealed
-				if dCount < dFromPct {
-					dCount = dFromPct
-				}
-				if dCount < dFromLimit {
-					dCount = dFromLimit
-				}
-				dSealedVal := dSealed
-				if dSealedVal == 0 && dCount > 0 {
-					dSealedVal = dCount
-				}
-				out = append(out, analysis.LimitStats{
-					TradeDate:       str(m, "trade_date"),
-					LimitUpCount:    total,
-					LimitDownCount:  dCount,
-					LimitUpSealed:   sealed,
-					LimitUpOpened:   opened,
-					LimitDownSealed: dSealedVal,
-					LimitDownOpened: 0,
-				})
-			}
-			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数（同样默认排除 ST/*ST）
-			if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
-				thsSQL := `
-SELECT trade_date,
-       SUM(CASE WHEN COALESCE(open_num, 0) = 0
-                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
-                THEN 1 ELSE 0 END) AS limit_up_sealed,
-       SUM(CASE WHEN COALESCE(open_num, 0) > 0
-                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
-                THEN 1 ELSE 0 END) AS limit_up_opened
-FROM limit_list_ths
-WHERE trade_date BETWEEN ? AND ?
-GROUP BY trade_date`
-				thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
-				if thsErr == nil {
-					byDate := make(map[string]*struct{ sealed, opened int })
-					for _, m := range thsRows {
-						byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
-							sealed: int_(m, "limit_up_sealed"),
-							opened: int_(m, "limit_up_opened"),
-						}
-					}
-					for i := range out {
-						if v, ok := byDate[out[i].TradeDate]; ok {
-							out[i].LimitUpSealed = v.sealed
-							out[i].LimitUpOpened = v.opened
-							out[i].LimitUpCount = v.sealed + v.opened
-						}
-					}
-				}
-			}
-			return out, nil
-		}
-	}
-	// 兜底：从 daily 表统计（无封板/打开区分）
+	return r.db.Query(ctx, sql, startDate, endDate)
+}
+
+// getLimitStatsFromDaily 无 limit_list_d 时从 daily 表统计（无封板/打开细分，涨停/跌停均按封板率 100% 展示）
+func (r *Readers) getLimitStatsFromDaily(ctx context.Context, startDate, endDate string) ([]analysis.LimitStats, error) {
 	sbOk, _ := r.db.TableExists(ctx, "stock_basic")
 	sql := ""
 	if sbOk {
@@ -369,13 +414,20 @@ GROUP BY trade_date ORDER BY trade_date`
 	}
 	out := make([]analysis.LimitStats, 0, len(rows))
 	for _, m := range rows {
+		upCount := int_(m, "limit_up_count")
+		downCount := int_(m, "limit_down_count")
+		// 兜底路径无封板/打开细分：按同花顺口径，全部视为封板，打开数=0，封板率=100%
 		out = append(out, analysis.LimitStats{
-			TradeDate:      str(m, "trade_date"),
-			LimitUpCount:   int_(m, "limit_up_count"),
-			LimitDownCount: int_(m, "limit_down_count"),
-			UpCount:        int_(m, "up_count"),
-			DownCount:      int_(m, "down_count"),
-			FlatCount:      int_(m, "flat_count"),
+			TradeDate:       str(m, "trade_date"),
+			LimitUpCount:    upCount,
+			LimitDownCount:  downCount,
+			LimitUpSealed:   upCount,
+			LimitUpOpened:   0,
+			LimitDownSealed: downCount,
+			LimitDownOpened: 0,
+			UpCount:         int_(m, "up_count"),
+			DownCount:       int_(m, "down_count"),
+			FlatCount:       int_(m, "flat_count"),
 		})
 	}
 	return out, nil
@@ -990,8 +1042,14 @@ func (r *Readers) ListStocks(ctx context.Context, req analysis.StockListRequest)
 	}
 	if req.Query != nil && strings.TrimSpace(*req.Query) != "" {
 		q := "%" + strings.TrimSpace(*req.Query) + "%"
-		sql += " AND (name LIKE ? OR ts_code LIKE ? OR symbol LIKE ?)"
-		args = append(args, q, q, q)
+		// DuckDB 的 LIKE 区分大小写，cnspell 多为大写（如 JNFD），用户输入小写（jnfd）需用 ILIKE
+		if req.SearchType != nil && strings.TrimSpace(strings.ToLower(*req.SearchType)) == "cnspell" {
+			sql += " AND (cnspell ILIKE ?)"
+			args = append(args, q)
+		} else {
+			sql += " AND (name ILIKE ? OR ts_code ILIKE ? OR symbol ILIKE ? OR cnspell ILIKE ?)"
+			args = append(args, q, q, q, q)
+		}
 	}
 	sql += " ORDER BY ts_code LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
@@ -1113,22 +1171,93 @@ FROM top_list WHERE 1=1`
 }
 
 // GetMoneyFlow MoneyFlowReader
-// 表 moneyflow 由 Tushare 个股资金流向 API 建表，仅含 ts_code/trade_date 与 *_amount/net_mf_amount，无 name、net_mf_ratio；不查不存在的列，实体缺省为 ""/0
+// 优先使用 moneyflow（Tushare 个股资金流向），含小/中/大/特大单的买入、卖出及净额，可支撑主力流入/流出、资金占比等展示。
+// 无 moneyflow 表时回退到 moneyflow_ths（同花顺，仅净额口径）；无表时返回空列表。
+// 支持单日 (TradeDate)、日期范围 (StartDate+EndDate)、股票代码 (TsCode) 三种过滤方式。
 func (r *Readers) GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error) {
-	sql := `SELECT trade_date, ts_code,
-       buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount,
-       buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount
-FROM moneyflow WHERE trade_date = ?`
-	args := []any{req.TradeDate}
-	if req.TsCode != nil && *req.TsCode != "" {
-		sql += " AND ts_code = ?"
-		args = append(args, *req.TsCode)
-	}
-	sql += " ORDER BY net_mf_amount DESC LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
 	if limit <= 0 {
 		limit = 100
 	}
+	var conds []string
+	var args []any
+	if req.TradeDate != nil && *req.TradeDate != "" {
+		conds = append(conds, "trade_date = ?")
+		args = append(args, *req.TradeDate)
+	} else if req.StartDate != nil && *req.StartDate != "" && req.EndDate != nil && *req.EndDate != "" {
+		conds = append(conds, "trade_date >= ? AND trade_date <= ?")
+		args = append(args, *req.StartDate, *req.EndDate)
+	}
+	if req.TsCode != nil && *req.TsCode != "" {
+		conds = append(conds, "ts_code = ?")
+		args = append(args, *req.TsCode)
+	}
+
+	// 优先：moneyflow 表（完整买卖 + 特大单，单位万元）
+	okMf, _ := r.db.TableExists(ctx, "moneyflow")
+	if okMf {
+		sql := `SELECT m.trade_date, m.ts_code,
+       COALESCE(s.name, '') AS name,
+       COALESCE(m.buy_sm_amount, 0) AS buy_sm_amount, COALESCE(m.sell_sm_amount, 0) AS sell_sm_amount,
+       COALESCE(m.buy_md_amount, 0) AS buy_md_amount, COALESCE(m.sell_md_amount, 0) AS sell_md_amount,
+       COALESCE(m.buy_lg_amount, 0) AS buy_lg_amount, COALESCE(m.sell_lg_amount, 0) AS sell_lg_amount,
+       COALESCE(m.buy_elg_amount, 0) AS buy_elg_amount, COALESCE(m.sell_elg_amount, 0) AS sell_elg_amount,
+       COALESCE(m.net_mf_amount, 0) AS net_mf_amount
+FROM moneyflow m
+LEFT JOIN stock_basic s ON m.ts_code = s.ts_code`
+		if len(conds) > 0 {
+			// 限定列名为 m. 避免与 stock_basic 的 ts_code 等歧义
+			q := make([]string, len(conds))
+			for i, c := range conds {
+				q[i] = strings.Replace(strings.Replace(c, "trade_date", "m.trade_date", -1), "ts_code", "m.ts_code", -1)
+			}
+			sql += " WHERE " + q[0]
+			for _, c := range q[1:] {
+				sql += " AND " + c
+			}
+		}
+		sql += " ORDER BY m.trade_date ASC, m.net_mf_amount DESC NULLS LAST LIMIT ? OFFSET ?"
+		fullArgs := append(args, limit, offset)
+		rows, err := r.db.Query(ctx, sql, fullArgs...)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]analysis.MoneyFlow, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, analysis.MoneyFlow{
+				TradeDate:     str(m, "trade_date"),
+				TsCode:        str(m, "ts_code"),
+				Name:          str(m, "name"),
+				BuySmAmount:   float(m, "buy_sm_amount"),
+				SellSmAmount:  float(m, "sell_sm_amount"),
+				BuyMdAmount:   float(m, "buy_md_amount"),
+				SellMdAmount:  float(m, "sell_md_amount"),
+				BuyLgAmount:   float(m, "buy_lg_amount"),
+				SellLgAmount:  float(m, "sell_lg_amount"),
+				BuyElgAmount:  float(m, "buy_elg_amount"),
+				SellElgAmount: float(m, "sell_elg_amount"),
+				NetMfAmount:   float(m, "net_mf_amount"),
+				NetMfRatio:    0,
+			})
+		}
+		return out, nil
+	}
+
+	// 回退：moneyflow_ths（同花顺，仅净额）
+	okThs, _ := r.db.TableExists(ctx, "moneyflow_ths")
+	if !okThs {
+		return nil, nil
+	}
+	sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name,
+       buy_sm_amount, buy_md_amount, buy_lg_amount, net_amount AS net_mf_amount
+FROM moneyflow_ths`
+	if len(conds) > 0 {
+		sql += " WHERE " + conds[0]
+		for _, c := range conds[1:] {
+			sql += " AND " + c
+		}
+	}
+	sql += " ORDER BY trade_date ASC, net_amount DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
@@ -1136,13 +1265,58 @@ FROM moneyflow WHERE trade_date = ?`
 	}
 	out := make([]analysis.MoneyFlow, 0, len(rows))
 	for _, m := range rows {
+		netAmt := float(m, "net_mf_amount")
 		out = append(out, analysis.MoneyFlow{
-			TradeDate: str(m, "trade_date"), TsCode: str(m, "ts_code"), Name: str(m, "name"),
-			BuySmAmount: float(m, "buy_sm_amount"), SellSmAmount: float(m, "sell_sm_amount"),
-			BuyMdAmount: float(m, "buy_md_amount"), SellMdAmount: float(m, "sell_md_amount"),
-			BuyLgAmount: float(m, "buy_lg_amount"), SellLgAmount: float(m, "sell_lg_amount"),
-			BuyElgAmount: float(m, "buy_elg_amount"), SellElgAmount: float(m, "sell_elg_amount"),
-			NetMfAmount: float(m, "net_mf_amount"), NetMfRatio: float(m, "net_mf_ratio"),
+			TradeDate:     str(m, "trade_date"),
+			TsCode:        str(m, "ts_code"),
+			Name:          str(m, "name"),
+			BuySmAmount:   float(m, "buy_sm_amount"),
+			SellSmAmount:  0,
+			BuyMdAmount:   float(m, "buy_md_amount"),
+			SellMdAmount:  0,
+			BuyLgAmount:   float(m, "buy_lg_amount"),
+			SellLgAmount:  0,
+			BuyElgAmount:  0,
+			SellElgAmount: 0,
+			NetMfAmount:   netAmt,
+			NetMfRatio:    0,
+		})
+	}
+	return out, nil
+}
+
+// GetMoneyFlowConcept 同花顺概念板块资金流入（moneyflow_cnt_ths）
+func (r *Readers) GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error) {
+	ok, _ := r.db.TableExists(ctx, "moneyflow_cnt_ths")
+	if !ok {
+		return nil, nil
+	}
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 100
+	}
+	sql := `SELECT trade_date, code AS concept_code, name AS concept_name, net_mf_amount AS net_inflow
+FROM moneyflow_cnt_ths WHERE trade_date = ?`
+	args := []any{req.TradeDate}
+	if req.Concept != nil && *req.Concept != "" {
+		sql += " AND (name LIKE ? OR code LIKE ?)"
+		q := "%" + *req.Concept + "%"
+		args = append(args, q, q)
+	}
+	sql += " ORDER BY net_mf_amount DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.MoneyFlowConcept, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.MoneyFlowConcept{
+			TradeDate:      str(m, "trade_date"),
+			ConceptCode:    str(m, "concept_code"),
+			ConceptName:    str(m, "concept_name"),
+			NetInflow:      float(m, "net_inflow"),
+			NetInflowRatio: float(m, "net_inflow_ratio"),
 		})
 	}
 	return out, nil
@@ -1154,9 +1328,70 @@ func (r *Readers) GetRank(ctx context.Context, req analysis.PopularityRankReques
 	return nil, nil
 }
 
-// ListNews NewsReader.List
+// ListNews NewsReader.List：支持 order=time_desc、limit、sources 过滤；表名优先 news，其次 major_news
 func (r *Readers) ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
-	return nil, nil
+	table := ""
+	for _, t := range []string{"news", "major_news"} {
+		ok, _ := r.db.TableExists(ctx, t)
+		if ok {
+			table = t
+			break
+		}
+	}
+	if table == "" {
+		return nil, nil
+	}
+	order := "DESC"
+	if strings.TrimSpace(strings.ToLower(req.Order)) == "time_asc" {
+		order = "ASC"
+	}
+	// 常见字段：id, title, content, source, publish_time, 可能无 author/relate_stocks/category/tags
+	sql := "SELECT id, title, content, source, publish_time FROM " + table + " WHERE 1=1"
+	args := []any{}
+	if req.StartDate != nil && *req.StartDate != "" {
+		sql += " AND publish_time >= ?"
+		args = append(args, *req.StartDate)
+	}
+	if req.EndDate != nil && *req.EndDate != "" {
+		sql += " AND publish_time <= ?"
+		args = append(args, *req.EndDate)
+	}
+	if req.Sources != nil && strings.TrimSpace(*req.Sources) != "" {
+		parts := strings.Split(*req.Sources, ",")
+		for i, p := range parts {
+			parts[i] = strings.TrimSpace(p)
+		}
+		if len(parts) > 0 {
+			placeholders := strings.Repeat("?,", len(parts))
+			sql += " AND source IN (" + placeholders[:len(placeholders)-1] + ")"
+			for _, p := range parts {
+				args = append(args, p)
+			}
+		}
+	}
+	sql += " ORDER BY publish_time " + order + " LIMIT ? OFFSET ?"
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 50
+	}
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.NewsItem, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.NewsItem{
+			ID:          str(m, "id"),
+			Title:       str(m, "title"),
+			Content:     str(m, "content"),
+			Source:      str(m, "source"),
+			PublishTime: str(m, "publish_time"),
+			Author:      str(m, "author"),
+			Category:    str(m, "category"),
+		})
+	}
+	return out, nil
 }
 
 // GetLimitUpListByDate 当日涨停列表（供 LimitUpListReader 使用）
@@ -1542,6 +1777,123 @@ func (r *Readers) GetTradingDates(ctx context.Context, startDate, endDate string
 	}
 	if err != nil {
 		return nil, fmt.Errorf("trade_cal query: %w", err)
+	}
+	return out, nil
+}
+
+// GetRealtimeTicks 当日实时分笔：ts_realtime_mkt_tick 按 trade_time 倒序，limit 条
+func (r *Readers) GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]analysis.TickRow, error) {
+	ok, _ := r.db.TableExists(ctx, "ts_realtime_mkt_tick")
+	if !ok {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	sql := `SELECT ts_code, name, trade_time, pre_price, price, open, high, low, close, volume, amount,
+		ask_price1, ask_volume1, bid_price1, bid_volume1, ask_price2, ask_volume2, bid_price2, bid_volume2,
+		ask_price3, ask_volume3, bid_price3, bid_volume3, ask_price4, ask_volume4, bid_price4, bid_volume4,
+		ask_price5, ask_volume5, bid_price5, bid_volume5
+		FROM ts_realtime_mkt_tick WHERE ts_code = ? ORDER BY trade_time DESC LIMIT ?`
+	rows, err := r.db.Query(ctx, sql, tsCode, limit)
+	if err != nil {
+		return nil, err
+	}
+	return mapRowsToTickRows(rows), nil
+}
+
+// GetIntradayTicks 按日分时+盘口回放：ts_realtime_mkt_tick 按 ts_code + 日期过滤，trade_time 升序
+func (r *Readers) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]analysis.TickRow, error) {
+	ok, _ := r.db.TableExists(ctx, "ts_realtime_mkt_tick")
+	if !ok || tsCode == "" || tradeDate == "" {
+		return nil, nil
+	}
+	// trade_date YYYYMMDD -> 当日 00:00:00 与次日 00:00:00（DuckDB 兼容字符串比较）
+	if len(tradeDate) != 8 {
+		return nil, nil
+	}
+	start := tradeDate[:4] + "-" + tradeDate[4:6] + "-" + tradeDate[6:8] + " 00:00:00"
+	end := tradeDate[:4] + "-" + tradeDate[4:6] + "-" + tradeDate[6:8] + " 23:59:59"
+	// DuckDB: trade_time 为 TIMESTAMP，需将字符串参数显式转为 TIMESTAMP 再比较
+	sql := `SELECT ts_code, name, trade_time, pre_price, price, open, high, low, close, volume, amount,
+		ask_price1, ask_volume1, bid_price1, bid_volume1, ask_price2, ask_volume2, bid_price2, bid_volume2,
+		ask_price3, ask_volume3, bid_price3, bid_volume3, ask_price4, ask_volume4, bid_price4, bid_volume4,
+		ask_price5, ask_volume5, bid_price5, bid_volume5
+		FROM ts_realtime_mkt_tick WHERE ts_code = ? AND trade_time >= CAST(? AS TIMESTAMP) AND trade_time <= CAST(? AS TIMESTAMP)
+		ORDER BY trade_time ASC`
+	rows, err := r.db.Query(ctx, sql, tsCode, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return mapRowsToTickRows(rows), nil
+}
+
+func mapRowsToTickRows(rows []map[string]any) []analysis.TickRow {
+	out := make([]analysis.TickRow, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.TickRow{
+			TradeTime:  str(m, "trade_time"),
+			TsCode:     str(m, "ts_code"),
+			Name:       str(m, "name"),
+			PrePrice:   float(m, "pre_price"),
+			Price:      float(m, "price"),
+			Open:       float(m, "open"),
+			High:       float(m, "high"),
+			Low:        float(m, "low"),
+			Close:      float(m, "close"),
+			Volume:     float(m, "volume"),
+			Amount:     float(m, "amount"),
+			AskPrice1:  float(m, "ask_price1"),
+			AskVolume1: float(m, "ask_volume1"),
+			BidPrice1:  float(m, "bid_price1"),
+			BidVolume1: float(m, "bid_volume1"),
+			AskPrice2:  float(m, "ask_price2"),
+			AskVolume2: float(m, "ask_volume2"),
+			BidPrice2:  float(m, "bid_price2"),
+			BidVolume2: float(m, "bid_volume2"),
+			AskPrice3:  float(m, "ask_price3"),
+			AskVolume3: float(m, "ask_volume3"),
+			BidPrice3:  float(m, "bid_price3"),
+			BidVolume3: float(m, "bid_volume3"),
+			AskPrice4:  float(m, "ask_price4"),
+			AskVolume4: float(m, "ask_volume4"),
+			BidPrice4:  float(m, "bid_price4"),
+			BidVolume4: float(m, "bid_volume4"),
+			AskPrice5:  float(m, "ask_price5"),
+			AskVolume5: float(m, "ask_volume5"),
+			BidPrice5:  float(m, "bid_price5"),
+			BidVolume5: float(m, "bid_volume5"),
+		})
+	}
+	return out
+}
+
+// GetIntradayKline 分钟 K 线：rt_min 表，按 ts_code + trade_date
+func (r *Readers) GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]analysis.IntradayKlineRow, error) {
+	ok, _ := r.db.TableExists(ctx, "rt_min")
+	if !ok || tsCode == "" || tradeDate == "" {
+		return nil, nil
+	}
+	if period == "" {
+		period = "1m"
+	}
+	// rt_min 常见字段：ts_code, time 或 trade_time, open, high, low, close, vol, amount
+	sql := `SELECT time, open, high, low, close, vol AS volume, amount FROM rt_min WHERE ts_code = ? AND trade_date = ? ORDER BY time`
+	rows, err := r.db.Query(ctx, sql, tsCode, tradeDate)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]analysis.IntradayKlineRow, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.IntradayKlineRow{
+			Time:   str(m, "time"),
+			Open:   float(m, "open"),
+			High:   float(m, "high"),
+			Low:    float(m, "low"),
+			Close:  float(m, "close"),
+			Volume: float(m, "volume"),
+			Amount: float(m, "amount"),
+		})
 	}
 	return out, nil
 }

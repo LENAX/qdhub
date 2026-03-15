@@ -201,7 +201,7 @@ func (g *schemaGeneratorImpl) ValidateDDL(ddl string) error {
 	}
 
 	upperDDL := strings.ToUpper(strings.TrimSpace(ddl))
-	
+
 	// Check if it's a valid DDL statement
 	validPrefixes := []string{"CREATE TABLE", "DROP TABLE", "ALTER TABLE", "CREATE INDEX"}
 	isValid := false

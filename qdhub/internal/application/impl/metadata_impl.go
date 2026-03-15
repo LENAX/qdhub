@@ -19,10 +19,10 @@ type MetadataApplicationServiceImpl struct {
 	dataSourceRepo metadata.DataSourceRepository
 	metadataRepo   metadata.Repository // 用于APISyncStrategy操作
 
-	metadataValidator   metadata.MetadataValidator
-	parserFactory       metadata.DocumentParserFactory
-	workflowExecutor    workflow.WorkflowExecutor   // 用于执行元数据爬取工作流（领域服务接口）
-	tokenValidator      contracts.DataSourceTokenValidator
+	metadataValidator metadata.MetadataValidator
+	parserFactory     metadata.DocumentParserFactory
+	workflowExecutor  workflow.WorkflowExecutor // 用于执行元数据爬取工作流（领域服务接口）
+	tokenValidator    contracts.DataSourceTokenValidator
 }
 
 // NewMetadataApplicationService creates a new MetadataApplicationService implementation.
@@ -79,7 +79,6 @@ func (s *MetadataApplicationServiceImpl) GetDataSource(ctx context.Context, id s
 	}
 	return ds, nil
 }
-
 
 // ListDataSources lists all data sources.
 func (s *MetadataApplicationServiceImpl) ListDataSources(ctx context.Context) ([]*metadata.DataSource, error) {
@@ -250,7 +249,6 @@ func (s *MetadataApplicationServiceImpl) ParseAndImportMetadata(ctx context.Cont
 
 	return result, nil
 }
-
 
 // ==================== Token Management ====================
 

@@ -18,13 +18,13 @@ import (
 
 // RealtimeSyncParams 实时流式同步工作流参数
 type RealtimeSyncParams struct {
-	DataSourceID      shared.ID   // 数据源 ID（用于 StrategyProvider 拉取策略）
-	DataSourceName   string      // 数据源名称（必填）
-	Token            string      // API Token（必填）
-	TargetDBPath     string     // 目标数据库路径（必填）
-	APINames         []string   // 需要同步的 API 列表（必填，应为白名单内 API）
-	TsCodes          []string   // 股票代码列表（从 stock_basic 或前置步骤获取，按策略分片用）
-	IndexCodes       []string   // 指数代码列表（从 index_basic 获取，供 rt_idx_min 等用）
+	DataSourceID     shared.ID // 数据源 ID（用于 StrategyProvider 拉取策略）
+	DataSourceName   string    // 数据源名称（必填）
+	Token            string    // API Token（必填）
+	TargetDBPath     string    // 目标数据库路径（必填）
+	APINames         []string  // 需要同步的 API 列表（必填，应为白名单内 API）
+	TsCodes          []string  // 股票代码列表（从 stock_basic 或前置步骤获取，按策略分片用）
+	IndexCodes       []string  // 指数代码列表（从 index_basic 获取，供 rt_idx_min 等用）
 	PullIntervalSecs int       // Pull 模式拉取间隔（秒），0 表示使用默认（如 60）
 }
 

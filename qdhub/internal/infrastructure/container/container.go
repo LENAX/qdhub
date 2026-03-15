@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/LENAX/task-engine/pkg/storage/sqlite"
 	"github.com/casbin/casbin/v2"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/bcrypt"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
@@ -24,24 +24,27 @@ import (
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
+	"qdhub/internal/domain/watchlist"
 	"qdhub/internal/domain/workflow"
+	analysisinfra "qdhub/internal/infrastructure/analysis"
 	authinfra "qdhub/internal/infrastructure/auth"
+	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/datasource"
-	"qdhub/internal/infrastructure/datasourcevalidator"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
-	"qdhub/internal/infrastructure/realtimebuffer"
+	"qdhub/internal/infrastructure/datasourcevalidator"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
-	analysisinfra "qdhub/internal/infrastructure/analysis"
 	"qdhub/internal/infrastructure/quantdb"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
+	"qdhub/internal/infrastructure/quantdb/writequeue"
+	"qdhub/internal/infrastructure/realtimebuffer"
 	"qdhub/internal/infrastructure/scheduler"
-	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 	httpserver "qdhub/internal/interfaces/http"
+	"qdhub/pkg/config"
 )
 
 // DependencyContainer defines the interface for dependency injection container.
@@ -172,8 +175,9 @@ type Container struct {
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
 
 	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
-	QuantDBAdapter  datastore.QuantDB
-	QuantDBFactory  datastore.QuantDBFactory
+	QuantDBAdapter    datastore.QuantDB
+	QuantDBFactory    datastore.QuantDBFactory
+	QuantDBWriteQueue datastore.QuantDBWriteQueue
 
 	// Unit of Work for transaction management
 	UoW contracts.UnitOfWork
@@ -183,6 +187,10 @@ type Container struct {
 	UserRoleRepo auth.UserRoleRepository
 	JWTManager   *authinfra.JWTManager
 	Enforcer     *casbin.Enforcer
+
+	// Watchlist (user stock watchlist, same DB as auth)
+	WatchlistRepo watchlist.Repository
+	WatchlistSvc  contracts.WatchlistApplicationService
 }
 
 // Config holds container configuration.
@@ -192,12 +200,12 @@ type Config struct {
 	DBDSN    string
 
 	// Server
-	ServerHost     string
-	ServerPort     int
-	ServerMode     string
-	EnableSwagger  bool   // 生产环境建议 false，关闭 /swagger、/docs
-	AdminPassword  string // 可选：覆盖默认 admin 密码（生产环境设强密码，如通过 QDHUB_AUTH_ADMIN_PASSWORD）
-	GuestPassword  string // 可选：覆盖默认 guest 密码（生产环境设强密码，如通过 QDHUB_AUTH_GUEST_PASSWORD）
+	ServerHost    string
+	ServerPort    int
+	ServerMode    string
+	EnableSwagger bool   // 生产环境建议 false，关闭 /swagger、/docs
+	AdminPassword string // 可选：覆盖默认 admin 密码（生产环境设强密码，如通过 QDHUB_AUTH_ADMIN_PASSWORD）
+	GuestPassword string // 可选：覆盖默认 guest 密码（生产环境设强密码，如通过 QDHUB_AUTH_GUEST_PASSWORD）
 
 	// Task Engine
 	TaskEngineMaxConcurrency int
@@ -209,6 +217,9 @@ type Config struct {
 	// QuantDB (DuckDB) - 默认数据存储路径
 	// 如果设置，将在 Task Engine 初始化时创建 QuantDB adapter
 	DefaultDuckDBPath string
+
+	// QuantDB 写队列配置
+	WriteQueue config.WriteQueueConfig
 
 	// Auth configuration
 	JWTSecret         string        // JWT 签名密钥
@@ -228,9 +239,17 @@ func DefaultConfig() Config {
 		TaskEngineMaxConcurrency: 100,
 		TaskEngineTimeout:        120, // 单任务执行超时（秒），元数据爬取等可能较慢
 		MigrationPath:            "./migrations/001_init_schema.up.sql",
-		JWTSecret:                "change-me-in-production",
-		JWTExpiration:            24 * time.Hour,
-		RefreshExpiration:        7 * 24 * time.Hour,
+		WriteQueue: config.WriteQueueConfig{
+			Enabled:            true,
+			BatchSize:          5000,
+			MaxWaitSec:         30,
+			MemoryCheckEnabled: true,
+			MemoryHighMB:       4096, // 4GB by default
+			MemoryCriticalMB:   6144, // 6GB by default
+		},
+		JWTSecret:         "change-me-in-production",
+		JWTExpiration:     24 * time.Hour,
+		RefreshExpiration: 7 * 24 * time.Hour,
 	}
 }
 
@@ -448,6 +467,7 @@ func (c *Container) initDatabase() error {
 //   - 按文件名排序应用（升序）
 //   - 按数据库驱动过滤 driver-specific 迁移（*.sqlite.* / *.postgres.* / *.mysql.*）
 //   - 对 "already exists"/"duplicate column" 等错误视为已应用，安全跳过
+//
 // 同时在所有迁移执行完后，应用 admin/guest 密码覆盖（若配置了环境变量）。
 func (c *Container) runMigrations() error {
 	if c.config.MigrationPath == "" {
@@ -568,7 +588,8 @@ func (c *Container) ensureSchemaMigrationsTable(driver string) error {
 
 // migrationVersionFromFile 从迁移文件名推导 version（与 scripts/migrate.sh 一致）。
 // 例如：001_init_schema.up.sql -> 001_init_schema
-//       004_auth_schema.sqlite.up.sql -> 004_auth_schema.sqlite
+//
+//	004_auth_schema.sqlite.up.sql -> 004_auth_schema.sqlite
 func migrationVersionFromFile(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, ".up.sql")
@@ -823,6 +844,8 @@ func (c *Container) initRepositories() error {
 	c.UserRepo = userRepoImpl
 	c.UserRoleRepo = userRepoImpl // UserRepositoryImpl implements both interfaces
 
+	c.WatchlistRepo = repository.NewWatchlistRepository(c.DB)
+
 	logrus.Info("Repositories initialized")
 	return nil
 }
@@ -874,6 +897,11 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	c.QuantDBFactory = duckdb.NewFactory()
 	taskEngineDeps.QuantDBFactory = c.QuantDBFactory
 	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
+
+	// QuantDBWriteQueue：按 path 缓冲写队列，防止并发写和内存爆炸
+	c.QuantDBWriteQueue = writequeue.NewQueue(c.config.WriteQueue, c.QuantDBFactory)
+	taskEngineDeps.QuantDBWriteQueue = c.QuantDBWriteQueue
+	log.Printf("[Container] ✅ QuantDBWriteQueue registered")
 
 	// CommonDataCache：公共数据内存缓存（TTL 24h），SyncAPIDataJob 按 common_data_apis 走 Cache→DuckDB→API
 	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
@@ -983,6 +1011,12 @@ func (c *Container) initAuth() error {
 		logrus.Info("Default RBAC policies initialized")
 	} else {
 		logrus.Info("Existing RBAC policies loaded from database")
+		if err := authinfra.EnsureWatchlistPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure watchlist policies: %w", err)
+		}
+		if err := authinfra.EnsureWSPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure ws policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -1037,6 +1071,9 @@ func (c *Container) initApplicationServices() error {
 		passwordHasher,
 		c.JWTManager,
 	)
+
+	// Watchlist service (user stock watchlist)
+	c.WatchlistSvc = impl.NewWatchlistApplicationService(c.WatchlistRepo)
 
 	// Deferred injection: executor needs SyncSvc (breaks init cycle)
 	c.planExecutor.SetSyncService(c.SyncSvc)
@@ -1150,6 +1187,11 @@ func (c *Container) initHTTPServer() error {
 		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
 	}
 
+	var watchlistHandler *httpserver.WatchlistHandler
+	if c.WatchlistSvc != nil {
+		watchlistHandler = httpserver.NewWatchlistHandler(c.WatchlistSvc, c.AnalysisSvc)
+	}
+	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc)
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
@@ -1159,6 +1201,8 @@ func (c *Container) initHTTPServer() error {
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,
+		watchlistHandler,
+		realtimeWSHandler,
 		c.JWTManager,
 		c.Enforcer,
 		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库
@@ -1194,6 +1238,13 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	// Shutdown Task Engine
 	if c.TaskEngine != nil {
 		c.TaskEngine.Stop()
+	}
+
+	// Shutdown WriteQueue to flush pending writes
+	if c.QuantDBWriteQueue != nil {
+		if err := c.QuantDBWriteQueue.Close(); err != nil {
+			logrus.Errorf("Error closing QuantDBWriteQueue: %v", err)
+		}
 	}
 
 	// Close QuantDB adapter

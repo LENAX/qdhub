@@ -82,3 +82,15 @@ func (f *WorkflowFactory) BatchDataSync() *BatchDataSyncWorkflowBuilder {
 func (f *WorkflowFactory) RealtimeDataSync() *RealtimeDataSyncWorkflowBuilder {
 	return NewRealtimeDataSyncWorkflowBuilder(f.registry)
 }
+
+// CreateNewsRealtimeSyncWorkflow 创建新闻实时同步工作流
+func (f *WorkflowFactory) CreateNewsRealtimeSyncWorkflow(params NewsRealtimeSyncParams) (*workflow.Workflow, error) {
+	return NewNewsRealtimeSyncWorkflowBuilder(f.registry).
+		WithParams(params).
+		Build()
+}
+
+// NewsRealtimeSync 返回新闻实时同步工作流构建器
+func (f *WorkflowFactory) NewsRealtimeSync() *NewsRealtimeSyncWorkflowBuilder {
+	return NewNewsRealtimeSyncWorkflowBuilder(f.registry)
+}

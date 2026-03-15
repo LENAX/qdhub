@@ -3,6 +3,7 @@ package sync
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"qdhub/internal/domain/shared"
@@ -16,7 +17,7 @@ type SyncExecution struct {
 	ID             shared.ID         `json:"id"`
 	SyncPlanID     shared.ID         `json:"sync_plan_id"`
 	WorkflowInstID shared.ID         `json:"workflow_instance_id,omitempty"`
-	Status         ExecStatus       `json:"status"`
+	Status         ExecStatus        `json:"status"`
 	StartedAt      shared.Timestamp  `json:"started_at"`
 	FinishedAt     *shared.Timestamp `json:"finished_at,omitempty"`
 	RecordCount    int64             `json:"record_count"`
@@ -212,11 +213,11 @@ func (eg *ExecutionGraph) UnmarshalJSON(data []byte) error {
 //   - 维护 SyncExecution 集合（执行记录）
 //   - 存储解析后的执行图
 type SyncPlan struct {
-	ID           shared.ID  `json:"id"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
-	DataSourceID shared.ID  `json:"data_source_id"`
-	DataStoreID  shared.ID  `json:"data_store_id"`
+	ID           shared.ID `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	DataSourceID shared.ID `json:"data_source_id"`
+	DataStoreID  shared.ID `json:"data_store_id"`
 
 	// PlanMode 控制同步模式：
 	//   - batch: 现有批量同步（默认）
@@ -227,7 +228,7 @@ type SyncPlan struct {
 	SelectedAPIs []string `json:"selected_apis,omitempty"`
 
 	// 解析结果
-	ResolvedAPIs   []string         `json:"resolved_apis,omitempty"`
+	ResolvedAPIs   []string        `json:"resolved_apis,omitempty"`
 	ExecutionGraph *ExecutionGraph `json:"execution_graph,omitempty"`
 
 	// 调度配置
@@ -236,6 +237,9 @@ type SyncPlan struct {
 	// 去掉 omitempty，便于前端在 /sync-plans 与 /sync-plans/:id 中始终看到字段（未配置时为 null）。
 	ScheduleStartCron *string `json:"schedule_start_cron"` // 如 "0 0 9 * * 1-5" 工作日 9:00 启动
 	ScheduleEndCron   *string `json:"schedule_end_cron"`   // 如 "0 30 15 * * 1-5" 工作日 15:30 停止
+	// 午休/暂停窗口（可选）：在此时段内视为不在运行窗口，自动停止
+	SchedulePauseStartCron *string `json:"schedule_pause_start_cron"` // 如 "0 30 11 * * 1-5" 11:30 进入暂停
+	SchedulePauseEndCron   *string `json:"schedule_pause_end_cron"`   // 如 "0 0 13 * * 1-5" 13:00 结束暂停
 	// Pull 模式拉取间隔（秒），0 表示使用默认 60；仅 realtime 模式生效
 	PullIntervalSeconds int `json:"pull_interval_seconds,omitempty"`
 
@@ -250,9 +254,9 @@ type SyncPlan struct {
 	IncrementalStartDateColumn *string `json:"incremental_start_date_column,omitempty"`
 
 	// 状态
-	Status         PlanStatus  `json:"status"`
-	LastExecutedAt *time.Time  `json:"last_run_at,omitempty"`
-	NextExecuteAt  *time.Time  `json:"next_run_at,omitempty"`
+	Status         PlanStatus `json:"status"`
+	LastExecutedAt *time.Time `json:"last_run_at,omitempty"`
+	NextExecuteAt  *time.Time `json:"next_run_at,omitempty"`
 
 	// LastExecutionStatus 最近一次执行状态，仅用于列表等接口展示，不持久化
 	LastExecutionStatus *ExecStatus `json:"last_execution_status,omitempty"`
@@ -313,6 +317,21 @@ func (sp *SyncPlan) SetScheduleWindow(startCron, endCron string) {
 		sp.ScheduleEndCron = nil
 	} else {
 		sp.ScheduleEndCron = &endCron
+	}
+	sp.UpdatedAt = shared.Now()
+}
+
+// SetSchedulePauseWindow sets the pause window (e.g. lunch 11:30-13:00); when both set, running is stopped in this window.
+func (sp *SyncPlan) SetSchedulePauseWindow(pauseStartCron, pauseEndCron string) {
+	if pauseStartCron == "" {
+		sp.SchedulePauseStartCron = nil
+	} else {
+		sp.SchedulePauseStartCron = &pauseStartCron
+	}
+	if pauseEndCron == "" {
+		sp.SchedulePauseEndCron = nil
+	} else {
+		sp.SchedulePauseEndCron = &pauseEndCron
 	}
 	sp.UpdatedAt = shared.Now()
 }
@@ -503,10 +522,10 @@ func (sp *SyncPlan) UnmarshalDefaultExecuteParamsJSON(jsonStr string) error {
 // SyncTask 单个 API 的同步配置（聚合内实体）
 // 替代原 SyncJob 的参数配置部分
 type SyncTask struct {
-	ID         shared.ID     `json:"id"`
-	SyncPlanID shared.ID     `json:"sync_plan_id"`
-	APIName    string        `json:"api_name"`
-	SyncMode   TaskSyncMode  `json:"sync_mode"`
+	ID         shared.ID    `json:"id"`
+	SyncPlanID shared.ID    `json:"sync_plan_id"`
+	APIName    string       `json:"api_name"`
+	SyncMode   TaskSyncMode `json:"sync_mode"`
 
 	// 参数配置
 	Params        map[string]interface{} `json:"params,omitempty"`
@@ -521,7 +540,7 @@ type SyncTask struct {
 
 	// 同步频率控制
 	SyncFrequency time.Duration `json:"sync_frequency,omitempty"`
-	LastSyncedAt  *time.Time   `json:"last_synced_at,omitempty"`
+	LastSyncedAt  *time.Time    `json:"last_synced_at,omitempty"`
 
 	CreatedAt shared.Timestamp `json:"created_at"`
 }
@@ -684,13 +703,15 @@ func (ps PlanStatus) String() string {
 }
 
 // PlanMode represents sync plan execution mode.
-// batch    - 现有批量同步模式，通过 BatchDataSync 工作流按时间/代码维度拉取历史数据。
-// realtime - 新增实时同步模式，通过流式工作流与 RealtimeAdapter 获取实时行情。
+// batch         - 现有批量同步模式，通过 BatchDataSync 工作流按时间/代码维度拉取历史数据。
+// realtime      - 新增实时同步模式，通过流式工作流与 RealtimeAdapter 获取实时行情。
+// news_realtime - 新闻实时同步，通过 builtin:news_realtime_sync 按 news_sync_checkpoint 增量拉取新闻快讯。
 type PlanMode string
 
 const (
-	PlanModeBatch    PlanMode = "batch"
-	PlanModeRealtime PlanMode = "realtime"
+	PlanModeBatch        PlanMode = "batch"
+	PlanModeRealtime     PlanMode = "realtime"
+	PlanModeNewsRealtime PlanMode = "news_realtime"
 )
 
 // String returns the string representation of the plan mode.
@@ -700,7 +721,7 @@ func (pm PlanMode) String() string {
 
 // IsValid returns whether the plan mode is valid.
 func (pm PlanMode) IsValid() bool {
-	return pm == PlanModeBatch || pm == PlanModeRealtime
+	return pm == PlanModeBatch || pm == PlanModeRealtime || pm == PlanModeNewsRealtime
 }
 
 // RealtimeAllowedAPIs 白名单：仅这些 API 支持在 PlanModeRealtime 下运行。
@@ -722,6 +743,18 @@ func IsRealtimeAPI(apiName string) bool {
 		}
 	}
 	return false
+}
+
+// ValidateRealtimePlanAPIs 约束：实时计划仅能绑定一个实时 API，不能多个实时 API，也不能混入批量/历史 API。
+// 若 selected 长度不为 1 或唯一元素不在白名单内，返回错误描述。
+func ValidateRealtimePlanAPIs(selected []string) error {
+	if len(selected) != 1 {
+		return fmt.Errorf("realtime plan must bind exactly one realtime API, got %d", len(selected))
+	}
+	if !IsRealtimeAPI(selected[0]) {
+		return fmt.Errorf("realtime plan only allows APIs: %v, got: %s", RealtimeAllowedAPIs, selected[0])
+	}
+	return nil
 }
 
 // ExecStatus represents execution status.

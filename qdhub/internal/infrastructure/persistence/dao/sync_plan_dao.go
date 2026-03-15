@@ -27,11 +27,11 @@ func NewSyncPlanDAO(db *sqlx.DB) *SyncPlanDAO {
 // Create inserts a new sync plan record.
 func (d *SyncPlanDAO) Create(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 	query := `INSERT INTO sync_plan (id, name, description, data_source_id, data_store_id,
-		plan_mode, selected_apis, resolved_apis, execution_graph, cron_expression, schedule_start_cron, schedule_end_cron, pull_interval_seconds, default_execute_params,
+		plan_mode, selected_apis, resolved_apis, execution_graph, cron_expression, schedule_start_cron, schedule_end_cron, schedule_pause_start_cron, schedule_pause_end_cron, pull_interval_seconds, default_execute_params,
 		incremental_mode, last_successful_end_date, incremental_start_date_api, incremental_start_date_column,
 		status, last_executed_at, next_execute_at, created_at, updated_at)
 		VALUES (:id, :name, :description, :data_source_id, :data_store_id,
-		:plan_mode, :selected_apis, :resolved_apis, :execution_graph, :cron_expression, :schedule_start_cron, :schedule_end_cron, :pull_interval_seconds, :default_execute_params,
+		:plan_mode, :selected_apis, :resolved_apis, :execution_graph, :cron_expression, :schedule_start_cron, :schedule_end_cron, :schedule_pause_start_cron, :schedule_pause_end_cron, :pull_interval_seconds, :default_execute_params,
 		:incremental_mode, :last_successful_end_date, :incremental_start_date_api, :incremental_start_date_column,
 		:status, :last_executed_at, :next_execute_at, :created_at, :updated_at)`
 
@@ -70,7 +70,9 @@ func (d *SyncPlanDAO) Update(tx *sqlx.Tx, entity *sync.SyncPlan) error {
 		name = :name, description = :description, data_store_id = :data_store_id,
 		plan_mode = :plan_mode, selected_apis = :selected_apis, resolved_apis = :resolved_apis,
 		execution_graph = :execution_graph, cron_expression = :cron_expression,
-		schedule_start_cron = :schedule_start_cron, schedule_end_cron = :schedule_end_cron, pull_interval_seconds = :pull_interval_seconds,
+		schedule_start_cron = :schedule_start_cron, schedule_end_cron = :schedule_end_cron,
+		schedule_pause_start_cron = :schedule_pause_start_cron, schedule_pause_end_cron = :schedule_pause_end_cron,
+		pull_interval_seconds = :pull_interval_seconds,
 		default_execute_params = :default_execute_params,
 		incremental_mode = :incremental_mode, last_successful_end_date = :last_successful_end_date,
 		incremental_start_date_api = :incremental_start_date_api, incremental_start_date_column = :incremental_start_date_column,
@@ -250,9 +252,9 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 		DataSourceID:         entity.DataSourceID.String(),
 		PlanMode:             entity.Mode.String(),
 		SelectedAPIs:         selectedAPIs,
-		ResolvedAPIs:         resolvedAPIs,
-		ExecutionGraph:       executionGraph,
-		DefaultExecuteParams: defaultExecuteParams,
+		ResolvedAPIs:         sql.NullString{String: resolvedAPIs, Valid: resolvedAPIs != ""},
+		ExecutionGraph:       sql.NullString{String: executionGraph, Valid: executionGraph != ""},
+		DefaultExecuteParams: sql.NullString{String: defaultExecuteParams, Valid: defaultExecuteParams != ""},
 		IncrementalMode:      entity.IncrementalMode,
 		Status:               entity.Status.String(),
 		CreatedAt:            entity.CreatedAt.ToTime(),
@@ -289,6 +291,12 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	}
 	if entity.ScheduleEndCron != nil {
 		row.ScheduleEndCron = sql.NullString{String: *entity.ScheduleEndCron, Valid: true}
+	}
+	if entity.SchedulePauseStartCron != nil {
+		row.SchedulePauseStartCron = sql.NullString{String: *entity.SchedulePauseStartCron, Valid: true}
+	}
+	if entity.SchedulePauseEndCron != nil {
+		row.SchedulePauseEndCron = sql.NullString{String: *entity.SchedulePauseEndCron, Valid: true}
 	}
 	row.PullIntervalSeconds = entity.PullIntervalSeconds
 
@@ -333,20 +341,20 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 		return nil, fmt.Errorf("failed to unmarshal selected apis: %w", err)
 	}
 
-	if row.ResolvedAPIs != "" {
-		if err := entity.UnmarshalResolvedAPIsJSON(row.ResolvedAPIs); err != nil {
+	if row.ResolvedAPIs.Valid && row.ResolvedAPIs.String != "" {
+		if err := entity.UnmarshalResolvedAPIsJSON(row.ResolvedAPIs.String); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal resolved apis: %w", err)
 		}
 	}
 
-	if row.ExecutionGraph != "" {
-		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph); err != nil {
+	if row.ExecutionGraph.Valid && row.ExecutionGraph.String != "" {
+		if err := entity.UnmarshalExecutionGraphJSON(row.ExecutionGraph.String); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal execution graph: %w", err)
 		}
 	}
 
-	if row.DefaultExecuteParams != "" {
-		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams); err != nil {
+	if row.DefaultExecuteParams.Valid && row.DefaultExecuteParams.String != "" {
+		if err := entity.UnmarshalDefaultExecuteParamsJSON(row.DefaultExecuteParams.String); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal default execute params: %w", err)
 		}
 	}
@@ -366,6 +374,12 @@ func (d *SyncPlanDAO) toEntity(row *SyncPlanRow) (*sync.SyncPlan, error) {
 	}
 	if row.ScheduleEndCron.Valid {
 		entity.ScheduleEndCron = &row.ScheduleEndCron.String
+	}
+	if row.SchedulePauseStartCron.Valid {
+		entity.SchedulePauseStartCron = &row.SchedulePauseStartCron.String
+	}
+	if row.SchedulePauseEndCron.Valid {
+		entity.SchedulePauseEndCron = &row.SchedulePauseEndCron.String
 	}
 	entity.PullIntervalSeconds = row.PullIntervalSeconds
 

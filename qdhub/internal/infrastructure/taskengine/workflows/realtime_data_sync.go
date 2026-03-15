@@ -13,16 +13,16 @@ import (
 // 时间范围（start_date/end_date 或表+日期列）仅用于「补充历史实时数据」的可选场景；
 // 不配置时视为仅同步最新数据（下游按“最新一日”处理）。
 type RealtimeDataSyncParams struct {
-	DataSourceName  string   // 数据源名称（必填）
-	Token           string   // API Token（必填）
-	TargetDBPath    string   // 目标数据库路径（必填）
-	APINames        []string // 需要同步的 API 列表（必填，不能为空）
-	MaxStocks       int      // 最大股票数量（用于限制子任务，0=不限制）
-	CronExpr        string   // Cron 表达式（可选，用于定时调度）
+	DataSourceName string   // 数据源名称（必填）
+	Token          string   // API Token（必填）
+	TargetDBPath   string   // 目标数据库路径（必填）
+	APINames       []string // 需要同步的 API 列表（必填，不能为空）
+	MaxStocks      int      // 最大股票数量（用于限制子任务，0=不限制）
+	CronExpr       string   // Cron 表达式（可选，用于定时调度）
 
 	// 时间范围（可选，仅用于补充历史）：不配置时不同步历史，仅拉最新
-	StartDate string // 可选，起始日（20060102）
-	EndDate   string // 可选，结束日；未传时由 FetchLatestTradingDate 提供
+	StartDate                  string // 可选，起始日（20060102）
+	EndDate                    string // 可选，结束日；未传时由 FetchLatestTradingDate 提供
 	IncrementalStartDateTable  string // 可选，用于 MAX(列) 的表名
 	IncrementalStartDateColumn string // 可选，日期列名（如 trade_date）
 }
@@ -159,10 +159,10 @@ func (b *RealtimeDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// 同步范围参数（表+列或 start/end）；空时使用占位符，执行时 ReplaceParams 替换
 	rangeParams := map[string]interface{}{
-		"start_date":                        params.StartDate,
-		"end_date":                          params.EndDate,
-		"incremental_start_date_table":      params.IncrementalStartDateTable,
-		"incremental_start_date_column":     params.IncrementalStartDateColumn,
+		"start_date":                    params.StartDate,
+		"end_date":                      params.EndDate,
+		"incremental_start_date_table":  params.IncrementalStartDateTable,
+		"incremental_start_date_column": params.IncrementalStartDateColumn,
 	}
 	if rangeParams["start_date"] == "" {
 		rangeParams["start_date"] = "${start_date}"
