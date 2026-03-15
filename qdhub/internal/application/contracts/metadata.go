@@ -165,11 +165,11 @@ type UpdateAPISyncStrategyRequest struct {
 
 // ListAPIMetadataRequest represents query params for listing API metadata (paginated, filter by id/name/category).
 type ListAPIMetadataRequest struct {
-	Page       int         // 1-based
-	PageSize   int         // default 20, max 100
-	ID         *shared.ID  // optional exact match
-	Name       string      // optional, name contains (LIKE %name%)
-	CategoryID *shared.ID  // optional, filter by API category
+	Page       int        // 1-based
+	PageSize   int        // default 20, max 100
+	ID         *shared.ID // optional exact match
+	Name       string     // optional, name contains (LIKE %name%)
+	CategoryID *shared.ID // optional, filter by API category
 }
 
 // ListAPIMetadataResponse is the paginated response for ListAPIMetadata.

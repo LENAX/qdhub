@@ -246,19 +246,19 @@ func (d *SyncPlanDAO) toRow(entity *sync.SyncPlan) (*SyncPlanRow, error) {
 	}
 
 	row := &SyncPlanRow{
-		ID:             entity.ID.String(),
-		Name:           entity.Name,
-		Description:    entity.Description,
-		DataSourceID:   entity.DataSourceID.String(),
-		PlanMode:       entity.Mode.String(),
-		SelectedAPIs:   selectedAPIs,
-		ResolvedAPIs:   sql.NullString{String: resolvedAPIs, Valid: resolvedAPIs != ""},
-		ExecutionGraph: sql.NullString{String: executionGraph, Valid: executionGraph != ""},
+		ID:                   entity.ID.String(),
+		Name:                 entity.Name,
+		Description:          entity.Description,
+		DataSourceID:         entity.DataSourceID.String(),
+		PlanMode:             entity.Mode.String(),
+		SelectedAPIs:         selectedAPIs,
+		ResolvedAPIs:         sql.NullString{String: resolvedAPIs, Valid: resolvedAPIs != ""},
+		ExecutionGraph:       sql.NullString{String: executionGraph, Valid: executionGraph != ""},
 		DefaultExecuteParams: sql.NullString{String: defaultExecuteParams, Valid: defaultExecuteParams != ""},
-		IncrementalMode: entity.IncrementalMode,
-		Status:         entity.Status.String(),
-		CreatedAt:      entity.CreatedAt.ToTime(),
-		UpdatedAt:      entity.UpdatedAt.ToTime(),
+		IncrementalMode:      entity.IncrementalMode,
+		Status:               entity.Status.String(),
+		CreatedAt:            entity.CreatedAt.ToTime(),
+		UpdatedAt:            entity.UpdatedAt.ToTime(),
 	}
 	if entity.LastSuccessfulEndDate != nil {
 		row.LastSuccessfulEndDate = sql.NullString{String: *entity.LastSuccessfulEndDate, Valid: true}

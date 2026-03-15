@@ -19,8 +19,8 @@ type QualityAnalysisParams struct {
 // DimensionFilter 维度过滤条件
 type DimensionFilter struct {
 	ColumnName string `json:"column_name"` // 表列名
-	Start     string `json:"start"`       // 闭区间起点，如 "20250101"
-	End       string `json:"end"`         // 闭区间终点
+	Start      string `json:"start"`       // 闭区间起点，如 "20250101"
+	End        string `json:"end"`         // 闭区间终点
 }
 
 // ============ 有效区间 ============
@@ -28,10 +28,10 @@ type DimensionFilter struct {
 // EffectiveRangeRequest 有效区间分析请求
 type EffectiveRangeRequest struct {
 	QualityAnalysisParams
-	EndDate           string `json:"end_date,omitempty"`
-	RefTableName      string `json:"ref_table_name,omitempty"`
-	RefDateColumn     string `json:"ref_date_column,omitempty"`
-	RefDateColumnEnd  string `json:"ref_date_column_end,omitempty"` // 参考表结束日期列，如 delist_date（退市日）
+	EndDate          string `json:"end_date,omitempty"`
+	RefTableName     string `json:"ref_table_name,omitempty"`
+	RefDateColumn    string `json:"ref_date_column,omitempty"`
+	RefDateColumnEnd string `json:"ref_date_column_end,omitempty"` // 参考表结束日期列，如 delist_date（退市日）
 }
 
 // EffectiveRangeResult 有效区间分析结果
@@ -75,10 +75,10 @@ type MissingSampleItem struct {
 
 // MissingAnalysisResult 缺失分析结果
 type MissingAnalysisResult struct {
-	Summary        MissingSummary        `json:"summary"`
-	MissingDates   []string              `json:"missing_dates,omitempty"`
-	MissingByDate  []MissingByDateItem   `json:"missing_by_date,omitempty"`
-	MissingSamples []MissingSampleItem   `json:"missing_samples,omitempty"`
+	Summary        MissingSummary      `json:"summary"`
+	MissingDates   []string            `json:"missing_dates,omitempty"`
+	MissingByDate  []MissingByDateItem `json:"missing_by_date,omitempty"`
+	MissingSamples []MissingSampleItem `json:"missing_samples,omitempty"`
 }
 
 // ============ 重复分析 ============
@@ -97,10 +97,10 @@ type DuplicateDetail struct {
 
 // DuplicateAnalysisResult 重复分析结果
 type DuplicateAnalysisResult struct {
-	HasDuplicates   bool             `json:"has_duplicates"`
-	DuplicateCount int64            `json:"duplicate_count"`
-	DuplicateRate  float64          `json:"duplicate_rate"`
-	Details         []DuplicateDetail `json:"details,omitempty"`
+	HasDuplicates  bool              `json:"has_duplicates"`
+	DuplicateCount int64             `json:"duplicate_count"`
+	DuplicateRate  float64           `json:"duplicate_rate"`
+	Details        []DuplicateDetail `json:"details,omitempty"`
 }
 
 // ============ 异常值分析 ============
@@ -145,8 +145,8 @@ type QualityReportRequest struct {
 
 // QualityReport 综合质量报告
 type QualityReport struct {
-	DataStoreID shared.ID `json:"data_store_id"`
-	TableName   string    `json:"table_name"`
+	DataStoreID shared.ID        `json:"data_store_id"`
+	TableName   string           `json:"table_name"`
 	GeneratedAt shared.Timestamp `json:"generated_at"`
 
 	OverallScore      float64 `json:"overall_score"`
@@ -155,8 +155,8 @@ type QualityReport struct {
 	TimelinessScore   float64 `json:"timeliness_score"`
 	ValidityScore     float64 `json:"validity_score"`
 
-	EffectiveRange *EffectiveRangeResult   `json:"effective_range"`
-	Missing        *MissingAnalysisResult  `json:"missing"`
+	EffectiveRange *EffectiveRangeResult    `json:"effective_range"`
+	Missing        *MissingAnalysisResult   `json:"missing"`
 	Duplicates     *DuplicateAnalysisResult `json:"duplicates"`
 	Anomalies      *AnomalyAnalysisResult   `json:"anomalies"`
 
@@ -185,7 +185,7 @@ const (
 
 // FixAction 修复动作
 type FixAction struct {
-	Type   string         `json:"type"`   // "create_sync_plan" | "execute_sql"
+	Type   string         `json:"type"` // "create_sync_plan" | "execute_sql"
 	Params map[string]any `json:"params"`
 }
 
@@ -203,10 +203,10 @@ type FixSuggestion struct {
 
 // ApplyFixRequest 修复执行请求
 type ApplyFixRequest struct {
-	DataStoreID  shared.ID `json:"data_store_id"`
-	TableName    string    `json:"table_name"`
-	SuggestionID string    `json:"suggestion_id"`
-	FixType      FixType   `json:"fix_type"`
+	DataStoreID  shared.ID      `json:"data_store_id"`
+	TableName    string         `json:"table_name"`
+	SuggestionID string         `json:"suggestion_id"`
+	FixType      FixType        `json:"fix_type"`
 	Params       map[string]any `json:"params"`
 }
 
@@ -214,11 +214,11 @@ type ApplyFixRequest struct {
 
 // SingleDimensionStatsRequest 单维度统计请求
 type SingleDimensionStatsRequest struct {
-	DataStoreID shared.ID         `json:"data_store_id"`
-	TableName   string            `json:"table_name"`
-	Dimension   string            `json:"dimension"`
-	Filter      *DimensionFilter  `json:"filter,omitempty"`
-	Limit       int               `json:"limit,omitempty"`
+	DataStoreID shared.ID        `json:"data_store_id"`
+	TableName   string           `json:"table_name"`
+	Dimension   string           `json:"dimension"`
+	Filter      *DimensionFilter `json:"filter,omitempty"`
+	Limit       int              `json:"limit,omitempty"`
 }
 
 // SingleDimensionStatsResult 单维度统计结果

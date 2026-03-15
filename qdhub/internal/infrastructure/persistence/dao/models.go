@@ -10,15 +10,15 @@ import (
 
 // DataSourceRow represents data_sources table row.
 type DataSourceRow struct {
-	ID               string    `db:"id"`
-	Name             string    `db:"name"`
-	Description      string    `db:"description"`
-	BaseURL          string    `db:"base_url"`
-	DocURL           string    `db:"doc_url"`
-	Status           string         `db:"status"`
-	CommonDataAPIs   sql.NullString `db:"common_data_apis"` // JSON array of API names, NULL when empty
-	CreatedAt        time.Time      `db:"created_at"`
-	UpdatedAt        time.Time `db:"updated_at"`
+	ID             string         `db:"id"`
+	Name           string         `db:"name"`
+	Description    string         `db:"description"`
+	BaseURL        string         `db:"base_url"`
+	DocURL         string         `db:"doc_url"`
+	Status         string         `db:"status"`
+	CommonDataAPIs sql.NullString `db:"common_data_apis"` // JSON array of API names, NULL when empty
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
 }
 
 // APICategoryRow represents api_categories table row.
@@ -109,64 +109,64 @@ type DataTypeMappingRuleRow struct {
 
 // APISyncStrategyRow represents api_sync_strategies table row.
 type APISyncStrategyRow struct {
-	ID                        string         `db:"id"`
-	DataSourceID              string         `db:"data_source_id"`
-	APIName                   string         `db:"api_name"`
-	PreferredParam            string         `db:"preferred_param"`
-	SupportDateRange          int            `db:"support_date_range"` // 0: false, 1: true
-	RequiredParams            sql.NullString `db:"required_params"`   // JSON array
-	Dependencies              sql.NullString `db:"dependencies"`      // JSON array
-	FixedParams               sql.NullString `db:"fixed_params"`      // JSON object
-	FixedParamKeys            sql.NullString `db:"fixed_param_keys"`   // JSON array
-	RealtimeTsCodeChunkSize   int            `db:"realtime_ts_code_chunk_size"`
-	RealtimeTsCodeFormat      string         `db:"realtime_ts_code_format"`
-	IterateParams             sql.NullString `db:"iterate_params"` // JSON object map[string][]string
-	Description               sql.NullString `db:"description"`
-	CreatedAt                 time.Time     `db:"created_at"`
-	UpdatedAt                 time.Time     `db:"updated_at"`
+	ID                      string         `db:"id"`
+	DataSourceID            string         `db:"data_source_id"`
+	APIName                 string         `db:"api_name"`
+	PreferredParam          string         `db:"preferred_param"`
+	SupportDateRange        int            `db:"support_date_range"` // 0: false, 1: true
+	RequiredParams          sql.NullString `db:"required_params"`    // JSON array
+	Dependencies            sql.NullString `db:"dependencies"`       // JSON array
+	FixedParams             sql.NullString `db:"fixed_params"`       // JSON object
+	FixedParamKeys          sql.NullString `db:"fixed_param_keys"`   // JSON array
+	RealtimeTsCodeChunkSize int            `db:"realtime_ts_code_chunk_size"`
+	RealtimeTsCodeFormat    string         `db:"realtime_ts_code_format"`
+	IterateParams           sql.NullString `db:"iterate_params"` // JSON object map[string][]string
+	Description             sql.NullString `db:"description"`
+	CreatedAt               time.Time      `db:"created_at"`
+	UpdatedAt               time.Time      `db:"updated_at"`
 }
 
 // ==================== Sync Domain Models ====================
 
 // SyncExecutionRow represents sync_execution table row.
 type SyncExecutionRow struct {
-	ID             string         `db:"id"`
-	SyncPlanID     string         `db:"sync_plan_id"`
-	WorkflowInstID string         `db:"workflow_inst_id"`
-	Status         string         `db:"status"`
-	StartedAt      time.Time      `db:"started_at"`
-	FinishedAt     sql.NullTime   `db:"finished_at"`
-	RecordCount           int64          `db:"record_count"`
-	ErrorMessage          sql.NullString `db:"error_message"`
-	WorkflowErrorMessage  sql.NullString `db:"workflow_error_message"`
-	ExecuteParams         string         `db:"execute_params"`
-	SyncedAPIs     string         `db:"synced_apis"`
-	SkippedAPIs    string         `db:"skipped_apis"`
+	ID                   string         `db:"id"`
+	SyncPlanID           string         `db:"sync_plan_id"`
+	WorkflowInstID       string         `db:"workflow_inst_id"`
+	Status               string         `db:"status"`
+	StartedAt            time.Time      `db:"started_at"`
+	FinishedAt           sql.NullTime   `db:"finished_at"`
+	RecordCount          int64          `db:"record_count"`
+	ErrorMessage         sql.NullString `db:"error_message"`
+	WorkflowErrorMessage sql.NullString `db:"workflow_error_message"`
+	ExecuteParams        string         `db:"execute_params"`
+	SyncedAPIs           string         `db:"synced_apis"`
+	SkippedAPIs          string         `db:"skipped_apis"`
 }
 
 // SyncPlanRow represents sync_plan table row.
 type SyncPlanRow struct {
-	ID                   string         `db:"id"`
-	Name                 string         `db:"name"`
-	Description          string         `db:"description"`
-	DataSourceID         string         `db:"data_source_id"`
-	DataStoreID          sql.NullString `db:"data_store_id"`
-	PlanMode             string         `db:"plan_mode"`
-	SelectedAPIs         string         `db:"selected_apis"`
-	ResolvedAPIs         sql.NullString `db:"resolved_apis"`
-	ExecutionGraph       sql.NullString `db:"execution_graph"`
-	CronExpression       sql.NullString `db:"cron_expression"`
-	ScheduleStartCron       sql.NullString `db:"schedule_start_cron"`
-	ScheduleEndCron         sql.NullString `db:"schedule_end_cron"`
-	SchedulePauseStartCron  sql.NullString `db:"schedule_pause_start_cron"`
-	SchedulePauseEndCron    sql.NullString `db:"schedule_pause_end_cron"`
-	PullIntervalSeconds    int            `db:"pull_interval_seconds"`
-	DefaultExecuteParams sql.NullString `db:"default_execute_params"` // JSON: ExecuteParams
-	IncrementalMode                bool           `db:"incremental_mode"`
-	LastSuccessfulEndDate          sql.NullString `db:"last_successful_end_date"`
-	IncrementalStartDateAPI        sql.NullString `db:"incremental_start_date_api"`
-	IncrementalStartDateColumn     sql.NullString `db:"incremental_start_date_column"`
-	Status                         string         `db:"status"`
+	ID                         string         `db:"id"`
+	Name                       string         `db:"name"`
+	Description                string         `db:"description"`
+	DataSourceID               string         `db:"data_source_id"`
+	DataStoreID                sql.NullString `db:"data_store_id"`
+	PlanMode                   string         `db:"plan_mode"`
+	SelectedAPIs               string         `db:"selected_apis"`
+	ResolvedAPIs               sql.NullString `db:"resolved_apis"`
+	ExecutionGraph             sql.NullString `db:"execution_graph"`
+	CronExpression             sql.NullString `db:"cron_expression"`
+	ScheduleStartCron          sql.NullString `db:"schedule_start_cron"`
+	ScheduleEndCron            sql.NullString `db:"schedule_end_cron"`
+	SchedulePauseStartCron     sql.NullString `db:"schedule_pause_start_cron"`
+	SchedulePauseEndCron       sql.NullString `db:"schedule_pause_end_cron"`
+	PullIntervalSeconds        int            `db:"pull_interval_seconds"`
+	DefaultExecuteParams       sql.NullString `db:"default_execute_params"` // JSON: ExecuteParams
+	IncrementalMode            bool           `db:"incremental_mode"`
+	LastSuccessfulEndDate      sql.NullString `db:"last_successful_end_date"`
+	IncrementalStartDateAPI    sql.NullString `db:"incremental_start_date_api"`
+	IncrementalStartDateColumn sql.NullString `db:"incremental_start_date_column"`
+	Status                     string         `db:"status"`
 	LastExecutedAt             sql.NullTime   `db:"last_executed_at"`
 	NextExecuteAt              sql.NullTime   `db:"next_execute_at"`
 	CreatedAt                  time.Time      `db:"created_at"`

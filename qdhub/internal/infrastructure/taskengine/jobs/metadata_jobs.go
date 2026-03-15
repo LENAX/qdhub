@@ -275,11 +275,11 @@ func ParseCatalogJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"categories":        categoryMaps,
-		"api_urls":          apiURLs,
-		"api_category_ids":  apiCategoryIDStrs,
-		"api_count":         len(apiURLs),
-		"data_source_id":    dataSourceID,
+		"categories":       categoryMaps,
+		"api_urls":         apiURLs,
+		"api_category_ids": apiCategoryIDStrs,
+		"api_count":        len(apiURLs),
+		"data_source_id":   dataSourceID,
 	}, nil
 }
 

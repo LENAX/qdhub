@@ -25,10 +25,10 @@ func NewWatchlistRepository(db *persistence.DB) *WatchlistRepositoryImpl {
 func (r *WatchlistRepositoryImpl) GetByUserID(ctx context.Context, userID shared.ID) ([]watchlist.WatchlistEntry, error) {
 	query := `SELECT user_id, ts_code, sort_order, created_at FROM user_stock_watchlist WHERE user_id = ? ORDER BY sort_order ASC, created_at ASC`
 	var rows []struct {
-		UserID    string         `db:"user_id"`
-		TsCode    string         `db:"ts_code"`
-		SortOrder int            `db:"sort_order"`
-		CreatedAt sql.NullTime   `db:"created_at"`
+		UserID    string       `db:"user_id"`
+		TsCode    string       `db:"ts_code"`
+		SortOrder int          `db:"sort_order"`
+		CreatedAt sql.NullTime `db:"created_at"`
 	}
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, userID.String()); err != nil {
 		return nil, err

@@ -102,15 +102,15 @@ func (f *fallbackProviderImpl) FetchDaily(ctx context.Context, tsCode, startDate
 func mapToRawDailyRow(m map[string]interface{}) analysis.RawDailyRow {
 	return analysis.RawDailyRow{
 		TradeDate: strVal(m, "trade_date"),
-		Open:     floatVal(m, "open"),
-		High:     floatVal(m, "high"),
-		Low:      floatVal(m, "low"),
-		Close:    floatVal(m, "close"),
-		Vol:      floatVal(m, "vol"),
-		Amount:   floatVal(m, "amount"),
-		PreClose: floatVal(m, "pre_close"),
-		Change:   floatVal(m, "change"),
-		PctChg:   floatVal(m, "pct_chg"),
+		Open:      floatVal(m, "open"),
+		High:      floatVal(m, "high"),
+		Low:       floatVal(m, "low"),
+		Close:     floatVal(m, "close"),
+		Vol:       floatVal(m, "vol"),
+		Amount:    floatVal(m, "amount"),
+		PreClose:  floatVal(m, "pre_close"),
+		Change:    floatVal(m, "change"),
+		PctChg:    floatVal(m, "pct_chg"),
 		AdjFactor: 1.0, // 兜底数据暂不复权，由上层按 none 处理或后续再查 adj_factor
 	}
 }

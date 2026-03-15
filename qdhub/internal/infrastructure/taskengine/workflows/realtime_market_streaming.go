@@ -19,14 +19,14 @@ import (
 // - TsCodes / IndexCodes：从 stock_basic / index_basic 解析出的 ts_code 列表，供策略分片用；
 // - PullIntervalSecs：Pull 模式下的轮询间隔（秒）。
 type RealtimeMarketStreamingParams struct {
-	DataSourceID      shared.ID
-	DataSourceName    string
-	Token             string
-	TargetDBPath      string
-	APINames          []string
-	TsCodes           []string
-	IndexCodes        []string
-	PullIntervalSecs  int
+	DataSourceID     shared.ID
+	DataSourceName   string
+	Token            string
+	TargetDBPath     string
+	APINames         []string
+	TsCodes          []string
+	IndexCodes       []string
+	PullIntervalSecs int
 }
 
 // RealtimeMarketStreamingBuilder 基于 Task Engine Streaming 能力构建实时行情 Workflow：
@@ -96,9 +96,9 @@ func (b *RealtimeMarketStreamingBuilder) Build() (*workflow.Workflow, error) {
 		WithContinuousMode().
 		WithTaskType(taskrealtime.TaskTypeStreamProcessor).
 		WithJobFunction("RealtimeQuoteStreamHandler", map[string]interface{}{
-			"target_db_path":  b.params.TargetDBPath,
+			"target_db_path":   b.params.TargetDBPath,
 			"data_source_name": b.params.DataSourceName,
-			"api_name":        apiName,
+			"api_name":         apiName,
 		}).
 		Build()
 	if err != nil {
@@ -140,4 +140,3 @@ func (b *RealtimeMarketStreamingBuilder) effectivePullInterval() int {
 	}
 	return secs
 }
-

@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/gin-contrib/authz"
 	"github.com/casbin/casbin/v2"
+	"github.com/gin-contrib/authz"
+	"github.com/gin-gonic/gin"
 
 	authinfra "qdhub/internal/infrastructure/auth"
 )

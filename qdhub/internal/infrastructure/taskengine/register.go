@@ -31,6 +31,8 @@ type Dependencies struct {
 	QuantDB datastore.QuantDB
 	// QuantDBFactory creates QuantDB by path; sync/table jobs use this with target_db_path from data store.
 	QuantDBFactory datastore.QuantDBFactory
+	// QuantDBWriteQueue is the queue for batching writes to DuckDB.
+	QuantDBWriteQueue datastore.QuantDBWriteQueue
 	// SyncCallbackInvoker 可选；DataSyncCompleteHandler 用于触发 execution 回调（Plan.MarkCompleted）。
 	// 需实现 HandleExecutionCallbackByWorkflowInstance(ctx, workflowInstID, success, recordCount, errMsg).
 	SyncCallbackInvoker interface{}
@@ -199,6 +201,10 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 	// Register QuantDBFactory (sync/table jobs use this with target_db_path from data store)
 	if deps.QuantDBFactory != nil {
 		registry.RegisterDependencyWithKey("QuantDBFactory", deps.QuantDBFactory)
+	}
+	// Register QuantDBWriteQueue (batch/realtime write jobs use this for write serialization)
+	if deps.QuantDBWriteQueue != nil {
+		registry.RegisterDependencyWithKey("QuantDBWriteQueue", deps.QuantDBWriteQueue)
 	}
 
 	// Register SyncCallbackInvoker (optional; for DataSyncCompleteHandler → execution callback)

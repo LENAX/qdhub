@@ -13,7 +13,7 @@ import (
 // WatchlistHandler 用户股票收藏 HTTP 处理
 type WatchlistHandler struct {
 	watchlistSvc contracts.WatchlistApplicationService
-	analysisSvc   contracts.AnalysisApplicationService // 可选，用于 GET 时填充 name
+	analysisSvc  contracts.AnalysisApplicationService // 可选，用于 GET 时填充 name
 }
 
 // NewWatchlistHandler 创建 WatchlistHandler

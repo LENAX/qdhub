@@ -17,10 +17,10 @@ import (
 )
 
 var tushareWSDialer = &websocket.Dialer{
-	TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
-	HandshakeTimeout: 15 * time.Second,
-	ReadBufferSize:   1024 * 1024,
-	WriteBufferSize:  64 * 1024,
+	TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+	HandshakeTimeout:  15 * time.Second,
+	ReadBufferSize:    1024 * 1024,
+	WriteBufferSize:   64 * 1024,
 	EnableCompression: true,
 }
 

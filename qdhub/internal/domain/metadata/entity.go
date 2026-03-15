@@ -29,9 +29,9 @@ type DataSource struct {
 	CommonDataAPIs []string `json:"common_data_apis,omitempty"`
 
 	// Aggregated entities (lazy loaded)
-	Categories []APICategory  `json:"categories,omitempty"`
-	APIs       []APIMetadata  `json:"apis,omitempty"`
-	Token      *Token         `json:"token,omitempty"`
+	Categories []APICategory `json:"categories,omitempty"`
+	APIs       []APIMetadata `json:"apis,omitempty"`
+	Token      *Token        `json:"token,omitempty"`
 }
 
 // NewDataSource creates a new DataSource aggregate.
@@ -129,20 +129,20 @@ func NewAPICategory(dataSourceID shared.ID, name, description, docPath string, p
 // APIMetadata represents an API metadata entity.
 // Belongs to: DataSource aggregate
 type APIMetadata struct {
-	ID                shared.ID        `json:"id"`
-	DataSourceID      shared.ID        `json:"data_source_id"`
-	CategoryID        *shared.ID      `json:"category_id,omitempty"`
-	Name              string           `json:"name"`
-	DisplayName       string           `json:"display_name"`
-	Description       string           `json:"description"`
-	Endpoint          string           `json:"endpoint"`
-	RequestParams     []ParamMeta      `json:"request_params,omitempty"`
-	ResponseFields    []FieldMeta      `json:"response_fields,omitempty"`
-	RateLimit         *RateLimit       `json:"rate_limit,omitempty"`
-	Permission        string           `json:"permission"`
-	Status            shared.Status    `json:"status"`
-	CreatedAt         shared.Timestamp `json:"created_at"`
-	UpdatedAt         shared.Timestamp `json:"updated_at"`
+	ID                shared.ID         `json:"id"`
+	DataSourceID      shared.ID         `json:"data_source_id"`
+	CategoryID        *shared.ID        `json:"category_id,omitempty"`
+	Name              string            `json:"name"`
+	DisplayName       string            `json:"display_name"`
+	Description       string            `json:"description"`
+	Endpoint          string            `json:"endpoint"`
+	RequestParams     []ParamMeta       `json:"request_params,omitempty"`
+	ResponseFields    []FieldMeta       `json:"response_fields,omitempty"`
+	RateLimit         *RateLimit        `json:"rate_limit,omitempty"`
+	Permission        string            `json:"permission"`
+	Status            shared.Status     `json:"status"`
+	CreatedAt         shared.Timestamp  `json:"created_at"`
+	UpdatedAt         shared.Timestamp  `json:"updated_at"`
 	ParamDependencies []ParamDependency `json:"param_dependencies,omitempty"` // 参数依赖规则（用于自动解析 API 依赖）
 }
 
@@ -356,26 +356,26 @@ const (
 // 定义每个 API 的同步方式，用于工作流构建
 // Belongs to: DataSource aggregate (通过 data_source_id + api_name 关联)
 type APISyncStrategy struct {
-	ID               shared.ID             `json:"id"`
-	DataSourceID     shared.ID             `json:"data_source_id"`
-	APIName          string                `json:"api_name"`
-	PreferredParam   SyncParamType         `json:"preferred_param"`
-	SupportDateRange bool                  `json:"support_date_range"`
-	RequiredParams   []string              `json:"required_params,omitempty"`
-	Dependencies     []string              `json:"dependencies,omitempty"`
+	ID               shared.ID     `json:"id"`
+	DataSourceID     shared.ID     `json:"data_source_id"`
+	APIName          string        `json:"api_name"`
+	PreferredParam   SyncParamType `json:"preferred_param"`
+	SupportDateRange bool          `json:"support_date_range"`
+	RequiredParams   []string      `json:"required_params,omitempty"`
+	Dependencies     []string      `json:"dependencies,omitempty"`
 	// FixedParams 为该 API 请求固定追加的参数（例如 fields），通常由管理员在策略里配置。
-	FixedParams      map[string]any        `json:"fixed_params,omitempty"`
+	FixedParams map[string]any `json:"fixed_params,omitempty"`
 	// FixedParamKeys 中的 key 将始终以 FixedParams 为准，上游调用方即便传了同名参数也会被忽略。
-	FixedParamKeys   []string              `json:"fixed_param_keys,omitempty"`
+	FixedParamKeys []string `json:"fixed_param_keys,omitempty"`
 	// 实时同步专用：ts_code 分片大小（0 表示非实时或不分片）
 	RealtimeTsCodeChunkSize int `json:"realtime_ts_code_chunk_size,omitempty"`
 	// 实时同步专用：comma_separated / single
 	RealtimeTsCodeFormat string `json:"realtime_ts_code_format,omitempty"`
 	// 需要迭代的参数及值列表（如 src: ["sina"]），存 DB 为 JSON
-	IterateParams    map[string][]string   `json:"iterate_params,omitempty"`
-	Description      string                `json:"description"`
-	CreatedAt        shared.Timestamp      `json:"created_at"`
-	UpdatedAt        shared.Timestamp      `json:"updated_at"`
+	IterateParams map[string][]string `json:"iterate_params,omitempty"`
+	Description   string              `json:"description"`
+	CreatedAt     shared.Timestamp    `json:"created_at"`
+	UpdatedAt     shared.Timestamp    `json:"updated_at"`
 }
 
 // NewAPISyncStrategy 创建新的 API 同步策略
@@ -469,4 +469,3 @@ const (
 func (dt DocumentType) String() string {
 	return string(dt)
 }
-

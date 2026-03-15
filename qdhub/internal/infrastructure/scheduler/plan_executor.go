@@ -88,9 +88,9 @@ func (e *ScheduledPlanExecutor) buildExecuteRequest(plan *sync.SyncPlan) *contra
 		return nil
 	}
 	return &contracts.ExecuteSyncPlanRequest{
-		StartDate:    p.StartDate,
-		EndDate:      p.EndDate,
-		StartTime:    p.StartTime,
-		EndTime:      p.EndTime,
+		StartDate: p.StartDate,
+		EndDate:   p.EndDate,
+		StartTime: p.StartTime,
+		EndTime:   p.EndTime,
 	}
 }

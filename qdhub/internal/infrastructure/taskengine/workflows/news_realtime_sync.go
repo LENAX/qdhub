@@ -112,8 +112,8 @@ func (b *NewsRealtimeSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
-		"token":             token,
-		"target_db_path":    targetDBPath,
+		"token":            token,
+		"target_db_path":   targetDBPath,
 	}
 
 	var tasks []*task.Task

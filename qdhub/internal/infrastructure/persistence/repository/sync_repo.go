@@ -354,16 +354,16 @@ func (r *SyncPlanRepositoryImpl) findByInternal(orderBy []shared.OrderBy, pagina
 // rowToEntity converts database row to domain entity.
 func (r *SyncPlanRepositoryImpl) rowToEntity(row *dao.SyncPlanRow) (*sync.SyncPlan, error) {
 	entity := &sync.SyncPlan{
-		ID:                   shared.ID(row.ID),
-		Name:                 row.Name,
-		Description:          row.Description,
-		DataSourceID:         shared.ID(row.DataSourceID),
-		Mode:                 sync.PlanMode(row.PlanMode),
-		Status:               sync.PlanStatus(row.Status),
-		PullIntervalSeconds:  row.PullIntervalSeconds,
-		IncrementalMode:      row.IncrementalMode,
-		CreatedAt:            shared.Timestamp(row.CreatedAt),
-		UpdatedAt:            shared.Timestamp(row.UpdatedAt),
+		ID:                  shared.ID(row.ID),
+		Name:                row.Name,
+		Description:         row.Description,
+		DataSourceID:        shared.ID(row.DataSourceID),
+		Mode:                sync.PlanMode(row.PlanMode),
+		Status:              sync.PlanStatus(row.Status),
+		PullIntervalSeconds: row.PullIntervalSeconds,
+		IncrementalMode:     row.IncrementalMode,
+		CreatedAt:           shared.Timestamp(row.CreatedAt),
+		UpdatedAt:           shared.Timestamp(row.UpdatedAt),
 	}
 	if entity.Mode == "" {
 		entity.Mode = sync.PlanModeBatch

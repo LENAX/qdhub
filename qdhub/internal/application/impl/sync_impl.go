@@ -668,15 +668,15 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			}
 		}
 		instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, workflow.RealtimeDataSyncRequest{
-			DataSourceName:     ds.Name,
-			Token:              token.TokenValue,
-			TargetDBPath:       eff.TargetDBPath,
-			APINames:           apiNames,
-			DataSourceID:       plan.DataSourceID,
-			TsCodes:            tsCodes,
-			IndexCodes:         indexCodes,
-			PullIntervalSecs:   pullSecs,
-			FixedParamsByAPI:   fixedParamsByAPI,
+			DataSourceName:   ds.Name,
+			Token:            token.TokenValue,
+			TargetDBPath:     eff.TargetDBPath,
+			APINames:         apiNames,
+			DataSourceID:     plan.DataSourceID,
+			TsCodes:          tsCodes,
+			IndexCodes:       indexCodes,
+			PullIntervalSecs: pullSecs,
+			FixedParamsByAPI: fixedParamsByAPI,
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
@@ -1582,18 +1582,18 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 	}
 
 	progress := &contracts.SyncExecutionProgress{
-		ExecutionID:        exec.ID,
-		PlanID:             exec.SyncPlanID,
-		WorkflowInstanceID: exec.WorkflowInstID,
+		ExecutionID:            exec.ID,
+		PlanID:                 exec.SyncPlanID,
+		WorkflowInstanceID:     exec.WorkflowInstID,
 		ScheduleStartCron:      plan.ScheduleStartCron,
 		ScheduleEndCron:        plan.ScheduleEndCron,
 		SchedulePauseStartCron: plan.SchedulePauseStartCron,
 		SchedulePauseEndCron:   plan.SchedulePauseEndCron,
 		Status:                 exec.Status,
-		RecordCount:        exec.RecordCount,
-		ErrorMessage:       exec.ErrorMessage,
-		StartedAt:          exec.StartedAt,
-		FinishedAt:         exec.FinishedAt,
+		RecordCount:            exec.RecordCount,
+		ErrorMessage:           exec.ErrorMessage,
+		StartedAt:              exec.StartedAt,
+		FinishedAt:             exec.FinishedAt,
 	}
 
 	// Merge workflow status if available
@@ -1869,13 +1869,13 @@ func (s *SyncApplicationServiceImpl) RecordTaskResult(ctx context.Context, workf
 		status = "failed"
 	}
 	detail := &sync.SyncExecutionDetail{
-		ID:           shared.NewID(),
-		ExecutionID:  exec.ID,
-		TaskID:       taskID,
-		APIName:      apiName,
-		RecordCount:  recordCount,
-		Status:       status,
-		FinishedAt:   ptrTimestamp(shared.Now()),
+		ID:          shared.NewID(),
+		ExecutionID: exec.ID,
+		TaskID:      taskID,
+		APIName:     apiName,
+		RecordCount: recordCount,
+		Status:      status,
+		FinishedAt:  ptrTimestamp(shared.Now()),
 	}
 	if errorMessage != "" {
 		detail.ErrorMessage = &errorMessage
@@ -1953,7 +1953,7 @@ func (s *SyncApplicationServiceImpl) GetExecutionDetail(ctx context.Context, exe
 		FailedCount:          failedCount,
 		ErrorRate:            errorRate,
 		ApiStats:             apiStats,
-		DetailRows:   rows,
+		DetailRows:           rows,
 	}
 	return out, nil
 }

@@ -441,10 +441,10 @@ func (s *DataQualityApplicationServiceImpl) AnalyzeDuplicates(ctx context.Contex
 		dupRate = 100 * float64(duplicateRecords) / float64(totalRows)
 	}
 	return &datastore.DuplicateAnalysisResult{
-		HasDuplicates:   len(rows) > 0,
-		DuplicateCount:  int64(len(rows)),
-		DuplicateRate:   dupRate,
-		Details:         details,
+		HasDuplicates:  len(rows) > 0,
+		DuplicateCount: int64(len(rows)),
+		DuplicateRate:  dupRate,
+		Details:        details,
 	}, nil
 }
 
@@ -818,10 +818,10 @@ func (s *DataQualityApplicationServiceImpl) generateFixSuggestions(report *datas
 			},
 		}
 		suggestions = append(suggestions, datastore.FixSuggestion{
-			ID:          uuid.New().String(),
-			Type:        datastore.FixTypeSyncMissing,
-			Severity:    datastore.SeverityMedium,
-			Title:       fmt.Sprintf("缺失 %d 条数据", report.Missing.Summary.MissingCount),
+			ID:       uuid.New().String(),
+			Type:     datastore.FixTypeSyncMissing,
+			Severity: datastore.SeverityMedium,
+			Title:    fmt.Sprintf("缺失 %d 条数据", report.Missing.Summary.MissingCount),
 			Description: fmt.Sprintf("应有 %d 条，实际 %d 条，缺失率 %.1f%%",
 				report.Missing.Summary.ExpectedCount, report.Missing.Summary.ActualCount, report.Missing.Summary.MissingRatePct),
 			Action: action,

@@ -69,7 +69,7 @@ func (b *TushareWSStreamingBuilder) Build() (*workflow.Workflow, error) {
 		WithSubscriberName("db_sink").
 		WithBufferPolicyBlocking(2000).
 		WithDataHandlerMaxRetries(3).
-		WithFlushInterval(500 * time.Millisecond).
+		WithFlushInterval(500*time.Millisecond).
 		WithJobFunction("TushareTickDBBatchWrite", map[string]interface{}{
 			"target_db_path":   b.params.TargetDBPath,
 			"data_source_name": b.params.DataSourceName,

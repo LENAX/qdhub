@@ -15,7 +15,6 @@ import (
 
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
-	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/realtimebuffer"
 	"qdhub/internal/infrastructure/realtimestore"
 )
@@ -134,7 +133,7 @@ func RealtimeSyncDataHandlerJob(tc *task.TaskContext) (interface{}, error) {
 
 	var totalRows int64
 	for batch := range recv {
-		n, err := writeRealtimeBatchToDuckDB(ctx, quantDB, batch.APIName, batch.Source, mapsToAny(batch.Data))
+		n, err := writeRealtimeBatchToDuckDB(ctx, tc, targetDBPath, batch.APIName, batch.Source, mapsToAny(batch.Data))
 		if err != nil {
 			// 已在内部打日志，这里继续下一批
 			continue
@@ -228,10 +227,8 @@ func RealtimeCloseBufferJob(tc *task.TaskContext) (interface{}, error) {
 // 复用于旧的 buffer 模式与新的 Streaming DataHandler。
 func writeRealtimeBatchToDuckDB(
 	ctx context.Context,
-	quantDB interface {
-		TableExists(ctx context.Context, tableName string) (bool, error)
-		BulkInsert(ctx context.Context, tableName string, data []map[string]any) (int64, error)
-	},
+	tc *task.TaskContext,
+	targetDBPath string,
 	apiName string,
 	source string,
 	rows []map[string]any,
@@ -244,16 +241,37 @@ func writeRealtimeBatchToDuckDB(
 		logrus.Warnf("[writeRealtimeBatch] skip batch: empty api_name")
 		return 0, fmt.Errorf("empty api_name")
 	}
-	exists, err := quantDB.TableExists(ctx, tableName)
-	if err != nil {
-		logrus.Warnf("[writeRealtimeBatch] TableExists %s: %v, skip batch", tableName, err)
-		return 0, err
+
+	// Fail fast check if table exists if QuantDBFactory is available
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err == nil {
+		exists, err := quantDB.TableExists(ctx, tableName)
+		if err != nil {
+			logrus.Warnf("[writeRealtimeBatch] TableExists %s: %v, skip batch", tableName, err)
+			return 0, err
+		}
+		if !exists {
+			logrus.Warnf("[writeRealtimeBatch] table %s does not exist, skip batch (run create_tables first)", tableName)
+			return 0, fmt.Errorf("table %s does not exist", tableName)
+		}
 	}
-	if !exists {
-		logrus.Warnf("[writeRealtimeBatch] table %s does not exist, skip batch (run create_tables first)", tableName)
-		return 0, fmt.Errorf("table %s does not exist", tableName)
+
+	wqIntf, ok := tc.GetDependency("QuantDBWriteQueue")
+	var n int64
+	if !ok || wqIntf == nil {
+		if quantDB == nil {
+			return 0, fmt.Errorf("no QuantDB nor WriteQueue available")
+		}
+		n, err = quantDB.BulkInsert(ctx, tableName, rows)
+	} else {
+		wq := wqIntf.(datastore.QuantDBWriteQueue)
+		n, err = wq.EnqueueAndWait(ctx, datastore.QuantDBBatchWriteRequest{
+			Path:      targetDBPath,
+			TableName: tableName,
+			Data:      rows,
+		})
 	}
-	n, err := quantDB.BulkInsert(ctx, tableName, rows)
+
 	if err != nil {
 		logrus.Warnf("[writeRealtimeBatch] BulkInsert %s: %v", tableName, err)
 		return 0, err
@@ -274,17 +292,7 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 	if targetDBPath == "" {
 		return nil, fmt.Errorf("RealtimeQuoteStreamHandler: target_db_path is required")
 	}
-	// Streaming 模式下，目前 TaskContext 中可能尚未注入 QuantDBFactory 依赖，
-	// 这里直接通过 DuckDB Factory 按路径创建连接，保证落库成功。
-	factory := duckdb.NewFactory()
-	quantDB, err := factory.Create(datastore.QuantDBConfig{
-		Type:        datastore.DataStoreTypeDuckDB,
-		StoragePath: targetDBPath,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("RealtimeQuoteStreamHandler: create QuantDB: %w", err)
-	}
-	defer quantDB.Close()
+	// 删除了手动的 quantDB creation，改为委托给 writeRealtimeBatchToDuckDB（内部优先使用 QuantDBWriteQueue）。
 
 	apiName := tc.GetParamString("api_name")
 	if apiName == "" {
@@ -302,7 +310,7 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 		return map[string]interface{}{"total_rows": 0}, nil
 	}
 
-	n, err := writeRealtimeBatchToDuckDB(ctx, quantDB, apiName, source, rows)
+	n, err := writeRealtimeBatchToDuckDB(ctx, tc, targetDBPath, apiName, source, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +383,7 @@ func TushareTickDBBatchWriteJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, err
 	}
 
-	n, err := writeRealtimeBatchToDuckDB(ctx, quantDB, apiName, "tushare_ws", toFlush)
+	n, err := writeRealtimeBatchToDuckDB(ctx, tc, targetDBPath, apiName, "tushare_ws", toFlush)
 	if err != nil {
 		return nil, err
 	}

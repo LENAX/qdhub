@@ -17,7 +17,7 @@ type SyncExecution struct {
 	ID             shared.ID         `json:"id"`
 	SyncPlanID     shared.ID         `json:"sync_plan_id"`
 	WorkflowInstID shared.ID         `json:"workflow_instance_id,omitempty"`
-	Status         ExecStatus       `json:"status"`
+	Status         ExecStatus        `json:"status"`
 	StartedAt      shared.Timestamp  `json:"started_at"`
 	FinishedAt     *shared.Timestamp `json:"finished_at,omitempty"`
 	RecordCount    int64             `json:"record_count"`
@@ -213,11 +213,11 @@ func (eg *ExecutionGraph) UnmarshalJSON(data []byte) error {
 //   - 维护 SyncExecution 集合（执行记录）
 //   - 存储解析后的执行图
 type SyncPlan struct {
-	ID           shared.ID  `json:"id"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
-	DataSourceID shared.ID  `json:"data_source_id"`
-	DataStoreID  shared.ID  `json:"data_store_id"`
+	ID           shared.ID `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	DataSourceID shared.ID `json:"data_source_id"`
+	DataStoreID  shared.ID `json:"data_store_id"`
 
 	// PlanMode 控制同步模式：
 	//   - batch: 现有批量同步（默认）
@@ -228,7 +228,7 @@ type SyncPlan struct {
 	SelectedAPIs []string `json:"selected_apis,omitempty"`
 
 	// 解析结果
-	ResolvedAPIs   []string         `json:"resolved_apis,omitempty"`
+	ResolvedAPIs   []string        `json:"resolved_apis,omitempty"`
 	ExecutionGraph *ExecutionGraph `json:"execution_graph,omitempty"`
 
 	// 调度配置
@@ -254,9 +254,9 @@ type SyncPlan struct {
 	IncrementalStartDateColumn *string `json:"incremental_start_date_column,omitempty"`
 
 	// 状态
-	Status         PlanStatus  `json:"status"`
-	LastExecutedAt *time.Time  `json:"last_run_at,omitempty"`
-	NextExecuteAt  *time.Time  `json:"next_run_at,omitempty"`
+	Status         PlanStatus `json:"status"`
+	LastExecutedAt *time.Time `json:"last_run_at,omitempty"`
+	NextExecuteAt  *time.Time `json:"next_run_at,omitempty"`
 
 	// LastExecutionStatus 最近一次执行状态，仅用于列表等接口展示，不持久化
 	LastExecutionStatus *ExecStatus `json:"last_execution_status,omitempty"`
@@ -522,10 +522,10 @@ func (sp *SyncPlan) UnmarshalDefaultExecuteParamsJSON(jsonStr string) error {
 // SyncTask 单个 API 的同步配置（聚合内实体）
 // 替代原 SyncJob 的参数配置部分
 type SyncTask struct {
-	ID         shared.ID     `json:"id"`
-	SyncPlanID shared.ID     `json:"sync_plan_id"`
-	APIName    string        `json:"api_name"`
-	SyncMode   TaskSyncMode  `json:"sync_mode"`
+	ID         shared.ID    `json:"id"`
+	SyncPlanID shared.ID    `json:"sync_plan_id"`
+	APIName    string       `json:"api_name"`
+	SyncMode   TaskSyncMode `json:"sync_mode"`
 
 	// 参数配置
 	Params        map[string]interface{} `json:"params,omitempty"`
@@ -540,7 +540,7 @@ type SyncTask struct {
 
 	// 同步频率控制
 	SyncFrequency time.Duration `json:"sync_frequency,omitempty"`
-	LastSyncedAt  *time.Time   `json:"last_synced_at,omitempty"`
+	LastSyncedAt  *time.Time    `json:"last_synced_at,omitempty"`
 
 	CreatedAt shared.Timestamp `json:"created_at"`
 }
@@ -709,9 +709,9 @@ func (ps PlanStatus) String() string {
 type PlanMode string
 
 const (
-	PlanModeBatch         PlanMode = "batch"
-	PlanModeRealtime      PlanMode = "realtime"
-	PlanModeNewsRealtime  PlanMode = "news_realtime"
+	PlanModeBatch        PlanMode = "batch"
+	PlanModeRealtime     PlanMode = "realtime"
+	PlanModeNewsRealtime PlanMode = "news_realtime"
 )
 
 // String returns the string representation of the plan mode.

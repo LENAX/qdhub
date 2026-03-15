@@ -214,7 +214,19 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 			return nil, err
 		}
 
-		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
+		wqIntf, ok := tc.GetDependency("QuantDBWriteQueue")
+		if !ok || wqIntf == nil {
+			savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, result.Data, syncBatchID)
+		} else {
+			wq := wqIntf.(datastore.QuantDBWriteQueue)
+			savedCount, err = wq.EnqueueAndWait(ctx, datastore.QuantDBBatchWriteRequest{
+				Path:        targetDBPath,
+				TableName:   apiName,
+				Data:        result.Data,
+				SyncBatchID: syncBatchID,
+			})
+		}
+
 		if err != nil {
 			logrus.Errorf("[SyncAPIData] task failed: taskID=%s, api=%s/%s, err=%v", tc.TaskID, dataSourceName, apiName, err)
 			return nil, fmt.Errorf("failed to save data: %w", err)
@@ -452,7 +464,18 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		if !exists {
 			return nil, fmt.Errorf("table %q does not exist, please run create_tables workflow first", apiName)
 		}
-		savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, allData, syncBatchID)
+		wqIntf, ok := tc.GetDependency("QuantDBWriteQueue")
+		if !ok || wqIntf == nil {
+			savedCount, err = quantDB.BulkInsertWithBatchID(ctx, apiName, allData, syncBatchID)
+		} else {
+			wq := wqIntf.(datastore.QuantDBWriteQueue)
+			savedCount, err = wq.EnqueueAndWait(ctx, datastore.QuantDBBatchWriteRequest{
+				Path:        targetDBPath,
+				TableName:   apiName,
+				Data:        allData,
+				SyncBatchID: syncBatchID,
+			})
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to save data: %w", err)
 		}
@@ -703,8 +726,8 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 //   - windows: []{start,end}  - 当 as_windows=true 时返回的时间窗口列表
 //   - count: int              - 时间点数量
 //   - extracted_data:
-//       - datetimes / datetime_points: 同上
-//       - windows: 时间窗口列表
+//   - datetimes / datetime_points: 同上
+//   - windows: 时间窗口列表
 func GenerateDatetimeRangeJob(tc *task.TaskContext) (interface{}, error) {
 	startStr := tc.GetParamString("start")
 	if startStr == "" {
@@ -1475,6 +1498,7 @@ func GetNewsSyncRangeJob(tc *task.TaskContext) (interface{}, error) {
 //
 // Input params:
 //   - target_db_path: string - 目标 DuckDB 路径
+//
 // 上游 GetNewsSyncRangeJob 输出的 end_datetime 通过 _cached_GetNewsSyncRange 传入。
 func UpdateNewsCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 	ctx := context.Background()

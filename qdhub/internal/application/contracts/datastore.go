@@ -87,5 +87,5 @@ type CreateTablesForDatasourceRequest struct {
 // TableDataPage holds a page of table rows and total count for data browser.
 type TableDataPage struct {
 	Rows  []map[string]any `json:"data"`
-	Total int64             `json:"total"`
+	Total int64            `json:"total"`
 }

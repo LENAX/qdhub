@@ -273,52 +273,52 @@ GROUP BY trade_date ORDER BY trade_date`
 		ldRows, ldErr = r.queryLimitStatsFromLimitListD(ctx, startDate, endDate)
 	}
 	if ldErr == nil && len(ldRows) > 0 {
-			out := make([]analysis.LimitStats, 0, len(ldRows))
-			for _, m := range ldRows {
-				sealed := int_(m, "limit_up_sealed")
-				opened := int_(m, "limit_up_opened")
-				upFromLimit := int_(m, "limit_up_from_limit")
-				upFromPct := int_(m, "limit_up_from_pct")
-				total := sealed + opened
-				if total < upFromPct {
-					total = upFromPct
-				}
-				if total < upFromLimit {
-					total = upFromLimit
-				}
-				if total > 0 && sealed == 0 && opened == 0 {
-					sealed = total
-				}
-				dSealed := int_(m, "limit_down_sealed")
-				dOpened := int_(m, "limit_down_opened")
-				dFromLimit := int_(m, "limit_down_from_limit")
-				dFromPct := int_(m, "limit_down_from_pct")
-				dCount := dSealed + dOpened
-				if dCount < dFromPct {
-					dCount = dFromPct
-				}
-				if dCount < dFromLimit {
-					dCount = dFromLimit
-				}
-				// 跌停：分钟/高频数据未稳定前不按 open_times 区分，有跌停则封板率 100%、打开数 0
-				var dSealedVal, dOpenedVal int
-				if dCount > 0 {
-					dSealedVal = dCount
-					dOpenedVal = 0
-				}
-				out = append(out, analysis.LimitStats{
-					TradeDate:       str(m, "trade_date"),
-					LimitUpCount:    total,
-					LimitDownCount:  dCount,
-					LimitUpSealed:   sealed,
-					LimitUpOpened:   opened,
-					LimitDownSealed: dSealedVal,
-					LimitDownOpened: dOpenedVal,
-				})
+		out := make([]analysis.LimitStats, 0, len(ldRows))
+		for _, m := range ldRows {
+			sealed := int_(m, "limit_up_sealed")
+			opened := int_(m, "limit_up_opened")
+			upFromLimit := int_(m, "limit_up_from_limit")
+			upFromPct := int_(m, "limit_up_from_pct")
+			total := sealed + opened
+			if total < upFromPct {
+				total = upFromPct
 			}
-			// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数（同样默认排除 ST/*ST）
-			if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
-				thsSQL := `
+			if total < upFromLimit {
+				total = upFromLimit
+			}
+			if total > 0 && sealed == 0 && opened == 0 {
+				sealed = total
+			}
+			dSealed := int_(m, "limit_down_sealed")
+			dOpened := int_(m, "limit_down_opened")
+			dFromLimit := int_(m, "limit_down_from_limit")
+			dFromPct := int_(m, "limit_down_from_pct")
+			dCount := dSealed + dOpened
+			if dCount < dFromPct {
+				dCount = dFromPct
+			}
+			if dCount < dFromLimit {
+				dCount = dFromLimit
+			}
+			// 跌停：分钟/高频数据未稳定前不按 open_times 区分，有跌停则封板率 100%、打开数 0
+			var dSealedVal, dOpenedVal int
+			if dCount > 0 {
+				dSealedVal = dCount
+				dOpenedVal = 0
+			}
+			out = append(out, analysis.LimitStats{
+				TradeDate:       str(m, "trade_date"),
+				LimitUpCount:    total,
+				LimitDownCount:  dCount,
+				LimitUpSealed:   sealed,
+				LimitUpOpened:   opened,
+				LimitDownSealed: dSealedVal,
+				LimitDownOpened: dOpenedVal,
+			})
+		}
+		// 有 limit_list_ths 时用 open_num 覆盖更准确的封板/打开数（同样默认排除 ST/*ST）
+		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+			thsSQL := `
 SELECT trade_date,
        SUM(CASE WHEN COALESCE(open_num, 0) = 0
                   AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
@@ -329,25 +329,25 @@ SELECT trade_date,
 FROM limit_list_ths
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date`
-				thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
-				if thsErr == nil {
-					byDate := make(map[string]*struct{ sealed, opened int })
-					for _, m := range thsRows {
-						byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
-							sealed: int_(m, "limit_up_sealed"),
-							opened: int_(m, "limit_up_opened"),
-						}
+			thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
+			if thsErr == nil {
+				byDate := make(map[string]*struct{ sealed, opened int })
+				for _, m := range thsRows {
+					byDate[str(m, "trade_date")] = &struct{ sealed, opened int }{
+						sealed: int_(m, "limit_up_sealed"),
+						opened: int_(m, "limit_up_opened"),
 					}
-					for i := range out {
-						if v, ok := byDate[out[i].TradeDate]; ok {
-							out[i].LimitUpSealed = v.sealed
-							out[i].LimitUpOpened = v.opened
-							out[i].LimitUpCount = v.sealed + v.opened
-						}
+				}
+				for i := range out {
+					if v, ok := byDate[out[i].TradeDate]; ok {
+						out[i].LimitUpSealed = v.sealed
+						out[i].LimitUpOpened = v.opened
+						out[i].LimitUpCount = v.sealed + v.opened
 					}
 				}
 			}
-			return out, nil
+		}
+		return out, nil
 	}
 	return r.getLimitStatsFromDaily(ctx, startDate, endDate)
 }
@@ -1312,11 +1312,11 @@ FROM moneyflow_cnt_ths WHERE trade_date = ?`
 	out := make([]analysis.MoneyFlowConcept, 0, len(rows))
 	for _, m := range rows {
 		out = append(out, analysis.MoneyFlowConcept{
-			TradeDate:       str(m, "trade_date"),
-			ConceptCode:     str(m, "concept_code"),
-			ConceptName:     str(m, "concept_name"),
-			NetInflow:       float(m, "net_inflow"),
-			NetInflowRatio:  float(m, "net_inflow_ratio"),
+			TradeDate:      str(m, "trade_date"),
+			ConceptCode:    str(m, "concept_code"),
+			ConceptName:    str(m, "concept_name"),
+			NetInflow:      float(m, "net_inflow"),
+			NetInflowRatio: float(m, "net_inflow_ratio"),
 		})
 	}
 	return out, nil

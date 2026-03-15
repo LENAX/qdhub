@@ -39,19 +39,19 @@ type ProgressCalculator interface {
 
 // WorkflowStatus represents the detailed status of a workflow instance.
 type WorkflowStatus struct {
-	InstanceID     string             `json:"instance_id"` // Task Engine uses string ID
-	Status         string             `json:"status"`      // Task Engine status string
-	Progress       float64            `json:"progress"`
-	TaskCount      int                `json:"task_count"`
-	CompletedTask  int                `json:"completed_task"`
-	FailedTask     int                `json:"failed_task"`
-	RunningCount   int                `json:"running_count"`   // 正在运行的任务数（来自引擎快照，0 时也返回以便与内部一致）
-	PendingCount   int                `json:"pending_count"`   // 挂起的任务数（来自引擎快照，0 时也返回）
-	RunningTaskIDs []string           `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
-	PendingTaskIDs []string           `json:"pending_task_ids,omitempty"`  // 挂起的任务 ID（存储可能滞后）
-	StartedAt      shared.Timestamp   `json:"started_at"`
-	FinishedAt     *shared.Timestamp  `json:"finished_at,omitempty"`
-	ErrorMessage   *string            `json:"error_message,omitempty"`
+	InstanceID     string            `json:"instance_id"` // Task Engine uses string ID
+	Status         string            `json:"status"`      // Task Engine status string
+	Progress       float64           `json:"progress"`
+	TaskCount      int               `json:"task_count"`
+	CompletedTask  int               `json:"completed_task"`
+	FailedTask     int               `json:"failed_task"`
+	RunningCount   int               `json:"running_count"`              // 正在运行的任务数（来自引擎快照，0 时也返回以便与内部一致）
+	PendingCount   int               `json:"pending_count"`              // 挂起的任务数（来自引擎快照，0 时也返回）
+	RunningTaskIDs []string          `json:"running_task_ids,omitempty"` // 正在运行的任务 ID（存储可能滞后）
+	PendingTaskIDs []string          `json:"pending_task_ids,omitempty"` // 挂起的任务 ID（存储可能滞后）
+	StartedAt      shared.Timestamp  `json:"started_at"`
+	FinishedAt     *shared.Timestamp `json:"finished_at,omitempty"`
+	ErrorMessage   *string           `json:"error_message,omitempty"`
 }
 
 // ==================== 外部依赖接口（领域定义，基础设施实现）====================
@@ -76,18 +76,18 @@ type CreateTablesRequest struct {
 // BatchDataSyncRequest 批量同步请求参数
 // APIConfigs 与 APINames 二选一：有 APIConfigs 时优先使用（用于 SyncPlan 执行），否则使用 APINames + 默认策略。
 type BatchDataSyncRequest struct {
-	DataSourceID   shared.ID         // 数据源 ID（可选，用于查询策略）
-	DataSourceName string            // 数据源名称（必填）
-	Token          string            // API Token（必填）
-	TargetDBPath   string            // 目标数据库路径（必填）
-	StartDate      string            // 开始日期（必填，格式: "20251201"）
-	EndDate        string            // 结束日期（必填，格式: "20251231"）
-	StartTime      string            // 开始时间（可选，格式: "09:30:00"）
-	EndTime        string            // 结束时间（可选，格式: "15:00:00"）
-	APINames       []string          // 需要同步的 API 列表（与 APIConfigs 二选一）
-	APIConfigs     []APISyncConfig   // API 同步配置（与 APINames 二选一，优先使用）
-	MaxStocks      int               // 最大股票数量（可选，0表示不限制）
-	CommonDataAPIs []string          // 公共数据 API 名列表（如 trade_cal, stock_basic），SyncAPIDataJob 走 Cache→DuckDB→API
+	DataSourceID   shared.ID       // 数据源 ID（可选，用于查询策略）
+	DataSourceName string          // 数据源名称（必填）
+	Token          string          // API Token（必填）
+	TargetDBPath   string          // 目标数据库路径（必填）
+	StartDate      string          // 开始日期（必填，格式: "20251201"）
+	EndDate        string          // 结束日期（必填，格式: "20251231"）
+	StartTime      string          // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string          // 结束时间（可选，格式: "15:00:00"）
+	APINames       []string        // 需要同步的 API 列表（与 APIConfigs 二选一）
+	APIConfigs     []APISyncConfig // API 同步配置（与 APINames 二选一，优先使用）
+	MaxStocks      int             // 最大股票数量（可选，0表示不限制）
+	CommonDataAPIs []string        // 公共数据 API 名列表（如 trade_cal, stock_basic），SyncAPIDataJob 走 Cache→DuckDB→API
 }
 
 // RealtimeDataSyncRequest 实时同步请求参数
@@ -101,16 +101,16 @@ type RealtimeDataSyncRequest struct {
 	CronExpr       string   // Cron 表达式（可选）
 
 	// 时间范围（可选）：实时 API 通常提供最新数据，此处仅用于补充历史；不传则不校验、按最新处理
-	StartDate                    string // 可选，起始日 20060102
-	EndDate                      string // 可选，结束日；未传时由工作流内 FetchLatestTradingDate 提供
-	IncrementalStartDateTable    string // 可选，用于 MAX(列) 的表名
-	IncrementalStartDateColumn   string // 可选，日期列名（如 trade_date）
+	StartDate                  string // 可选，起始日 20060102
+	EndDate                    string // 可选，结束日；未传时由工作流内 FetchLatestTradingDate 提供
+	IncrementalStartDateTable  string // 可选，用于 MAX(列) 的表名
+	IncrementalStartDateColumn string // 可选，日期列名（如 trade_date）
 
 	// 流式实时模式（PlanMode=realtime 时由 ExecuteSyncPlan 填充）
 	DataSourceID     shared.ID // 数据源 ID，非空时使用流式工作流并从 DB 拉策略
-	TsCodes          []string // 股票代码列表（从 stock_basic 读取，用于 ts_code 分片）
-	IndexCodes       []string // 指数代码列表（从 index_basic 读取，用于 rt_idx_min 等）
-	PullIntervalSecs int      // Pull 拉取间隔（秒），0 用默认 60
+	TsCodes          []string  // 股票代码列表（从 stock_basic 读取，用于 ts_code 分片）
+	IndexCodes       []string  // 指数代码列表（从 index_basic 读取，用于 rt_idx_min 等）
+	PullIntervalSecs int       // Pull 拉取间隔（秒），0 用默认 60
 
 	// FixedParamsByAPI 各 API 的 Fixed Params（来自 api_sync_strategies），供流式工作流使用。
 	// 例如 ts_realtime_mkt_tick 的 topic、codes 在此配置，默认由 migration 021 写入。
@@ -130,17 +130,17 @@ type APISyncConfig struct {
 
 // ExecutionGraphSyncRequest 基于 ExecutionGraph 的同步请求参数
 type ExecutionGraphSyncRequest struct {
-	ExecutionGraph interface{}           // ExecutionGraph 结构（使用 interface{} 避免循环依赖）
-	DataSourceName string                // 数据源名称（必填）
-	Token          string                // API Token（必填）
-	TargetDBPath   string                // 目标数据库路径（必填）
-	StartDate      string                // 开始日期（必填，格式: "20251201"）
-	EndDate        string                // 结束日期（必填，格式: "20251231"）
-	StartTime      string                // 开始时间（可选，格式: "09:30:00"）
-	EndTime        string                // 结束时间（可选，格式: "15:00:00"）
-	MaxStocks      int                   // 最大股票数量（可选，0表示不限制）
-	SyncedAPIs     []string              // 需要同步的 API 列表
-	SkippedAPIs    []string              // 跳过的 API 列表
+	ExecutionGraph interface{} // ExecutionGraph 结构（使用 interface{} 避免循环依赖）
+	DataSourceName string      // 数据源名称（必填）
+	Token          string      // API Token（必填）
+	TargetDBPath   string      // 目标数据库路径（必填）
+	StartDate      string      // 开始日期（必填，格式: "20251201"）
+	EndDate        string      // 结束日期（必填，格式: "20251231"）
+	StartTime      string      // 开始时间（可选，格式: "09:30:00"）
+	EndTime        string      // 结束时间（可选，格式: "15:00:00"）
+	MaxStocks      int         // 最大股票数量（可选，0表示不限制）
+	SyncedAPIs     []string    // 需要同步的 API 列表
+	SkippedAPIs    []string    // 跳过的 API 列表
 }
 
 // WorkflowExecutor defines the interface for executing built-in workflows.
