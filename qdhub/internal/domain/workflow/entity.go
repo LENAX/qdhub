@@ -3,6 +3,8 @@
 package workflow
 
 import (
+	"strings"
+
 	"qdhub/internal/domain/shared"
 
 	"github.com/LENAX/task-engine/pkg/core/workflow"
@@ -48,7 +50,7 @@ func (wf *WorkflowDefinition) Status() WfDefStatus {
 		return WfDefStatusDisabled
 	}
 	status := wf.Workflow.GetStatus()
-	if status == "ENABLED" {
+	if strings.EqualFold(status, "ENABLED") {
 		return WfDefStatusEnabled
 	}
 	return WfDefStatusDisabled
@@ -89,7 +91,7 @@ func (wf *WorkflowDefinition) UpdateDefinition(definitionYAML string) {
 
 // IsEnabled checks if the workflow definition is enabled.
 func (wf *WorkflowDefinition) IsEnabled() bool {
-	return wf.Workflow.GetStatus() == "ENABLED"
+	return strings.EqualFold(wf.Workflow.GetStatus(), "ENABLED")
 }
 
 // CanCreateInstance checks if a new instance can be created.

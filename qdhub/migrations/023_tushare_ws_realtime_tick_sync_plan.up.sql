@@ -1,7 +1,7 @@
 -- Tushare WS 全市场 tick 实时 SyncPlan 种子
 -- Version: 023
 -- Description: 插入 tushare WS 接口 ts_realtime_mkt_tick 的实时 sync plan，
---   运行时段：每周一至周五 9:15 - 15:00（与 021 的 api_metadata/api_sync_strategies 配套）。
+--   运行时段：每周一至周五 9:15 - 15:00；拉取间隔 3 秒（与 Level1 更新频率一致）。与 021 的 api_metadata/api_sync_strategies 配套。
 
 INSERT OR IGNORE INTO sync_plan (
     id,
@@ -41,7 +41,7 @@ SELECT
     NULL AS cron_expression,
     '0 15 9 * * 1-5' AS schedule_start_cron,
     '0 0 15 * * 1-5' AS schedule_end_cron,
-    60 AS pull_interval_seconds,
+    3 AS pull_interval_seconds,
     NULL AS default_execute_params,
     0 AS incremental_mode,
     NULL AS last_successful_end_date,

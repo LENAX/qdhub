@@ -188,19 +188,20 @@ type SyncExecutionDetailRow struct {
 }
 
 // SyncTaskRow represents sync_task table row.
+// Params, ParamMappings, Dependencies may be NULL in DB (e.g. migration 026).
 type SyncTaskRow struct {
-	ID            string       `db:"id"`
-	SyncPlanID    string       `db:"sync_plan_id"`
-	APIName       string       `db:"api_name"`
-	SyncMode      string       `db:"sync_mode"`
-	Params        string       `db:"params"`
-	ParamMappings string       `db:"param_mappings"`
-	Dependencies  string       `db:"dependencies"`
-	Level         int          `db:"level"`
-	SortOrder     int          `db:"sort_order"`
-	SyncFrequency int64        `db:"sync_frequency"`
-	LastSyncedAt  sql.NullTime `db:"last_synced_at"`
-	CreatedAt     time.Time    `db:"created_at"`
+	ID            string         `db:"id"`
+	SyncPlanID    string         `db:"sync_plan_id"`
+	APIName       string         `db:"api_name"`
+	SyncMode      string         `db:"sync_mode"`
+	Params        sql.NullString `db:"params"`
+	ParamMappings sql.NullString `db:"param_mappings"`
+	Dependencies  sql.NullString `db:"dependencies"`
+	Level         int            `db:"level"`
+	SortOrder     int            `db:"sort_order"`
+	SyncFrequency int64          `db:"sync_frequency"`
+	LastSyncedAt  sql.NullTime   `db:"last_synced_at"`
+	CreatedAt     time.Time      `db:"created_at"`
 }
 
 // ==================== Workflow Domain Models ====================

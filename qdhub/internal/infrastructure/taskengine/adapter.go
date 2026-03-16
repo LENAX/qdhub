@@ -4,7 +4,6 @@ package taskengine
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/LENAX/task-engine/pkg/core/engine"
@@ -152,23 +151,15 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 		} else {
 			finalStatus = statusStr
 		}
-		// 若引擎已标记实例为终态或暂停，以引擎为准
-		statusUpper := strings.ToUpper(statusStr)
-		switch statusUpper {
-		case "SUCCESS", "COMPLETED", "FAILED", "ERROR", "TERMINATED", "CANCELLED":
+		if workflow.IsTerminal(statusStr) || workflow.IsPaused(statusStr) {
 			finalStatus = statusStr
 			progress = 100.0
-		case "PAUSED":
-			finalStatus = statusStr
 		}
 	} else {
-		// Fallback: compute from storage task instances or instance status
 		for _, task := range taskInstances {
-			sts := strings.ToUpper(task.Status)
-			switch sts {
-			case "SUCCESS", "SKIPPED":
+			if workflow.IsSuccess(task.Status) || workflow.IsSkipped(task.Status) {
 				completedTasks++
-			case "FAILED":
+			} else if workflow.IsFailed(task.Status) {
 				failedTasks++
 			}
 		}
@@ -184,24 +175,20 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 					finalStatus = "Success"
 				}
 			}
-			// 若引擎状态已是终态，进度按 100% 显示，避免存储滞后导致 99.x%
-			statusUpper := strings.ToUpper(statusStr)
-			if statusUpper == "SUCCESS" || statusUpper == "COMPLETED" || statusUpper == "FAILED" || statusUpper == "ERROR" || statusUpper == "TERMINATED" || statusUpper == "CANCELLED" {
+			if workflow.IsTerminal(statusStr) {
 				progress = 100.0
 			}
 		} else {
-			instanceStatusUpper := strings.ToUpper(instance.Status)
-			switch instanceStatusUpper {
-			case "SUCCESS", "COMPLETED":
+			if workflow.IsSuccess(instance.Status) {
 				finalStatus = "Success"
 				progress = 100.0
-			case "FAILED", "ERROR":
+			} else if workflow.IsFailed(instance.Status) {
 				finalStatus = "Failed"
 				progress = 100.0
-			case "TERMINATED", "CANCELLED":
+			} else if workflow.IsTerminated(instance.Status) {
 				finalStatus = "Terminated"
 				progress = 100.0
-			case "RUNNING", "PENDING":
+			} else if workflow.IsRunning(instance.Status) || workflow.IsPending(instance.Status) {
 				finalStatus = "Running"
 				elapsed := time.Since(instance.StartTime)
 				progressPct := elapsed.Seconds() / 60 * 1.5
@@ -209,7 +196,7 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 					progressPct = 95
 				}
 				progress = progressPct
-			default:
+			} else {
 				finalStatus = statusStr
 			}
 		}
@@ -230,11 +217,9 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 	// 未在任务开始时写入 Running、或未在任务完成时及时更新存储，导致 running_ids 常为空、pending_ids 不随完成而减少。
 	var runningIDs, pendingIDs []string
 	for _, task := range taskInstances {
-		sts := strings.ToUpper(task.Status)
-		switch sts {
-		case "RUNNING":
+		if workflow.IsRunning(task.Status) {
 			runningIDs = append(runningIDs, task.ID)
-		case "PENDING", "READY":
+		} else if workflow.IsPending(task.Status) {
 			pendingIDs = append(pendingIDs, task.ID)
 		}
 	}
@@ -269,15 +254,14 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 	if instance.ErrorMessage != "" {
 		status.ErrorMessage = &instance.ErrorMessage
 	}
-	// 工作流失败但 instance 未记录错误时，从第一个失败任务补充错误信息，便于 UI 展示
-	if status.Status == "Failed" && (status.ErrorMessage == nil || *status.ErrorMessage == "") {
+	if workflow.IsFailed(status.Status) && (status.ErrorMessage == nil || *status.ErrorMessage == "") {
 		if msg := firstFailedTaskErrorMessage(taskInstances); msg != "" {
 			status.ErrorMessage = &msg
 		}
 	}
 
 	// 获取任务进度时打印正在运行/挂起的任务数量；若有内存快照则同时打印引擎侧计数，便于对比存储滞后
-	if status.Status == "Running" {
+	if workflow.IsRunning(status.Status) {
 		runningCnt := len(status.RunningTaskIDs)
 		pendingCnt := len(status.PendingTaskIDs)
 		if snapshot, ok := a.engine.GetInstanceProgress(engineInstanceID); ok {
@@ -295,7 +279,7 @@ func (a *TaskEngineAdapterImpl) GetInstanceStatus(ctx context.Context, engineIns
 // firstFailedTaskErrorMessage 从任务列表中取第一个失败任务的错误信息，供 UI 展示。
 func firstFailedTaskErrorMessage(taskInstances []*storage.TaskInstance) string {
 	for _, t := range taskInstances {
-		if t != nil && strings.ToUpper(t.Status) == "FAILED" && t.ErrorMessage != "" {
+		if t != nil && workflow.IsFailed(t.Status) && t.ErrorMessage != "" {
 			return t.ErrorMessage
 		}
 	}

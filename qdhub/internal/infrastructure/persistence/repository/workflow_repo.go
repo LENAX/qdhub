@@ -13,6 +13,11 @@ import (
 	"qdhub/internal/infrastructure/persistence/dao"
 )
 
+// isTerminalStatus 表示工作流终态（大小写不敏感），用于同步到 workflow_instances 表
+func isTerminalStatus(s string) bool {
+	return workflow.IsTerminal(s)
+}
+
 // WorkflowDefinitionRepositoryImpl implements workflow.WorkflowDefinitionRepository using Task Engine storage.
 // Following DDD principles, this repository handles both the aggregate root (WorkflowDefinition)
 // and its child entities (WorkflowInstance) to maintain aggregate boundaries.
@@ -145,9 +150,27 @@ func (r *WorkflowDefinitionRepositoryImpl) GetInstancesByDef(workflowDefID strin
 	return r.taskEngineRepo.GetInstancesByDef(workflowDefID)
 }
 
-// UpdateInstance updates a WorkflowInstance.
+// UpdateInstance updates a WorkflowInstance (task engine storage and qdhub workflow_instances table).
 func (r *WorkflowDefinitionRepositoryImpl) UpdateInstance(inst *workflow.WorkflowInstance) error {
-	return r.taskEngineRepo.UpdateInstance(inst)
+	if err := r.taskEngineRepo.UpdateInstance(inst); err != nil {
+		return err
+	}
+	// 同步到 qdhub workflow_instances 表，便于前端/列表 API 看到最新状态与错误信息
+	progress := 0.0
+	if isTerminalStatus(inst.Status) {
+		progress = 100.0
+	}
+	var errMsg *string
+	if inst.ErrorMessage != "" {
+		errMsg = &inst.ErrorMessage
+	}
+	if err := r.instanceDAO.UpdateStatusByID(nil, inst.ID, inst.Status, progress, inst.EndTime, errMsg); err != nil {
+		// 表不存在或非 qdhub 库（如仅 task engine 的测试库）时忽略，保证兼容
+		if !strings.Contains(err.Error(), "no such table") && !strings.Contains(err.Error(), "does not exist") {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteInstance deletes a WorkflowInstance by ID.

@@ -201,12 +201,7 @@ func (h *WorkflowHandler) StreamInstanceProgress(c *gin.Context) {
 			c.Writer.Write([]byte("\n\n"))
 			flusher.Flush()
 
-			// Stop streaming when workflow reaches a terminal state
-			if status.FinishedAt != nil ||
-				status.Status == "Success" ||
-				status.Status == "Failed" ||
-				status.Status == "Terminated" ||
-				status.Status == "Completed" {
+			if status.FinishedAt != nil || workflow.IsTerminal(status.Status) {
 				return
 			}
 

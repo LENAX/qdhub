@@ -2,6 +2,7 @@ package dao
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/LENAX/task-engine/pkg/core/workflow"
 	"github.com/jmoiron/sqlx"
@@ -120,7 +121,7 @@ func (d *WorkflowDefinitionDAO) toEntity(row *WorkflowDefinitionRow) *qdhubworkf
 	// Create Task Engine Workflow
 	teWorkflow := workflow.NewWorkflow(row.Name, row.Description)
 	teWorkflow.ID = row.ID
-	if row.Status == "enabled" {
+	if strings.EqualFold(row.Status, "enabled") {
 		teWorkflow.SetStatus("ENABLED")
 	} else {
 		teWorkflow.SetStatus("DISABLED")

@@ -143,6 +143,12 @@ func (c *TushareWSTickCollector) runOnce(
 		}
 	}()
 
+	// 当 context 取消时关闭连接，使阻塞的 ReadMessage 立即返回，便于引擎在超时内完成停止
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -154,10 +160,16 @@ func (c *TushareWSTickCollector) runOnce(
 
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("read message: %w", err)
 		}
 		rows, err := c.parseRows(msg)
 		if err != nil {
+			if isUpstreamPermissionOrLimitError(err) {
+				return err
+			}
 			logrus.Warnf("[TushareWSTickCollector] parse message failed: %v", err)
 			continue
 		}
@@ -213,6 +225,15 @@ func (c *TushareWSTickCollector) parseRows(msg []byte) ([]map[string]interface{}
 		row["target_db_path"] = c.TargetDBPath
 	}
 	return []map[string]interface{}{row}, nil
+}
+
+// isUpstreamPermissionOrLimitError 判断是否为上游权限/IP 限制类错误，此类错误应直接返回以快速失败并给出明确原因
+func isUpstreamPermissionOrLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "超限") || strings.Contains(s, "权限") || strings.Contains(s, "没有订阅数据")
 }
 
 func normalizeTushareTickRecord(raw interface{}, code string) map[string]interface{} {

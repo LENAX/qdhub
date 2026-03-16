@@ -3,7 +3,7 @@ module qdhub
 go 1.26.1
 
 require (
-	github.com/LENAX/task-engine v1.0.16
+	github.com/LENAX/task-engine v1.0.18
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/casbin/casbin/v2 v2.128.0
 	github.com/gin-contrib/authz v1.0.6
@@ -114,6 +114,3 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
-
-// 本地调试 task-engine 时使用，提交前请删除或注释
-replace github.com/LENAX/task-engine => /Users/stevelan/Desktop/projects/task-engine

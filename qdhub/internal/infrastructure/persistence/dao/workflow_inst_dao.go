@@ -3,6 +3,7 @@ package dao
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -75,6 +76,30 @@ func (d *WorkflowInstanceDAO) Update(tx *sqlx.Tx, entity *qdhubworkflow.Workflow
 
 	if err != nil {
 		return fmt.Errorf("failed to update workflow instance: %w", err)
+	}
+	return nil
+}
+
+// UpdateStatusByID updates only status, progress, finished_at, error_message for the given instance ID.
+// Used when workflow reaches terminal state so DB stays in sync for frontend/API.
+func (d *WorkflowInstanceDAO) UpdateStatusByID(tx *sqlx.Tx, id string, status string, progress float64, finishedAt *time.Time, errorMessage *string) error {
+	query := d.DB().Rebind(`UPDATE workflow_instances SET status = ?, progress = ?, finished_at = ?, error_message = ? WHERE id = ?`)
+	var finAt sql.NullTime
+	if finishedAt != nil {
+		finAt = sql.NullTime{Time: *finishedAt, Valid: true}
+	}
+	var errMsg sql.NullString
+	if errorMessage != nil && *errorMessage != "" {
+		errMsg = sql.NullString{String: *errorMessage, Valid: true}
+	}
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, status, progress, finAt, errMsg, id)
+	} else {
+		_, err = d.DB().Exec(query, status, progress, finAt, errMsg, id)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to update workflow instance status: %w", err)
 	}
 	return nil
 }

@@ -16,11 +16,14 @@ import (
 )
 
 // Adapter implements the QuantDB interface for DuckDB.
+// writeMu serializes all write operations (BulkInsert, Execute, BeginTx, etc.) for the same
+// database file to avoid DuckDB "Invalid bitmask for FixedSizeAllocator" under concurrent writes.
 type Adapter struct {
 	db          *sql.DB
 	storagePath string
 	mu          sync.RWMutex
 	connected   bool
+	writeMu     sync.Mutex
 }
 
 // NewAdapter creates a new DuckDB adapter.
@@ -320,6 +323,8 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 	if len(data) == 0 {
 		return 0, nil
 	}
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
 
 	if err := a.ensureConnected(ctx); err != nil {
 		return 0, err
@@ -492,6 +497,8 @@ func (a *Adapter) BulkInsertWithBatchID(ctx context.Context, tableName string, d
 
 // DeleteBySyncBatchID deletes all rows with the given sync batch ID.
 func (a *Adapter) DeleteBySyncBatchID(ctx context.Context, tableName string, syncBatchID string) (int64, error) {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
 	if err := a.ensureConnected(ctx); err != nil {
 		return 0, err
 	}
@@ -549,6 +556,8 @@ func (a *Adapter) Query(ctx context.Context, sqlQuery string, args ...any) ([]ma
 
 // Execute executes a SQL statement and returns affected rows.
 func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int64, error) {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
 	if err := a.ensureConnected(ctx); err != nil {
 		return 0, err
 	}
@@ -562,17 +571,20 @@ func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int
 
 // ==================== Transaction Support ====================
 
-// BeginTx begins a transaction.
+// BeginTx begins a transaction. Caller must call Commit or Rollback to release the write lock.
 func (a *Adapter) BeginTx(ctx context.Context) (datastore.QuantDBTx, error) {
+	a.writeMu.Lock()
 	if err := a.ensureConnected(ctx); err != nil {
+		a.writeMu.Unlock()
 		return nil, err
 	}
 
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
+		a.writeMu.Unlock()
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	return &duckDBTx{tx: tx}, nil
+	return &duckDBTx{tx: tx, writeMu: &a.writeMu}, nil
 }
 
 // ==================== DDL Generation ====================
@@ -641,17 +653,26 @@ func (a *Adapter) generateIndexDDL(tableName string, index datastore.IndexDef) s
 // ==================== Transaction Implementation ====================
 
 type duckDBTx struct {
-	tx *sql.Tx
+	tx        *sql.Tx
+	writeMu   *sync.Mutex
+	unlockOnce sync.Once
 }
 
-// Commit commits the transaction.
+// unlock releases the adapter's write lock exactly once (used after Commit or Rollback).
+func (t *duckDBTx) unlock() { t.unlockOnce.Do(func() { t.writeMu.Unlock() }) }
+
+// Commit commits the transaction and releases the write lock.
 func (t *duckDBTx) Commit() error {
-	return t.tx.Commit()
+	err := t.tx.Commit()
+	t.unlock()
+	return err
 }
 
-// Rollback rolls back the transaction.
+// Rollback rolls back the transaction and releases the write lock.
 func (t *duckDBTx) Rollback() error {
-	return t.tx.Rollback()
+	err := t.tx.Rollback()
+	t.unlock()
+	return err
 }
 
 // BulkInsert inserts multiple rows within the transaction.

@@ -80,16 +80,8 @@ func (v *workflowValidatorImpl) ValidateWorkflowInstance(instance *WorkflowInsta
 		return shared.NewDomainError(shared.ErrCodeValidation, "workflow definition ID cannot be empty", nil)
 	}
 
-	// Validate status (Task Engine uses string status)
-	validStatuses := []string{"Ready", "Running", "Paused", "Success", "Failed", "Terminated"}
-	isValidStatus := false
-	for _, status := range validStatuses {
-		if instance.Status == status {
-			isValidStatus = true
-			break
-		}
-	}
-	if !isValidStatus {
+	// Validate status（大小写不敏感）
+	if !IsValidInstanceStatus(instance.Status) {
 		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid instance status: %s", instance.Status), nil)
 	}
 
@@ -166,8 +158,7 @@ func (p *progressCalculatorImpl) CalculateProgress(tasks []TaskInstance) float64
 
 	completedTasks := 0
 	for _, task := range tasks {
-		// Task Engine uses string status
-		if task.Status == "Success" || task.Status == "Skipped" {
+		if IsSuccess(task.Status) || IsSkipped(task.Status) {
 			completedTasks++
 		}
 	}
@@ -182,11 +173,7 @@ func (p *progressCalculatorImpl) EstimateRemainingTime(instance *WorkflowInstanc
 		return nil
 	}
 
-	// If workflow is completed or cancelled, no remaining time
-	// Task Engine uses string status
-	if instance.Status == "Success" ||
-		instance.Status == "Failed" ||
-		instance.Status == "Terminated" {
+	if IsTerminal(instance.Status) {
 		zero := int64(0)
 		return &zero
 	}

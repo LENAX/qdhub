@@ -1,7 +1,8 @@
 # Production: build binary and run server (glibc-based, for DuckDB)
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 WORKDIR /build
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates && rm -rf /var/lib/apt/lists/*
+# Retry apt to tolerate transient 502 from Debian mirror
+RUN for i in 1 2 3; do apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates && rm -rf /var/lib/apt/lists/* && break; sleep 20; done
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

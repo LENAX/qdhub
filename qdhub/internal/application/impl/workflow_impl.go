@@ -4,11 +4,32 @@ package impl
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 )
+
+// workflowInstanceStatusMatches 判断实例状态是否与期望的 WfInstStatus 一致（大小写不敏感）
+func workflowInstanceStatusMatches(instStatus string, want workflow.WfInstStatus) bool {
+	switch want {
+	case workflow.WfInstStatusPending:
+		return workflow.IsPending(instStatus)
+	case workflow.WfInstStatusRunning:
+		return workflow.IsRunning(instStatus)
+	case workflow.WfInstStatusPaused:
+		return workflow.IsPaused(instStatus)
+	case workflow.WfInstStatusSuccess:
+		return workflow.IsSuccess(instStatus)
+	case workflow.WfInstStatusFailed:
+		return workflow.IsFailed(instStatus)
+	case workflow.WfInstStatusCancelled:
+		return workflow.IsTerminated(instStatus)
+	default:
+		return strings.EqualFold(instStatus, string(want))
+	}
+}
 
 // WorkflowApplicationServiceImpl implements WorkflowApplicationService.
 type WorkflowApplicationServiceImpl struct {
@@ -48,13 +69,11 @@ func (s *WorkflowApplicationServiceImpl) ListWorkflowInstances(ctx context.Conte
 		return nil, fmt.Errorf("failed to list workflow instances: %w", err)
 	}
 
-	// Filter by status if specified
+	// Filter by status if specified（状态比较大小写不敏感）
 	if status != nil {
-		// Map qdhub status to Task Engine status
-		teStatus := mapQDHubStatusToTaskEngine(*status)
 		filtered := make([]*workflow.WorkflowInstance, 0)
 		for _, inst := range instances {
-			if inst.Status == teStatus {
+			if workflowInstanceStatusMatches(inst.Status, *status) {
 				filtered = append(filtered, inst)
 			}
 		}
@@ -65,10 +84,25 @@ func (s *WorkflowApplicationServiceImpl) ListWorkflowInstances(ctx context.Conte
 }
 
 // GetWorkflowStatus retrieves detailed status of a workflow instance.
+// 当状态为终态时同步到数据库，便于前端与列表 API 看到最新状态与错误信息。
 func (s *WorkflowApplicationServiceImpl) GetWorkflowStatus(ctx context.Context, instanceID shared.ID) (*workflow.WorkflowStatus, error) {
 	status, err := s.taskEngineAdapter.GetInstanceStatus(ctx, instanceID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow status: %w", err)
+	}
+	if status != nil && workflow.IsTerminal(status.Status) {
+		inst, getErr := s.workflowDefRepo.GetInstance(instanceID.String())
+		if getErr == nil && inst != nil {
+			inst.Status = status.Status
+			if status.FinishedAt != nil {
+				t := status.FinishedAt.ToTime()
+				inst.EndTime = &t
+			}
+			if status.ErrorMessage != nil {
+				inst.ErrorMessage = *status.ErrorMessage
+			}
+			_ = s.workflowDefRepo.UpdateInstance(inst)
+		}
 	}
 	return status, nil
 }

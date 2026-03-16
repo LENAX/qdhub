@@ -365,16 +365,14 @@ func (s *SyncApplicationServiceImpl) tryRecoverStalePlan(ctx context.Context, pl
 		return
 	}
 
-	statusUpper := strings.ToUpper(wfStatus.Status)
 	var newExecStatus sync.ExecStatus
-	switch statusUpper {
-	case "SUCCESS", "COMPLETED":
+	if workflow.IsSuccess(wfStatus.Status) {
 		newExecStatus = sync.ExecStatusSuccess
-	case "FAILED", "ERROR":
+	} else if workflow.IsFailed(wfStatus.Status) {
 		newExecStatus = sync.ExecStatusFailed
-	case "TERMINATED", "CANCELLED":
+	} else if workflow.IsTerminated(wfStatus.Status) {
 		newExecStatus = sync.ExecStatusCancelled
-	default:
+	} else {
 		return
 	}
 
@@ -1521,7 +1519,7 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallbackByWorkflowInstance(c
 		if rows, derr := s.syncPlanRepo.GetExecutionDetailsByExecutionID(exec.ID); derr == nil && len(rows) > 0 {
 			var sum int64
 			for _, r := range rows {
-				if r != nil && r.Status == "success" {
+				if r != nil && workflow.IsSuccess(r.Status) {
 					sum += r.RecordCount
 				}
 			}
@@ -1625,17 +1623,13 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 			progress.ErrorMessage = wfStatus.ErrorMessage
 		}
 
-		// Sync workflow terminal status to SyncExecution if not already terminal
-		// This ensures SyncExecution.Status reflects workflow completion
 		if exec.Status == sync.ExecStatusRunning || exec.Status == sync.ExecStatusPending {
 			var newStatus sync.ExecStatus
-			statusUpper := strings.ToUpper(wfStatus.Status)
-			switch statusUpper {
-			case "SUCCESS", "COMPLETED":
+			if workflow.IsSuccess(wfStatus.Status) {
 				newStatus = sync.ExecStatusSuccess
-			case "FAILED", "ERROR":
+			} else if workflow.IsFailed(wfStatus.Status) {
 				newStatus = sync.ExecStatusFailed
-			case "TERMINATED", "CANCELLED":
+			} else if workflow.IsTerminated(wfStatus.Status) {
 				newStatus = sync.ExecStatusCancelled
 			}
 
@@ -1646,7 +1640,7 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 					allSuccess := true
 					var sum int64
 					for _, d := range details {
-						if d.Status != "success" {
+						if !workflow.IsSuccess(d.Status) {
 							allSuccess = false
 							break
 						}
@@ -1903,7 +1897,7 @@ func (s *SyncApplicationServiceImpl) GetExecutionDetail(ctx context.Context, exe
 	var totalRows int64
 	for _, r := range rows {
 		totalRows += r.RecordCount
-		if r.Status == "success" {
+		if workflow.IsSuccess(r.Status) {
 			successCount++
 		} else {
 			failedCount++
@@ -1923,7 +1917,7 @@ func (s *SyncApplicationServiceImpl) GetExecutionDetail(ctx context.Context, exe
 		}
 		st.TaskCount++
 		st.TotalRows += r.RecordCount
-		if r.Status == "success" {
+		if workflow.IsSuccess(r.Status) {
 			st.SuccessCount++
 		} else {
 			st.FailedCount++

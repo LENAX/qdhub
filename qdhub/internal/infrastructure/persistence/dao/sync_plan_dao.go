@@ -525,9 +525,9 @@ func (d *SyncTaskDAO) toRow(entity *sync.SyncTask) (*SyncTaskRow, error) {
 		SyncPlanID:    entity.SyncPlanID.String(),
 		APIName:       entity.APIName,
 		SyncMode:      entity.SyncMode.String(),
-		Params:        params,
-		ParamMappings: paramMappings,
-		Dependencies:  dependencies,
+		Params:        sql.NullString{String: params, Valid: params != ""},
+		ParamMappings: sql.NullString{String: paramMappings, Valid: paramMappings != ""},
+		Dependencies:  sql.NullString{String: dependencies, Valid: dependencies != ""},
 		Level:         entity.Level,
 		SortOrder:     entity.SortOrder,
 		SyncFrequency: int64(entity.SyncFrequency),
@@ -558,15 +558,27 @@ func (d *SyncTaskDAO) toEntity(row *SyncTaskRow) (*sync.SyncTask, error) {
 		entity.LastSyncedAt = &row.LastSyncedAt.Time
 	}
 
-	if err := entity.UnmarshalParamsJSON(row.Params); err != nil {
+	paramsStr := ""
+	if row.Params.Valid {
+		paramsStr = row.Params.String
+	}
+	if err := entity.UnmarshalParamsJSON(paramsStr); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
 	}
 
-	if err := entity.UnmarshalParamMappingsJSON(row.ParamMappings); err != nil {
+	paramMappingsStr := ""
+	if row.ParamMappings.Valid {
+		paramMappingsStr = row.ParamMappings.String
+	}
+	if err := entity.UnmarshalParamMappingsJSON(paramMappingsStr); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal param mappings: %w", err)
 	}
 
-	if err := entity.UnmarshalDependenciesJSON(row.Dependencies); err != nil {
+	depsStr := ""
+	if row.Dependencies.Valid {
+		depsStr = row.Dependencies.String
+	}
+	if err := entity.UnmarshalDependenciesJSON(depsStr); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal dependencies: %w", err)
 	}
 
