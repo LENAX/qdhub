@@ -1,0 +1,36 @@
+# ts_proxy — Tushare 实时行情转发服务 (内地部署)
+# 安装: sudo cp ts_proxy.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# 配置: 创建 /etc/ts_proxy/env 或使用下方 Environment 覆盖
+# 启动: sudo systemctl enable ts_proxy && sudo systemctl start ts_proxy
+
+[Unit]
+Description=Tushare Realtime Forward Proxy (ts_proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tsproxy
+Group=tsproxy
+
+# 环境变量由 ts_proxy 读取（flag 会 fallback 到 env）。可选环境文件示例：
+# TUSHARE_TOKEN=xxx
+# RSA_PRIVATE_KEY_PATH=/etc/ts_proxy/private.pem
+# LISTEN_ADDR=:8888
+# TUSHARE_TOPIC=HQ_STK_TICK
+# TUSHARE_CODES=0*.SZ,3*.SZ,6*.SH
+EnvironmentFile=-/etc/ts_proxy/env
+
+ExecStart=/opt/ts_proxy/ts_proxy
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ts_proxy
+
+# 若未使用 EnvironmentFile，则必须通过环境变量或 ExecStart 传入 TUSHARE_TOKEN 与 RSA_PRIVATE_KEY_PATH
+# 创建系统用户: sudo useradd -r -s /bin/false tsproxy
+
+[Install]
+WantedBy=multi-user.target
