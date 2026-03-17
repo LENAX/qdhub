@@ -354,7 +354,7 @@ func TestDefaultTypeMapper_UnknownType(t *testing.T) {
 	mapper := typemap.NewDefaultTypeMapper()
 
 	field := metadata.FieldMeta{Name: "unknown", Type: "unknown_type"}
-	
+
 	// Should fallback to VARCHAR for DuckDB
 	result := mapper.MapFieldType(field, "tushare", datastore.DataStoreTypeDuckDB)
 	if result != "VARCHAR" {

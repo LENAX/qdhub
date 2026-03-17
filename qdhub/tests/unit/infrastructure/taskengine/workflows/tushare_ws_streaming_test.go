@@ -52,4 +52,3 @@ func TestTushareWSStreamingBuilder_BuildValidationError(t *testing.T) {
 		t.Fatalf("expected validation error for empty params")
 	}
 }
-

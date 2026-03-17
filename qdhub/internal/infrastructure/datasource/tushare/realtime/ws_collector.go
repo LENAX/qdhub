@@ -66,6 +66,10 @@ func (c *TushareWSTickCollector) Run(
 
 		start := time.Now()
 		if err := c.runOnce(ctx, cfg, publish); err != nil {
+			if IsRealtimeBanError(err) {
+				// 主动终止工作流，由引擎置为失败并停止
+				return fmt.Errorf("实时行情接口被限制，工作流已取消: %w", err)
+			}
 			logrus.Warnf("[TushareWSTickCollector] stream stopped: %v", err)
 		}
 		if time.Since(start) > 30*time.Second {

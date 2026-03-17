@@ -89,8 +89,8 @@ type mockDailyClient struct {
 	data []map[string]interface{}
 }
 
-func (c *mockDailyClient) Name() string                  { return "tushare" }
-func (c *mockDailyClient) SetToken(token string)         {}
+func (c *mockDailyClient) Name() string          { return "tushare" }
+func (c *mockDailyClient) SetToken(token string) {}
 func (c *mockDailyClient) Query(ctx context.Context, apiName string, params map[string]interface{}) (*datasource.QueryResult, error) {
 	if apiName != "daily" {
 		return &datasource.QueryResult{Data: nil, Total: int64(0), HasMore: false}, nil

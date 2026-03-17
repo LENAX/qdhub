@@ -100,7 +100,7 @@ func createTestDataSource(t *testing.T, db *persistence.DB, name string) *metada
 	_, err := db.Exec(
 		`INSERT INTO data_sources (id, name, description, base_url, doc_url, status, created_at, updated_at) 
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		ds.ID.String(), ds.Name, ds.Description, ds.BaseURL, ds.DocURL, ds.Status, 
+		ds.ID.String(), ds.Name, ds.Description, ds.BaseURL, ds.DocURL, ds.Status,
 		ds.CreatedAt.ToTime(), ds.UpdatedAt.ToTime(),
 	)
 	if err != nil {

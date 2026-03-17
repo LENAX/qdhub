@@ -307,7 +307,8 @@ func (s *DataStoreApplicationServiceImpl) ListDatastoreTables(ctx context.Contex
 // GetDatastoreTableData returns a page of rows from a table and the total row count.
 // tableName must be in the whitelist from ListDatastoreTables.
 // If searchQ is non-empty, filters by ILIKE; searchColumn (optional) restricts to one column.
-func (s *DataStoreApplicationServiceImpl) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) ([]map[string]any, int64, error) {
+// orderBy is a table column name for ORDER BY (whitelisted); order is "asc" or "desc" (default "asc").
+func (s *DataStoreApplicationServiceImpl) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn, orderBy, order string) ([]map[string]any, int64, error) {
 	ds, err := s.dataStoreRepo.Get(id)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get data store: %w", err)
@@ -371,6 +372,30 @@ func (s *DataStoreApplicationServiceImpl) GetDatastoreTableData(ctx context.Cont
 	// Build WHERE fragment from whitelisted column names only; placeholders for pattern (bound later).
 	whereFragment, patternCount := buildSearchWhereFragment(searchCols)
 
+	// Optional ORDER BY: orderBy must be a column in the table (whitelist); order is asc/desc.
+	orderByFragment := ""
+	if strings.TrimSpace(orderBy) != "" {
+		colNames, errCol := s.getTableColumnNames(ctx, ds, tableName)
+		if errCol != nil {
+			return nil, 0, fmt.Errorf("failed to get table columns: %w", errCol)
+		}
+		var allowedCol bool
+		for _, c := range colNames {
+			if c == orderBy {
+				allowedCol = true
+				break
+			}
+		}
+		if !allowedCol {
+			return nil, 0, shared.NewDomainError(shared.ErrCodeValidation, "order_by column not in table", nil)
+		}
+		dir := "ASC"
+		if strings.EqualFold(strings.TrimSpace(order), "desc") {
+			dir = "DESC"
+		}
+		orderByFragment = " ORDER BY " + quoteIdentifier(orderBy) + " " + dir
+	}
+
 	// COUNT: use bound parameters for pattern only.
 	const countBase = "SELECT COUNT(*) AS n FROM "
 	countSQL := countBase + quotedTable + whereFragment
@@ -405,10 +430,10 @@ func (s *DataStoreApplicationServiceImpl) GetDatastoreTableData(ctx context.Cont
 		}
 	}
 
-	// SELECT: same WHERE; LIMIT/OFFSET as bound parameters.
+	// SELECT: same WHERE; optional ORDER BY; LIMIT/OFFSET as bound parameters.
 	const dataBase = "SELECT * FROM "
 	const limitFragment = " LIMIT ? OFFSET ?"
-	dataSQL := dataBase + quotedTable + whereFragment + limitFragment
+	dataSQL := dataBase + quotedTable + whereFragment + orderByFragment + limitFragment
 	var dataArgs []any
 	if patternCount > 0 {
 		patternArg := "%" + strings.TrimSpace(searchQ) + "%"

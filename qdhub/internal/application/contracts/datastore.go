@@ -48,7 +48,8 @@ type DataStoreApplicationService interface {
 	// GetDatastoreTableData returns a page of rows from a table and the total row count.
 	// tableName must be one of the names returned by ListDatastoreTables (whitelist).
 	// If searchQ is non-empty, filters rows by searchQ (ILIKE); searchColumn restricts to one column (must be in table) or empty for all columns.
-	GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) (rows []map[string]any, total int64, err error)
+	// orderBy is a table column name for ORDER BY (whitelisted); order is "asc" or "desc" (default "asc").
+	GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn, orderBy, order string) (rows []map[string]any, total int64, err error)
 }
 
 // ==================== Request/Response DTOs ====================

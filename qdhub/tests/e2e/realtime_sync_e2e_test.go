@@ -35,8 +35,10 @@ import (
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
+	"qdhub/internal/infrastructure/quantdb/writequeue"
 	"qdhub/internal/infrastructure/realtimebuffer"
 	"qdhub/internal/infrastructure/taskengine"
+	"qdhub/pkg/config"
 )
 
 // ==================== Mock Realtime Adapter（CSV 数据）====================
@@ -268,11 +270,14 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		DataSourceRegistry:      nil, // 实时不依赖 Tushare registry
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: adapterReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -305,6 +310,7 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 	)
 
 	cleanup := func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -528,10 +534,13 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: adapterReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -548,6 +557,7 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -745,10 +755,13 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: adapterReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -765,6 +778,7 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -972,10 +986,13 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: adapterReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -992,6 +1009,7 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -1162,10 +1180,13 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: adapterReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -1182,6 +1203,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -1356,10 +1378,13 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: eastReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -1376,6 +1401,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -1561,10 +1587,13 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: eastReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -1581,6 +1610,7 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)
@@ -1748,10 +1778,13 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 	syncPlanRepo := repository.NewSyncPlanRepository(db)
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
+	wqCfg := config.Default().QuantDB.WriteQueue
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
 		QuantDBFactory:          quantDBFactory,
+		QuantDBWriteQueue:       quantDBWriteQueue,
 		RealtimeAdapterRegistry: eastReg,
 		RealtimeBufferRegistry:  bufReg,
 	}
@@ -1768,6 +1801,7 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 	)
 
 	defer func() {
+		_ = quantDBWriteQueue.Close()
 		eng.Stop()
 		os.Remove(dsn)
 		os.Remove(duckDBPath)

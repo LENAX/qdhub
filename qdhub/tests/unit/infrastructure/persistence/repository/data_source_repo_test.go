@@ -122,16 +122,16 @@ func TestDataSourceRepository_Create_WithAggregates(t *testing.T) {
 	repo := repository.NewDataSourceRepository(db)
 
 	ds := metadata.NewDataSource("Test Source", "Test Description", "https://api.test.com", "https://docs.test.com")
-	
+
 	// Add category
 	category := metadata.NewAPICategory(ds.ID, "Stock", "Stock data", "/stock", nil, 1)
 	ds.Categories = []metadata.APICategory{*category}
-	
+
 	// Add API metadata
 	api := metadata.NewAPIMetadata(ds.ID, "daily", "Daily Price", "Daily stock price", "/daily")
 	api.CategoryID = &category.ID
 	ds.APIs = []metadata.APIMetadata{*api}
-	
+
 	// Add token
 	token := metadata.NewToken(ds.ID, "test-token-123", nil)
 	ds.Token = token
@@ -270,7 +270,7 @@ func TestDataSourceRepository_Delete_Cascade(t *testing.T) {
 	ds := metadata.NewDataSource("Test Source", "Test Description", "https://api.test.com", "https://docs.test.com")
 	category := metadata.NewAPICategory(ds.ID, "Stock", "Stock data", "/stock", nil, 1)
 	ds.Categories = []metadata.APICategory{*category}
-	
+
 	err := repo.Create(ds)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)

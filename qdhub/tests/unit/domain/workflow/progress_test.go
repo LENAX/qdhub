@@ -11,16 +11,16 @@ func TestProgressCalculator_CalculateProgress(t *testing.T) {
 	calculator := workflow.NewProgressCalculator()
 
 	tests := []struct {
-		name           string
-		tasks          []workflow.TaskInstance
-		expectedMin    float64
-		expectedMax    float64
+		name        string
+		tasks       []workflow.TaskInstance
+		expectedMin float64
+		expectedMax float64
 	}{
 		{
-			name:           "empty tasks",
-			tasks:          []workflow.TaskInstance{},
-			expectedMin:    0.0,
-			expectedMax:    0.0,
+			name:        "empty tasks",
+			tasks:       []workflow.TaskInstance{},
+			expectedMin: 0.0,
+			expectedMax: 0.0,
 		},
 		{
 			name: "all pending",
@@ -105,7 +105,7 @@ func TestProgressCalculator_CalculateProgress(t *testing.T) {
 			progress := calculator.CalculateProgress(tt.tasks)
 
 			if progress < tt.expectedMin || progress > tt.expectedMax {
-				t.Errorf("CalculateProgress() = %v, expected between %v and %v", 
+				t.Errorf("CalculateProgress() = %v, expected between %v and %v",
 					progress, tt.expectedMin, tt.expectedMax)
 			}
 		})

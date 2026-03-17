@@ -680,8 +680,12 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
 		}
 	} else {
-		// 批量工作流
-		apiConfigs := s.convertToAPIConfigs(plan.ExecutionGraph, needSyncTasks)
+		// 批量工作流：用当前 DB 策略重新解析执行图，避免 api_sync_strategies 已改（如 moneyflow 改为 trade_date）后仍用旧图导致传 ts_code
+		freshGraph, _, resolveErr := s.resolveExecutionGraphForPlan(ctx, plan)
+		if resolveErr != nil {
+			return "", fmt.Errorf("resolve execution graph for run: %w", resolveErr)
+		}
+		apiConfigs := s.convertToAPIConfigsFromGraph(freshGraph, needSyncTasks)
 		instanceID, err = s.workflowExecutor.ExecuteBatchDataSync(ctx, workflow.BatchDataSyncRequest{
 			DataSourceID:   plan.DataSourceID,
 			DataSourceName: ds.Name,
@@ -744,6 +748,32 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	}
 
 	return executionID, nil
+}
+
+// resolveExecutionGraphForPlan 用当前 DB 中的 api_sync_strategies 与 api_metadata 重新解析执行图，不落库。
+// 用于执行时拿到最新策略（如 moneyflow 已改为 trade_date），避免使用计划中缓存的旧 ExecutionGraph。
+func (s *SyncApplicationServiceImpl) resolveExecutionGraphForPlan(ctx context.Context, plan *sync.SyncPlan) (*sync.ExecutionGraph, []string, error) {
+	allAPIs, err := s.dataSourceRepo.ListAPIMetadataByDataSource(plan.DataSourceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list API metadata: %w", err)
+	}
+	allAPIDependencies := make(map[string][]sync.ParamDependency)
+	for _, api := range allAPIs {
+		deps := make([]sync.ParamDependency, len(api.ParamDependencies))
+		for i, dep := range api.ParamDependencies {
+			deps[i] = sync.ParamDependency{
+				ParamName:   dep.ParamName,
+				SourceAPI:   dep.SourceAPI,
+				SourceField: dep.SourceField,
+				IsList:      dep.IsList,
+				FilterField: dep.FilterField,
+				FilterValue: dep.FilterValue,
+			}
+		}
+		allAPIDependencies[api.Name] = deps
+	}
+	s.supplementDependenciesFromStrategies(ctx, plan.DataSourceID, allAPIs, allAPIDependencies)
+	return s.dependencyResolver.Resolve(plan.SelectedAPIs, allAPIDependencies)
 }
 
 // supplementDependenciesFromStrategies 用 api_sync_strategies 的 preferred_param/support_date_range
@@ -976,6 +1006,12 @@ func (s *SyncApplicationServiceImpl) filterTasksByFrequency(tasks []*sync.SyncTa
 // convertToAPIConfigs converts ExecutionGraph and tasks to API configs.
 // 从 SyncTask.ParamMappings 填充 ParamKey、UpstreamTask、UpstreamParams，使工作流按计划依赖与参数执行。
 func (s *SyncApplicationServiceImpl) convertToAPIConfigs(graph *sync.ExecutionGraph, tasks []*sync.SyncTask) []workflow.APISyncConfig {
+	return s.convertToAPIConfigsFromGraph(graph, tasks)
+}
+
+// convertToAPIConfigsFromGraph 从 ExecutionGraph.TaskConfigs 为给定 tasks 生成 API 配置。
+// 使用 graph 中的 TaskConfigs（可来自当前 DB 策略的重新解析），保证执行时使用最新 preferred_param/依赖。
+func (s *SyncApplicationServiceImpl) convertToAPIConfigsFromGraph(graph *sync.ExecutionGraph, tasks []*sync.SyncTask) []workflow.APISyncConfig {
 	configs := make([]workflow.APISyncConfig, 0, len(tasks))
 
 	for _, task := range tasks {
@@ -991,15 +1027,29 @@ func (s *SyncApplicationServiceImpl) convertToAPIConfigs(graph *sync.ExecutionGr
 			config.ExtraParams = task.Params
 		}
 
-		// 从 ParamMappings 填充模板/直接任务的参数来源
-		if len(task.ParamMappings) > 0 {
-			first := task.ParamMappings[0]
+		// 优先从 graph.TaskConfigs 取参数映射（反映当前 DB 策略），若无则回退到 task.ParamMappings
+		var paramMappings []sync.ParamMapping
+		if graph != nil && graph.TaskConfigs != nil {
+			if tc := graph.TaskConfigs[task.APIName]; tc != nil {
+				paramMappings = tc.ParamMappings
+				config.SyncMode = tc.SyncMode.String()
+				if len(tc.Dependencies) > 0 {
+					config.Dependencies = tc.Dependencies
+				}
+			}
+		}
+		if len(paramMappings) == 0 {
+			paramMappings = task.ParamMappings
+		}
+
+		if len(paramMappings) > 0 {
+			first := paramMappings[0]
 			config.ParamKey = first.ParamName
 			config.UpstreamTask = first.SourceTask
-			if task.SyncMode == sync.TaskSyncModeDirect {
-				// direct 模式：构建 upstream_params 供 SyncAPIData 的 resolveUpstreamParams 使用
+			mode := sync.TaskSyncMode(config.SyncMode)
+			if mode == sync.TaskSyncModeDirect {
 				config.UpstreamParams = make(map[string]interface{})
-				for _, m := range task.ParamMappings {
+				for _, m := range paramMappings {
 					extractedField := m.SourceField
 					if extractedField == "cal_date" {
 						extractedField = "cal_dates"
@@ -1677,6 +1727,8 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 						errMsg = *wfStatus.ErrorMessage
 					}
 					exec.MarkFailed(errMsg)
+					// 保留工作流原始错误信息，便于前端/执行详情展示（如被 ban、超时、断连无法重连）
+					exec.WorkflowErrorMessage = wfStatus.ErrorMessage
 				case sync.ExecStatusCancelled:
 					exec.MarkCancelled()
 				}

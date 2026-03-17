@@ -112,7 +112,7 @@ func (m *FullMockDataStoreService) CreateTablesForDatasource(ctx context.Context
 func (m *FullMockDataStoreService) ListDatastoreTables(ctx context.Context, id shared.ID) ([]string, error) {
 	return nil, nil
 }
-func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) ([]map[string]any, int64, error) {
+func (m *FullMockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn, orderBy, order string) ([]map[string]any, int64, error) {
 	return nil, 0, nil
 }
 
@@ -153,8 +153,12 @@ func (m *FullMockSyncService) ListPlanExecutionHistory(ctx context.Context, plan
 func (m *FullMockSyncService) CancelExecution(ctx context.Context, executionID shared.ID) error {
 	return nil
 }
-func (m *FullMockSyncService) PauseExecution(ctx context.Context, executionID shared.ID) error { return nil }
-func (m *FullMockSyncService) ResumeExecution(ctx context.Context, executionID shared.ID) error { return nil }
+func (m *FullMockSyncService) PauseExecution(ctx context.Context, executionID shared.ID) error {
+	return nil
+}
+func (m *FullMockSyncService) ResumeExecution(ctx context.Context, executionID shared.ID) error {
+	return nil
+}
 func (m *FullMockSyncService) EnablePlan(ctx context.Context, planID shared.ID) error  { return nil }
 func (m *FullMockSyncService) DisablePlan(ctx context.Context, planID shared.ID) error { return nil }
 func (m *FullMockSyncService) UpdatePlanSchedule(ctx context.Context, planID shared.ID, cronExpression string) error {
@@ -213,7 +217,7 @@ func TestNewServer(t *testing.T) {
 		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, nil, "",
+		nil, nil, nil, nil, nil, "",
 	)
 
 	assert.NotNil(t, server)
@@ -231,7 +235,7 @@ func TestHealthCheck(t *testing.T) {
 		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, nil, "",
+		nil, nil, nil, nil, nil, "",
 	)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
@@ -254,7 +258,7 @@ func TestServerShutdown(t *testing.T) {
 		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, nil, "",
+		nil, nil, nil, nil, nil, "",
 	)
 
 	// Test shutdown without starting
@@ -285,7 +289,7 @@ func TestAPIRoutes(t *testing.T) {
 		nil,
 		&FullMockSyncService{},
 		&FullMockWorkflowService{},
-		nil, nil, nil, "",
+		nil, nil, nil, nil, nil, "",
 	)
 
 	// Test that all routes are registered

@@ -46,8 +46,10 @@ import (
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
+	"qdhub/internal/infrastructure/quantdb/writequeue"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
+	appconfig "qdhub/pkg/config"
 )
 
 // ==================== 测试模式配置 ====================
@@ -647,10 +649,17 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		DataSourceRegistry: dsRegistry,
 		MetadataRepo:       metadataRepo,
 	}
-	// 有 DuckDB 时注册（真实模式或 Mock 模式 Analysis E2E）
+	// 有 DuckDB 时注册 Factory + WriteQueue（Sync/Realtime 写库经 WriteQueue）及兼容用 QuantDB
+	var quantDBFactory datastore.QuantDBFactory
+	var quantDBWriteQueue datastore.QuantDBWriteQueue
 	if duckDBAdapter != nil {
 		taskEngineDeps.QuantDB = duckDBAdapter
-		t.Logf("✅ 已注册 QuantDB (DuckDB Adapter)")
+		quantDBFactory = duckdb.NewFactory()
+		wqCfg := appconfig.Default().QuantDB.WriteQueue
+		quantDBWriteQueue = writequeue.NewQueue(wqCfg, quantDBFactory)
+		taskEngineDeps.QuantDBFactory = quantDBFactory
+		taskEngineDeps.QuantDBWriteQueue = quantDBWriteQueue
+		t.Logf("✅ 已注册 QuantDB / QuantDBFactory / QuantDBWriteQueue")
 	}
 	err = taskengine.Initialize(ctx, eng, taskEngineDeps)
 	require.NoError(t, err)
@@ -708,7 +717,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		taskEngineAdapter,
 		uowImpl,
 		metadataRepo,
-		nil, // quantDBFactory
+		quantDBFactory,
 	)
 
 	// 13. 有 QuantDB 时创建 Analysis 应用服务（含兜底），供 Analysis E2E 使用
@@ -727,6 +736,9 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	}
 
 	cleanup := func() {
+		if quantDBWriteQueue != nil {
+			_ = quantDBWriteQueue.Close()
+		}
 		eng.Stop()
 		if duckDBAdapter != nil {
 			duckDBAdapter.Close()
@@ -774,13 +786,13 @@ func waitForWorkflowCompletionQuiet(ctx context.Context, adapter workflow.TaskEn
 
 		elapsed := time.Since(startTime).Round(time.Millisecond)
 
-		// 检查是否完成（成功或失败）
-		switch status.Status {
-		case "Success", "Completed", "success", "completed":
+		if workflow.IsSuccess(status.Status) {
 			return status, nil
-		case "Failed", "failed", "Error", "error":
+		}
+		if workflow.IsFailed(status.Status) {
 			return status, fmt.Errorf("workflow failed after %v: %v", elapsed, status.ErrorMessage)
-		case "Cancelled", "cancelled":
+		}
+		if workflow.IsTerminated(status.Status) {
 			return status, fmt.Errorf("workflow cancelled after %v", elapsed)
 		}
 
@@ -814,15 +826,15 @@ func waitForWorkflowCompletion(ctx context.Context, adapter workflow.TaskEngineA
 			pollCount, elapsed, remaining, status.Status, status.Progress,
 			status.TaskCount, status.CompletedTask, status.FailedTask)
 
-		// 检查是否完成（成功或失败）
-		switch status.Status {
-		case "Success", "Completed", "success", "completed":
+		if workflow.IsSuccess(status.Status) {
 			fmt.Printf("✅ Workflow 完成! 总耗时: %v\n", elapsed)
 			return status, nil
-		case "Failed", "failed", "Error", "error":
+		}
+		if workflow.IsFailed(status.Status) {
 			fmt.Printf("❌ Workflow 失败! 总耗时: %v, 错误: %v\n", elapsed, status.ErrorMessage)
 			return status, fmt.Errorf("workflow failed: %v", status.ErrorMessage)
-		case "Cancelled", "cancelled":
+		}
+		if workflow.IsTerminated(status.Status) {
 			fmt.Printf("⚠️ Workflow 已取消! 总耗时: %v\n", elapsed)
 			return status, fmt.Errorf("workflow cancelled")
 		}
@@ -1121,8 +1133,8 @@ func TestE2E_BuiltinWorkflow_FullPipeline(t *testing.T) {
 		}
 
 		execReq := contracts.ExecuteSyncPlanRequest{
-			StartDate:    startDate,
-			EndDate:      endDate,
+			StartDate: startDate,
+			EndDate:   endDate,
 		}
 
 		executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlanID, execReq)
@@ -1399,8 +1411,8 @@ func TestE2E_SyncPlan_FullLifecycle(t *testing.T) {
 	var executionID shared.ID
 	t.Run("Step6_ExecuteSyncPlan", func(t *testing.T) {
 		execReq := contracts.ExecuteSyncPlanRequest{
-			StartDate:    "20251201",
-			EndDate:      "20251215",
+			StartDate: "20251201",
+			EndDate:   "20251215",
 		}
 
 		executionID, err = testCtx.syncAppService.ExecuteSyncPlan(ctx, planID, execReq)
@@ -1889,8 +1901,8 @@ func TestE2E_DataSyncOnly(t *testing.T) {
 	t.Logf("  日期范围: %s ~ %s", startDate, endDate)
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, syncPlan.ID, contracts.ExecuteSyncPlanRequest{
-		StartDate:    startDate,
-		EndDate:      endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err, "执行 SyncPlan 失败")
 	t.Logf("✅ SyncPlan 执行已启动: ExecutionID=%s", executionID)
@@ -2080,8 +2092,8 @@ func TestE2E_GGT_Top10(t *testing.T) {
 	endDate := time.Now().Format("20060102")                     // 今天
 
 	executionID, err := testCtx.syncAppService.ExecuteSyncPlan(ctx, plan.ID, contracts.ExecuteSyncPlanRequest{
-		StartDate:    startDate,
-		EndDate:      endDate,
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	require.NoError(t, err, "执行 SyncPlan 失败")
 	t.Logf("  ✅ SyncPlan 执行已启动: ExecutionID=%s", executionID)

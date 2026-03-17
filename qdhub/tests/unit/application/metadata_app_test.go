@@ -362,19 +362,45 @@ func (m *MockMetadataRepository) DeleteAPISyncStrategiesByDataSource(ctx context
 }
 
 // Stub methods for other Repository interface methods (not used in tests)
-func (m *MockMetadataRepository) SaveCategories(ctx context.Context, categories []metadata.APICategory) error { return nil }
-func (m *MockMetadataRepository) DeleteCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) error { return nil }
-func (m *MockMetadataRepository) SaveAPIMetadata(ctx context.Context, meta *metadata.APIMetadata) error { return nil }
-func (m *MockMetadataRepository) SaveAPIMetadataBatch(ctx context.Context, metas []metadata.APIMetadata) error { return nil }
-func (m *MockMetadataRepository) DeleteAPIMetadata(ctx context.Context, id shared.ID) error { return nil }
-func (m *MockMetadataRepository) DeleteAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) error { return nil }
-func (m *MockMetadataRepository) GetDataSource(ctx context.Context, id shared.ID) (*metadata.DataSource, error) { return nil, nil }
-func (m *MockMetadataRepository) GetDataSourceByName(ctx context.Context, name string) (*metadata.DataSource, error) { return nil, nil }
-func (m *MockMetadataRepository) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) { return nil, nil }
-func (m *MockMetadataRepository) GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error) { return nil, nil }
-func (m *MockMetadataRepository) ListCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) { return nil, nil }
-func (m *MockMetadataRepository) ListCategoriesByDataSourceWithAPIs(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) { return nil, nil }
-func (m *MockMetadataRepository) ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APIMetadata, error) { return nil, nil }
+func (m *MockMetadataRepository) SaveCategories(ctx context.Context, categories []metadata.APICategory) error {
+	return nil
+}
+func (m *MockMetadataRepository) DeleteCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) error {
+	return nil
+}
+func (m *MockMetadataRepository) SaveAPIMetadata(ctx context.Context, meta *metadata.APIMetadata) error {
+	return nil
+}
+func (m *MockMetadataRepository) SaveAPIMetadataBatch(ctx context.Context, metas []metadata.APIMetadata) error {
+	return nil
+}
+func (m *MockMetadataRepository) DeleteAPIMetadata(ctx context.Context, id shared.ID) error {
+	return nil
+}
+func (m *MockMetadataRepository) DeleteAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) error {
+	return nil
+}
+func (m *MockMetadataRepository) GetDataSource(ctx context.Context, id shared.ID) (*metadata.DataSource, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) GetDataSourceByName(ctx context.Context, name string) (*metadata.DataSource, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) GetToken(ctx context.Context, dataSourceID shared.ID) (*metadata.Token, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) GetAPIMetadata(ctx context.Context, id shared.ID) (*metadata.APIMetadata, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) ListCategoriesByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) ListCategoriesByDataSourceWithAPIs(ctx context.Context, dataSourceID shared.ID) ([]metadata.APICategory, error) {
+	return nil, nil
+}
+func (m *MockMetadataRepository) ListAPIMetadataByDataSource(ctx context.Context, dataSourceID shared.ID) ([]metadata.APIMetadata, error) {
+	return nil, nil
+}
 func (m *MockMetadataRepository) ListAPIMetadataByDataSourcePaginated(ctx context.Context, dataSourceID shared.ID, idFilter *shared.ID, nameFilter string, categoryIDFilter *shared.ID, page, pageSize int) ([]metadata.APIMetadata, int64, error) {
 	return nil, 0, nil
 }
@@ -467,4 +493,3 @@ func TestMetadataApplicationService_GetDataSource(t *testing.T) {
 		}
 	})
 }
-

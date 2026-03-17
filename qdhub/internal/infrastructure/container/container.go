@@ -1011,6 +1011,9 @@ func (c *Container) initAuth() error {
 		logrus.Info("Default RBAC policies initialized")
 	} else {
 		logrus.Info("Existing RBAC policies loaded from database")
+		if err := authinfra.EnsureAPISyncStrategiesPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure api-sync-strategies policies: %w", err)
+		}
 		if err := authinfra.EnsureWatchlistPolicies(enforcer); err != nil {
 			return fmt.Errorf("failed to ensure watchlist policies: %w", err)
 		}

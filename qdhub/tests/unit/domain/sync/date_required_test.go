@@ -34,7 +34,7 @@ func TestPlanRequiresDateRange(t *testing.T) {
 			apiNames: []string{"stock_basic", "daily"},
 			paramNamesByAPI: map[string][]string{
 				"stock_basic": {"ts_code", "name"},
-				"daily":      {"ts_code", "trade_date"},
+				"daily":       {"ts_code", "trade_date"},
 			},
 			want: true,
 		},

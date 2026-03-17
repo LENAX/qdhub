@@ -581,7 +581,7 @@ func TestE2E_Analysis_DragonTiger_MoneyFlow_Empty(t *testing.T) {
 		// 先尝试获取一次龙虎榜/资金流向，有数据则跳过同步（仅真实模式且需 Tushare）
 		if testCtx.config.IsRealMode && testCtx.config.TushareToken != "" {
 			list, errList := testCtx.analysisAppService.GetDragonTigerList(ctx, analysis.DragonTigerRequest{TradeDate: &tradeDate, Limit: 10, Offset: 0})
-			flow, errFlow := testCtx.analysisAppService.GetMoneyFlow(ctx, analysis.MoneyFlowRequest{TradeDate: tradeDate, Limit: 10, Offset: 0})
+			flow, errFlow := testCtx.analysisAppService.GetMoneyFlow(ctx, analysis.MoneyFlowRequest{TradeDate: &tradeDate, Limit: 10, Offset: 0})
 			if errList == nil && errFlow == nil && (len(list) > 0 || len(flow) > 0) {
 				t.Log("DuckDB 已有 top_list/moneyflow 数据，跳过同步")
 				logTableLine(t, "DuckDB 已有 top_list/moneyflow 数据，跳过同步", logFile)
@@ -605,7 +605,7 @@ func TestE2E_Analysis_DragonTiger_MoneyFlow_Empty(t *testing.T) {
 	assert.NotNil(t, list)
 	printDragonTigerTable(t, list, logFile)
 
-	flow, err := testCtx.analysisAppService.GetMoneyFlow(ctx, analysis.MoneyFlowRequest{TradeDate: tradeDate, Limit: 10, Offset: 0})
+	flow, err := testCtx.analysisAppService.GetMoneyFlow(ctx, analysis.MoneyFlowRequest{TradeDate: &tradeDate, Limit: 10, Offset: 0})
 	if err != nil && strings.Contains(err.Error(), "not found in FROM clause") {
 		t.Skipf("现有 DB 中 moneyflow 表结构与 Reader 不一致，跳过: %v", err)
 	}

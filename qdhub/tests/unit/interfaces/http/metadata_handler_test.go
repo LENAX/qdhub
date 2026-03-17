@@ -270,7 +270,6 @@ func TestGetDataSourceNotFound(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-
 func TestCreateDataSourceInvalidBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
 	router := setupMetadataRouter(mockSvc)
@@ -294,13 +293,8 @@ func TestCreateDataSourceInvalidBody(t *testing.T) {
 	assert.Equal(t, 400, resp.Code)
 }
 
-
 // Note: Tests for deleted routes (ListAPIsByDataSource, GetCategories, etc.)
 // have been removed as these routes are no longer part of the MetadataHandler.
-
-
-
-
 
 func TestSetToken(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -470,9 +464,6 @@ func TestCreateDataSourceServiceError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-
-
-
 func TestRefreshMetadataWithOptionalBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
 	router := setupMetadataRouter(mockSvc)
@@ -520,14 +511,6 @@ func TestRefreshMetadataError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	mockSvc.AssertExpectations(t)
 }
-
-
-
-
-
-
-
-
 
 func TestSetTokenInvalidBody(t *testing.T) {
 	mockSvc := new(MockMetadataService)
@@ -578,4 +561,3 @@ func TestGetTokenError(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	mockSvc.AssertExpectations(t)
 }
-

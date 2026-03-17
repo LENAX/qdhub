@@ -301,7 +301,7 @@ func TestValueObjects_JSON(t *testing.T) {
 			Name:        "ts_code",
 			Type:        "str",
 			Required:    true,
-			Default:     &defaultVal,
+			Default:     defaultVal,
 			Description: "股票代码",
 		}
 

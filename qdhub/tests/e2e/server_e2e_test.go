@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
+	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 )
 
@@ -69,6 +70,7 @@ func runAllMigrations(t *testing.T, projectRoot, dbPath string) error {
 		"migrations/004_api_sync_strategy.up.sql",
 		"migrations/005_sync_plan_default_params.up.sql",
 		"migrations/006_seed_default_admin.sqlite.up.sql",
+		"migrations/022_user_stock_watchlist.sqlite.up.sql",
 	}
 
 	for _, migrationFile := range migrationFiles {
@@ -207,18 +209,11 @@ quantdb:
 	}
 	t.Log("✅ 服务器已就绪")
 
-	// 先请求一次 debug/health，确认二进制包含最新接口并打印当前 DSN
+	// 先请求一次 /health，确认服务器就绪
 	if resp, err := ctx.HTTPClient.Get(ctx.BaseURL + "/health"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		t.Logf("  [probe] GET /health -> %d %s", resp.StatusCode, string(body))
-	}
-	for _, path := range []string{"/api/v1/debug/database", "/debug/database"} {
-		if resp, err := ctx.HTTPClient.Get(ctx.BaseURL + path); err == nil {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			t.Logf("  [probe] GET %s -> %d %s", path, resp.StatusCode, string(body))
-		}
 	}
 
 	// 设置清理函数
@@ -468,25 +463,6 @@ func (ctx *ServerE2EContext) ensureAdminUser(t *testing.T, _, _, _ string) strin
 		} else {
 			t.Logf("  [health] 请求失败: %v", reqErr)
 		}
-		// 再试 debug 专用接口（若存在）
-		for _, u := range []string{ctx.BaseURL + "/api/v1/debug/database", ctx.BaseURL + "/debug/database"} {
-			t.Logf("  [debug] 请求 %s ...", u)
-			resp, reqErr := ctx.HTTPClient.Get(u)
-			if reqErr != nil {
-				t.Logf("  [debug] 请求失败: %v", reqErr)
-				continue
-			}
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			t.Logf("  [debug] 状态码: %d, 响应: %s", resp.StatusCode, string(bodyBytes))
-			var out struct {
-				DatabaseDSN string `json:"database_dsn"`
-			}
-			if json.Unmarshal(bodyBytes, &out) == nil && out.DatabaseDSN != "" {
-				t.Logf("  [debug] 服务器当前连接的 DB: %s", out.DatabaseDSN)
-				break
-			}
-		}
 		logServerDBLines(t, ctx.Config.DataDir, "server.log")
 		require.NoError(t, err, "使用预置默认 admin 登录失败，请确认迁移 006_seed_default_admin 已执行且用户名/密码为 admin/admin123；若 server 连接的 DB 与 E2E 不一致会报 401")
 	}
@@ -588,10 +564,7 @@ func (ctx *ServerE2EContext) waitForWorkflowSSE(t *testing.T, path string, token
 			// 判断是否达到终态
 			// 注意：statusData 可能包含 finished_at
 			finishedAt := statusData["finished_at"]
-			if (finishedAt != nil && finishedAt != "") ||
-				statusStr == "Success" || statusStr == "Failed" ||
-				statusStr == "Terminated" || statusStr == "Completed" ||
-				statusStr == "success" || statusStr == "failed" { // 兼容不同接口的大小写
+			if (finishedAt != nil && finishedAt != "") || workflow.IsTerminal(statusStr) {
 				break
 			}
 		}
@@ -599,11 +572,7 @@ func (ctx *ServerE2EContext) waitForWorkflowSSE(t *testing.T, path string, token
 
 	t.Logf("✅ SSE 等待结束，最终状态: %s", lastStatus)
 
-	// 检查是否是终态
-	isTerminal := strings.ToLower(lastStatus) == "success" ||
-		strings.ToLower(lastStatus) == "failed" ||
-		strings.ToLower(lastStatus) == "completed" ||
-		strings.ToLower(lastStatus) == "terminated"
+	isTerminal := workflow.IsTerminal(lastStatus)
 
 	// 如果 SSE 断开时工作流未完成，使用 API 轮询确认
 	if !isTerminal {

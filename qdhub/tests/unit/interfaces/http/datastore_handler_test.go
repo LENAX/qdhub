@@ -79,8 +79,8 @@ func (m *MockDataStoreService) ListDatastoreTables(ctx context.Context, id share
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (m *MockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn string) ([]map[string]any, int64, error) {
-	args := m.Called(ctx, id, tableName, page, pageSize, searchQ, searchColumn)
+func (m *MockDataStoreService) GetDatastoreTableData(ctx context.Context, id shared.ID, tableName string, page, pageSize int, searchQ, searchColumn, orderBy, order string) ([]map[string]any, int64, error) {
+	args := m.Called(ctx, id, tableName, page, pageSize, searchQ, searchColumn, orderBy, order)
 	return args.Get(0).([]map[string]any), args.Get(1).(int64), args.Error(2)
 }
 

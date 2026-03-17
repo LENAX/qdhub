@@ -92,7 +92,7 @@ func TestQuantDataStoreRepository_Create_WithSchemas(t *testing.T) {
 	repo := repository.NewQuantDataStoreRepository(db)
 
 	ds := datastore.NewQuantDataStore("Test Store", "Test Description", datastore.DataStoreTypeDuckDB, "duckdb://test.db", "/data/test.db")
-	
+
 	// Add table schema
 	apiMetaID := shared.NewID()
 	schema := datastore.NewTableSchema(ds.ID, apiMetaID, "test_table")
@@ -225,7 +225,7 @@ func TestQuantDataStoreRepository_Delete_Cascade(t *testing.T) {
 	apiMetaID := shared.NewID()
 	schema := datastore.NewTableSchema(ds.ID, apiMetaID, "test_table")
 	ds.Schemas = []datastore.TableSchema{*schema}
-	
+
 	err := repo.Create(ds)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)

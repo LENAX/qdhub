@@ -66,8 +66,8 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		{
 			name: "prefer field pattern match over source type match",
 			rules: []*datastore.DataTypeMappingRule{
-				createRule("str", "", 20),               // Higher priority but no pattern
-				createRule("str", "^ts_", 10),           // Lower priority but matches pattern
+				createRule("str", "", 20),     // Higher priority but no pattern
+				createRule("str", "^ts_", 10), // Lower priority but matches pattern
 			},
 			fieldName:  "ts_code",
 			sourceType: "str",
@@ -77,8 +77,8 @@ func TestTypeMappingService_FindBestMatchingRule(t *testing.T) {
 		{
 			name: "field pattern must match source type too",
 			rules: []*datastore.DataTypeMappingRule{
-				createRule("int", "^ts_", 20),  // Pattern matches but source type doesn't
-				createRule("str", "", 10),      // Source type matches
+				createRule("int", "^ts_", 20), // Pattern matches but source type doesn't
+				createRule("str", "", 10),     // Source type matches
 			},
 			fieldName:  "ts_code",
 			sourceType: "str",

@@ -10,8 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
-	httpapi "qdhub/internal/interfaces/http"
 	"qdhub/internal/infrastructure/realtimestore"
+	httpapi "qdhub/internal/interfaces/http"
 )
 
 func TestRealtimeWSHandler_SubscribeSubset(t *testing.T) {
@@ -21,7 +21,7 @@ func TestRealtimeWSHandler_SubscribeSubset(t *testing.T) {
 	store.Update("000002.SZ", map[string]interface{}{"ts_code": "000002.SZ", "price": 20.22})
 
 	r := gin.New()
-	h := httpapi.NewRealtimeWSHandler(store)
+	h := httpapi.NewRealtimeWSHandler(store, nil)
 	h.RegisterRoutes(r.Group("/api/v1"))
 	srv := httptest.NewServer(r)
 	defer srv.Close()
@@ -75,4 +75,3 @@ func TestRealtimeWSHandler_SubscribeSubset(t *testing.T) {
 	}
 	t.Fatalf("did not receive subset snapshot after subscribe")
 }
-

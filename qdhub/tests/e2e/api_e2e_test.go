@@ -319,7 +319,7 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, jwtManager, enforcer, "")
 
 	cleanup := func() {
 		db.Close()

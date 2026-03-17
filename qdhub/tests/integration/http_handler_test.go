@@ -230,7 +230,7 @@ func setupHTTPTestContext(t *testing.T) (*httpTestContext, func()) {
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, jwtManager, enforcer, "")
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, jwtManager, enforcer, "")
 
 	return &httpTestContext{
 		db:             db,

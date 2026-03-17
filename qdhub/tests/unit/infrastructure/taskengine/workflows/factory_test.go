@@ -544,8 +544,8 @@ func TestRealtimeDataSyncParams_Validate_MissingFields(t *testing.T) {
 			name: "missing data_source_name",
 			params: workflows.RealtimeDataSyncParams{
 				Token:        "token",
-				TargetDBPath:  "/tmp/db",
-				APINames:      []string{"daily"},
+				TargetDBPath: "/tmp/db",
+				APINames:     []string{"daily"},
 			},
 			expected: workflows.ErrEmptyDataSourceName,
 		},

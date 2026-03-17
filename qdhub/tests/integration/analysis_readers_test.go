@@ -73,6 +73,21 @@ func TestAnalysisReaders_GetDailyWithAdjFactor(t *testing.T) {
 	_, err = adapter.BulkInsert(ctx, "adj_factor", adjData)
 	require.NoError(t, err)
 
+	// GetDailyWithAdjFactor 的 SQL 使用 LEFT JOIN stock_basic，需存在该表
+	stockBasicSchema := &datastore.TableSchema{
+		TableName: "stock_basic",
+		Columns: []datastore.ColumnDef{
+			{Name: "ts_code", TargetType: "VARCHAR", Nullable: false},
+			{Name: "name", TargetType: "VARCHAR", Nullable: true},
+		},
+		PrimaryKeys: []string{"ts_code"},
+	}
+	require.NoError(t, adapter.CreateTable(ctx, stockBasicSchema))
+	_, err = adapter.BulkInsert(ctx, "stock_basic", []map[string]any{
+		{"ts_code": "000001.SZ", "name": "平安银行"},
+	})
+	require.NoError(t, err)
+
 	readers := analysisinfra.NewReaders(adapter)
 
 	t.Run("has_data", func(t *testing.T) {
@@ -147,6 +162,15 @@ func TestAnalysisReaders_GetDailyWithAdjFactor_Fallback(t *testing.T) {
 		PrimaryKeys: []string{"ts_code", "trade_date"},
 	}
 	require.NoError(t, adapter.CreateTable(ctx, adjSchema))
+	stockBasicSchema := &datastore.TableSchema{
+		TableName: "stock_basic",
+		Columns: []datastore.ColumnDef{
+			{Name: "ts_code", TargetType: "VARCHAR", Nullable: false},
+			{Name: "name", TargetType: "VARCHAR", Nullable: true},
+		},
+		PrimaryKeys: []string{"ts_code"},
+	}
+	require.NoError(t, adapter.CreateTable(ctx, stockBasicSchema))
 
 	fallbackRows := []analysis.RawDailyRow{
 		{TradeDate: "20240115", Open: 12, High: 13, Low: 11.5, Close: 12.5, Vol: 2e6, Amount: 2e7, PreClose: 12, Change: 0.5, PctChg: 4.17, AdjFactor: 1.0},
@@ -161,3 +185,72 @@ func TestAnalysisReaders_GetDailyWithAdjFactor_Fallback(t *testing.T) {
 	assert.Equal(t, "20240115", rows[0].TradeDate)
 	assert.Equal(t, 12.5, rows[0].Close)
 }
+
+// TestAnalysisReaders_ListStocks_Cnspell 测试拼音缩写搜索：仅按 cnspell 匹配
+func TestAnalysisReaders_ListStocks_Cnspell(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "list_stocks_cnspell.db")
+
+	adapter := duckdb.NewAdapter(dbPath)
+	require.NoError(t, adapter.Connect(ctx))
+	defer adapter.Close()
+
+	// stock_basic 含 cnspell（与 readers_impl ListStocks 查询字段一致）
+	schema := &datastore.TableSchema{
+		TableName: "stock_basic",
+		Columns: []datastore.ColumnDef{
+			{Name: "ts_code", TargetType: "VARCHAR", Nullable: false},
+			{Name: "symbol", TargetType: "VARCHAR", Nullable: true},
+			{Name: "name", TargetType: "VARCHAR", Nullable: true},
+			{Name: "area", TargetType: "VARCHAR", Nullable: true},
+			{Name: "industry", TargetType: "VARCHAR", Nullable: true},
+			{Name: "market", TargetType: "VARCHAR", Nullable: true},
+			{Name: "list_date", TargetType: "VARCHAR", Nullable: true},
+			{Name: "is_hs", TargetType: "VARCHAR", Nullable: true},
+			{Name: "cnspell", TargetType: "VARCHAR", Nullable: true},
+		},
+		PrimaryKeys: []string{"ts_code"},
+	}
+	require.NoError(t, adapter.CreateTable(ctx, schema))
+
+	// 平安银行 cnspell 常用缩写 PA、PINGAN 等
+	data := []map[string]any{
+		{"ts_code": "000001.SZ", "symbol": "000001", "name": "平安银行", "area": "深圳", "industry": "银行", "market": "主板", "list_date": "19910403", "is_hs": "S", "cnspell": "PAYH"},
+		{"ts_code": "600519.SH", "symbol": "600519", "name": "贵州茅台", "area": "贵州", "industry": "白酒", "market": "主板", "list_date": "20010827", "is_hs": "N", "cnspell": "GZMT"},
+		{"ts_code": "000002.SZ", "symbol": "000002", "name": "万科A", "area": "深圳", "industry": "地产", "market": "主板", "list_date": "19910129", "is_hs": "N", "cnspell": "WKA"},
+	}
+	_, err := adapter.BulkInsert(ctx, "stock_basic", data)
+	require.NoError(t, err)
+
+	readers := analysisinfra.NewReaders(adapter)
+
+	t.Run("search_type_cnspell_match", func(t *testing.T) {
+		st := "cnspell"
+		req := analysis.StockListRequest{Query: strPtr("PA"), SearchType: &st, Limit: 10, Offset: 0}
+		rows, err := readers.ListStocks(ctx, req)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "000001.SZ", rows[0].TsCode)
+		assert.Equal(t, "平安银行", rows[0].Name)
+	})
+
+	t.Run("search_type_cnspell_partial", func(t *testing.T) {
+		st := "cnspell"
+		req := analysis.StockListRequest{Query: strPtr("GZ"), SearchType: &st, Limit: 10, Offset: 0}
+		rows, err := readers.ListStocks(ctx, req)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "600519.SH", rows[0].TsCode)
+	})
+
+	t.Run("default_search_includes_name", func(t *testing.T) {
+		req := analysis.StockListRequest{Query: strPtr("平安"), Limit: 10, Offset: 0}
+		rows, err := readers.ListStocks(ctx, req)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, "000001.SZ", rows[0].TsCode)
+	})
+}
+
+func strPtr(s string) *string { return &s }

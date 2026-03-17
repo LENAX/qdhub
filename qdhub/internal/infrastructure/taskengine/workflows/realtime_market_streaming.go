@@ -33,6 +33,8 @@ type RealtimeMarketStreamingParams struct {
 // - 使用 WorkflowBuilder.WithStreamingMode；
 // - 使用 RealtimeTaskBuilder.WithContinuousMode + TaskTypeDataCollector/TaskTypeStreamProcessor；
 // - 通过 WorkflowBuilder.WithDataCollector 注册 DataCollector 实现。
+// 诊断与限流：DataCollector（如 QuotePullCollector）内建每 3 秒打印工作状态与已获取数据条数；
+// 若实时接口被 ban/多 IP 限制，Collector 返回错误，工作流自动取消并返回错误信息。
 type RealtimeMarketStreamingBuilder struct {
 	registry task.FunctionRegistry
 	params   RealtimeMarketStreamingParams

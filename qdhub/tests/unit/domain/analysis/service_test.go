@@ -50,6 +50,9 @@ func (noop) GetList(ctx context.Context, req analysis.DragonTigerRequest) ([]ana
 func (noop) GetMoneyFlow(ctx context.Context, req analysis.MoneyFlowRequest) ([]analysis.MoneyFlow, error) {
 	return nil, nil
 }
+func (noop) GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error) {
+	return nil, nil
+}
 func (noop) GetRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return nil, nil
 }
@@ -63,6 +66,9 @@ func (noop) GetIndicators(ctx context.Context, req analysis.FinancialIndicatorRe
 	return nil, nil
 }
 func (noop) GetReports(ctx context.Context, req analysis.FinancialReportRequest) ([]analysis.FinancialReport, error) {
+	return nil, nil
+}
+func (noop) GetTableData(ctx context.Context, table string, req analysis.FinancialReportRequest) ([]map[string]any, error) {
 	return nil, nil
 }
 func (noop) ExecuteReadOnlyQuery(ctx context.Context, req analysis.CustomQueryRequest) (*analysis.CustomQueryResult, error) {
@@ -156,6 +162,41 @@ func (noopLimitUpComparison) GetComparison(ctx context.Context, todayDate string
 	return nil, nil
 }
 
+// noopFirstLimitUp FirstLimitUpReader（首板列表）
+type noopFirstLimitUp struct{}
+
+func (noopFirstLimitUp) GetByDate(ctx context.Context, tradeDate string) ([]analysis.LimitStock, error) {
+	return nil, nil
+}
+
+// noopTradeCalendar TradeCalendarReader
+type noopTradeCalendar struct{}
+
+func (noopTradeCalendar) GetTradingDates(ctx context.Context, startDate, endDate string) ([]string, error) {
+	return nil, nil
+}
+
+// noopRealtimeTick RealtimeTickReader
+type noopRealtimeTick struct{}
+
+func (noopRealtimeTick) GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]analysis.TickRow, error) {
+	return nil, nil
+}
+
+// noopIntradayTick IntradayTickReader
+type noopIntradayTick struct{}
+
+func (noopIntradayTick) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]analysis.TickRow, error) {
+	return nil, nil
+}
+
+// noopIntradayKline IntradayKlineReader
+type noopIntradayKline struct{}
+
+func (noopIntradayKline) GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]analysis.IntradayKlineRow, error) {
+	return nil, nil
+}
+
 func TestAnalysisService_GetKLine(t *testing.T) {
 	ctx := context.Background()
 	n := noop{}
@@ -171,6 +212,11 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 	nLimitUp := noopLimitUpList{}
 	nLimitUpLadder := noopLimitUpLadder{}
 	nLimitUpCmp := noopLimitUpComparison{}
+	nFirstLimitUp := noopFirstLimitUp{}
+	nTradeCal := noopTradeCalendar{}
+	nRealtimeTick := noopRealtimeTick{}
+	nIntradayTick := noopIntradayTick{}
+	nIntradayKline := noopIntradayKline{}
 
 	t.Run("none_adjust", func(t *testing.T) {
 		mockK := new(mockKLineReader)
@@ -181,7 +227,9 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
+			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
+			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -203,7 +251,9 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
+			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
+			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustQfq,
@@ -231,7 +281,9 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
+			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
+			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustHfq,
@@ -254,7 +306,9 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
+			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
+			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "999999.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -270,7 +324,9 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 
 		svc := analysis.NewAnalysisService(
 			mockK, n, n, nLadder, nCmp, nSector, n, n, n, n,
-			nStock, nSnapshot, nIndex, nConcept, n, n, nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, n, n, n, n, n, n, n,
+			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
+			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
+			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,

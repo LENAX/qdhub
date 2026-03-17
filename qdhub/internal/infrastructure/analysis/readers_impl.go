@@ -1329,6 +1329,7 @@ func (r *Readers) GetRank(ctx context.Context, req analysis.PopularityRankReques
 }
 
 // ListNews NewsReader.List：支持 order=time_desc、limit、sources 过滤；表名优先 news，其次 major_news
+// 兼容 Tushare：news 表为 datetime/title/content/channels（无 id）；major_news 为 pub_time/title/content/src
 func (r *Readers) ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
 	table := ""
 	for _, t := range []string{"news", "major_news"} {
@@ -1341,35 +1342,52 @@ func (r *Readers) ListNews(ctx context.Context, req analysis.NewsListRequest) ([
 	if table == "" {
 		return nil, nil
 	}
+	// 默认按 datetime 从最新到旧排序；仅当显式 time_asc 时升序
 	order := "DESC"
 	if strings.TrimSpace(strings.ToLower(req.Order)) == "time_asc" {
 		order = "ASC"
 	}
-	// 常见字段：id, title, content, source, publish_time, 可能无 author/relate_stocks/category/tags
-	sql := "SELECT id, title, content, source, publish_time FROM " + table + " WHERE 1=1"
+	// Tushare news: datetime, title（必选）, content/channels 可能不存在；major_news: pub_time, title, content, src
+	var timeCol, sourceCol string
+	if table == "news" {
+		timeCol = "datetime"
+		sourceCol = "channels"
+	} else {
+		timeCol = "pub_time"
+		sourceCol = "src"
+	}
+	// 只选确定存在的列，避免 "Referenced column not found"：news 至少 title+datetime，content/channels 可能未同步
+	var sel string
+	if table == "major_news" {
+		sel = "title, content, " + sourceCol + " AS source, " + timeCol + " AS publish_time"
+	} else {
+		sel = "title, " + timeCol + " AS publish_time"
+	}
+	sql := "SELECT " + sel + " FROM " + table + " WHERE 1=1"
 	args := []any{}
 	if req.StartDate != nil && *req.StartDate != "" {
-		sql += " AND publish_time >= ?"
+		sql += " AND " + timeCol + " >= ?"
 		args = append(args, *req.StartDate)
 	}
 	if req.EndDate != nil && *req.EndDate != "" {
-		sql += " AND publish_time <= ?"
+		sql += " AND " + timeCol + " <= ?"
 		args = append(args, *req.EndDate)
 	}
-	if req.Sources != nil && strings.TrimSpace(*req.Sources) != "" {
+	// sources 过滤仅在对 major_news 或表确有 source/channels 列时生效，news 最小 schema 可能无 channels
+	if req.Sources != nil && strings.TrimSpace(*req.Sources) != "" && table == "major_news" {
 		parts := strings.Split(*req.Sources, ",")
 		for i, p := range parts {
 			parts[i] = strings.TrimSpace(p)
 		}
 		if len(parts) > 0 {
 			placeholders := strings.Repeat("?,", len(parts))
-			sql += " AND source IN (" + placeholders[:len(placeholders)-1] + ")"
+			sql += " AND " + sourceCol + " IN (" + placeholders[:len(placeholders)-1] + ")"
 			for _, p := range parts {
 				args = append(args, p)
 			}
 		}
 	}
-	sql += " ORDER BY publish_time " + order + " LIMIT ? OFFSET ?"
+	sql += " ORDER BY " + timeCol + " " + order + " LIMIT ? OFFSET ?"
 	limit, offset := req.Limit, req.Offset
 	if limit <= 0 {
 		limit = 50
@@ -1382,7 +1400,7 @@ func (r *Readers) ListNews(ctx context.Context, req analysis.NewsListRequest) ([
 	out := make([]analysis.NewsItem, 0, len(rows))
 	for _, m := range rows {
 		out = append(out, analysis.NewsItem{
-			ID:          str(m, "id"),
+			ID:          "",
 			Title:       str(m, "title"),
 			Content:     str(m, "content"),
 			Source:      str(m, "source"),

@@ -158,11 +158,11 @@ type MockSyncPlanRepository struct {
 	existsByDataStoreID bool // Exists(shared.Eq("data_store_id", id)) returns this
 }
 
-func (m *MockSyncPlanRepository) Create(plan *sync.SyncPlan) error                    { return nil }
-func (m *MockSyncPlanRepository) Get(id shared.ID) (*sync.SyncPlan, error)            { return nil, nil }
-func (m *MockSyncPlanRepository) Update(plan *sync.SyncPlan) error                      { return nil }
-func (m *MockSyncPlanRepository) Delete(id shared.ID) error                           { return nil }
-func (m *MockSyncPlanRepository) List() ([]*sync.SyncPlan, error)                      { return nil, nil }
+func (m *MockSyncPlanRepository) Create(plan *sync.SyncPlan) error         { return nil }
+func (m *MockSyncPlanRepository) Get(id shared.ID) (*sync.SyncPlan, error) { return nil, nil }
+func (m *MockSyncPlanRepository) Update(plan *sync.SyncPlan) error         { return nil }
+func (m *MockSyncPlanRepository) Delete(id shared.ID) error                { return nil }
+func (m *MockSyncPlanRepository) List() ([]*sync.SyncPlan, error)          { return nil, nil }
 func (m *MockSyncPlanRepository) FindBy(conditions ...shared.QueryCondition) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }
@@ -184,13 +184,17 @@ func (m *MockSyncPlanRepository) Count(conditions ...shared.QueryCondition) (int
 func (m *MockSyncPlanRepository) Exists(conditions ...shared.QueryCondition) (bool, error) {
 	return m.existsByDataStoreID, nil
 }
-func (m *MockSyncPlanRepository) AddTask(task *sync.SyncTask) error                          { return nil }
-func (m *MockSyncPlanRepository) GetTask(id shared.ID) (*sync.SyncTask, error)              { return nil, nil }
-func (m *MockSyncPlanRepository) GetTasksByPlan(planID shared.ID) ([]*sync.SyncTask, error) { return nil, nil }
-func (m *MockSyncPlanRepository) UpdateTask(task *sync.SyncTask) error                      { return nil }
-func (m *MockSyncPlanRepository) DeleteTasksByPlan(planID shared.ID) error                  { return nil }
-func (m *MockSyncPlanRepository) AddPlanExecution(exec *sync.SyncExecution) error           { return nil }
-func (m *MockSyncPlanRepository) GetPlanExecution(id shared.ID) (*sync.SyncExecution, error) { return nil, nil }
+func (m *MockSyncPlanRepository) AddTask(task *sync.SyncTask) error            { return nil }
+func (m *MockSyncPlanRepository) GetTask(id shared.ID) (*sync.SyncTask, error) { return nil, nil }
+func (m *MockSyncPlanRepository) GetTasksByPlan(planID shared.ID) ([]*sync.SyncTask, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) UpdateTask(task *sync.SyncTask) error            { return nil }
+func (m *MockSyncPlanRepository) DeleteTasksByPlan(planID shared.ID) error        { return nil }
+func (m *MockSyncPlanRepository) AddPlanExecution(exec *sync.SyncExecution) error { return nil }
+func (m *MockSyncPlanRepository) GetPlanExecution(id shared.ID) (*sync.SyncExecution, error) {
+	return nil, nil
+}
 func (m *MockSyncPlanRepository) GetExecutionsByPlan(planID shared.ID) ([]*sync.SyncExecution, error) {
 	return nil, nil
 }
@@ -210,9 +214,15 @@ func (m *MockSyncPlanRepository) GetExecutionDetailsByExecutionID(executionID sh
 func (m *MockSyncPlanRepository) GetByDataSource(dataSourceID shared.ID) ([]*sync.SyncPlan, error) {
 	return nil, nil
 }
-func (m *MockSyncPlanRepository) GetEnabledPlans() ([]*sync.SyncPlan, error)      { return nil, nil }
+func (m *MockSyncPlanRepository) GetByDataStore(dataStoreID shared.ID) ([]*sync.SyncPlan, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) GetEnabledPlans() ([]*sync.SyncPlan, error)     { return nil, nil }
 func (m *MockSyncPlanRepository) GetSchedulablePlans() ([]*sync.SyncPlan, error) { return nil, nil }
 func (m *MockSyncPlanRepository) GetByStatus(status sync.PlanStatus) ([]*sync.SyncPlan, error) {
+	return nil, nil
+}
+func (m *MockSyncPlanRepository) GetRunningExecutionByPlanID(planID shared.ID) (*sync.SyncExecution, error) {
 	return nil, nil
 }
 
@@ -675,7 +685,7 @@ func TestDataStoreApplicationService_ListDataStores(t *testing.T) {
 	}
 }
 
-// Note: Tests for deleted methods (UpdateDataStore, DeleteDataStore, TestConnection, 
+// Note: Tests for deleted methods (UpdateDataStore, DeleteDataStore, TestConnection,
 // GenerateTableSchema, CreateTable, DropTable, GetTableSchema, GetTableSchemaByAPI,
 // ListTableSchemas, UpdateTableSchema, SyncSchemaStatus, CreateMappingRule, GetMappingRules)
 // have been removed as these methods are no longer part of the DataStoreApplicationService interface.

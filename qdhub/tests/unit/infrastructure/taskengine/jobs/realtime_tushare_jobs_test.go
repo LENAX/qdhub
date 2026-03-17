@@ -54,4 +54,3 @@ func TestTushareTickFrontendPushJob_UpdatesLatestQuoteStore(t *testing.T) {
 		t.Fatalf("target_db_path should be removed before caching")
 	}
 }
-

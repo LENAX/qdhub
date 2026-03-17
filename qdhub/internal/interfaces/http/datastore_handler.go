@@ -276,7 +276,7 @@ func (h *DataStoreHandler) ListDatastoreTables(c *gin.Context) {
 
 // GetDatastoreTableData handles GET /api/v1/datastores/:id/tables/:tableName/data
 // @Summary      Get paginated table data
-// @Description  Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional)
+// @Description  Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional), order_by (column), order (asc|desc)
 // @Tags         DataStores
 // @Produce      json
 // @Param        id             path      string  true   "Data store ID"
@@ -285,6 +285,8 @@ func (h *DataStoreHandler) ListDatastoreTables(c *gin.Context) {
 // @Param        page_size      query     int     false  "Page size (max 100)" default(20)
 // @Param        q              query     string  false  "Search term (ILIKE)"
 // @Param        search_column  query     string  false  "Column to search in (omit for all)"
+// @Param        order_by       query     string  false  "Column name for ORDER BY"
+// @Param        order          query     string  false  "Sort direction: asc or desc" default(asc)
 // @Success      200            {object}  Response  "data: rows, total: count"
 // @Failure      404            {object}  Response
 // @Failure      500            {object}  Response
@@ -301,7 +303,9 @@ func (h *DataStoreHandler) GetDatastoreTableData(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	searchQ := c.Query("q")
 	searchColumn := c.Query("search_column")
-	rows, total, err := h.dataStoreSvc.GetDatastoreTableData(c.Request.Context(), id, tableName, page, pageSize, searchQ, searchColumn)
+	orderBy := c.Query("order_by")
+	order := c.DefaultQuery("order", "asc")
+	rows, total, err := h.dataStoreSvc.GetDatastoreTableData(c.Request.Context(), id, tableName, page, pageSize, searchQ, searchColumn, orderBy, order)
 	if err != nil {
 		HandleError(c, err)
 		return

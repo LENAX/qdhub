@@ -116,6 +116,8 @@
 
 前端可用 `execution_id` 配合进度接口或 SSE 展示「同步运行中」状态。
 
+**实时工作流中断时的状态同步**：当实时工作流因**被 ban（多 IP 限制）/超时/断连无法重连**等原因结束时，后端会将该次执行状态置为 `failed`，并将错误信息写入 `error_message`。前端应通过 **GET `/api/v1/sync-plans/:id/progress`** 轮询或 **GET `/api/v1/sync-plans/:id/progress-stream`** SSE 订阅获取最新状态；一旦收到 `status: "failed"`，应展示 `error_message` 给用户（如「实时行情接口被限制，工作流已取消」），并停止展示为运行中。
+
 ---
 
 ## 三、实时数据订阅：WebSocket 接口

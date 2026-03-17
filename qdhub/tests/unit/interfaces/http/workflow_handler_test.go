@@ -67,14 +67,6 @@ func setupWorkflowRouter(mockSvc *MockWorkflowService) *gin.Engine {
 	return router
 }
 
-
-
-
-
-
-
-
-
 func TestListInstances(t *testing.T) {
 	mockSvc := new(MockWorkflowService)
 	router := setupWorkflowRouter(mockSvc)
@@ -101,8 +93,6 @@ func TestListInstancesMissingWorkflowID(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-
-
 func TestCancelInstance(t *testing.T) {
 	mockSvc := new(MockWorkflowService)
 	router := setupWorkflowRouter(mockSvc)
@@ -116,8 +106,6 @@ func TestCancelInstance(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	mockSvc.AssertExpectations(t)
 }
-
-
 
 func TestGetInstance(t *testing.T) {
 	mockSvc := new(MockWorkflowService)
@@ -170,20 +158,7 @@ func TestGetInstanceProgress(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-
-
 // ==================== Error Scenario Tests ====================
-
-
-
-
-
-
-
-
-
-
-
 
 func TestListInstancesWithStatus(t *testing.T) {
 	mockSvc := new(MockWorkflowService)
@@ -257,8 +232,6 @@ func TestGetInstanceProgressError(t *testing.T) {
 	mockSvc.AssertExpectations(t)
 }
 
-
-
 func TestCancelInstanceError(t *testing.T) {
 	mockSvc := new(MockWorkflowService)
 	router := setupWorkflowRouter(mockSvc)
@@ -272,7 +245,3 @@ func TestCancelInstanceError(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	mockSvc.AssertExpectations(t)
 }
-
-
-
-
