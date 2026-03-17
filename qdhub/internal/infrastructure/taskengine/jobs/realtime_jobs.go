@@ -21,6 +21,62 @@ import (
 
 const defaultRealtimeSrc = "sina"
 
+func toFloat(v interface{}) (float64, bool) {
+	if f, ok := v.(float64); ok {
+		return f, true
+	}
+	if s, ok := v.(string); ok {
+		f, err := strconv.ParseFloat(s, 64)
+		return f, err == nil
+	}
+	return 0, false
+}
+
+// sinaRowToTushareStoreRow 将 Sina realtime_quote 行映射为 Tushare Store 字段名，与 WS 推送结构一致。
+func sinaRowToTushareStoreRow(row map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, 32)
+	out["ts_code"], _ = row["ts_code"]
+	out["code"], _ = row["ts_code"]
+	if v, ok := row["name"].(string); ok {
+		out["name"] = v
+	}
+	if v, ok := row["trade_time"].(string); ok {
+		out["trade_time"] = v
+	}
+	if v, ok := toFloat(row["pre_close"]); ok {
+		out["pre_price"] = v
+	}
+	for _, key := range []string{"price", "open", "high", "low", "close", "volume", "amount"} {
+		if v, ok := toFloat(row[key]); ok {
+			out[key] = v
+		}
+	}
+	if _, ok := out["close"]; !ok {
+		if v, ok := toFloat(row["price"]); ok {
+			out["close"] = v
+		}
+	}
+	out["open_int"] = float64(0)
+	out["num"] = float64(0)
+	for i := 1; i <= 5; i++ {
+		bp, bv := fmt.Sprintf("b%d_p", i), fmt.Sprintf("b%d_v", i)
+		ap, av := fmt.Sprintf("a%d_p", i), fmt.Sprintf("a%d_v", i)
+		if v, ok := toFloat(row[bp]); ok {
+			out[fmt.Sprintf("bid_price%d", i)] = v
+		}
+		if v, ok := toFloat(row[bv]); ok {
+			out[fmt.Sprintf("bid_volume%d", i)] = v
+		}
+		if v, ok := toFloat(row[ap]); ok {
+			out[fmt.Sprintf("ask_price%d", i)] = v
+		}
+		if v, ok := toFloat(row[av]); ok {
+			out[fmt.Sprintf("ask_volume%d", i)] = v
+		}
+	}
+	return out
+}
+
 // RealtimeDataCollectorJob 实时数据采集 Job：从 RealtimeAdapter 拉取一批数据并 Push 到 buffer。
 // Pull 模式：单次 Fetch；多轮轮询由工作流或调度层多次触发实现。
 //
@@ -313,6 +369,23 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 	n, err := writeRealtimeBatchToDuckDB(ctx, tc, targetDBPath, apiName, source, rows)
 	if err != nil {
 		return nil, err
+	}
+	// 多源时仅当前选中源写 Store；Sina realtime_quote 写前映射为 Tushare 字段名，与 WS 推送结构一致
+	if source == defaultRealtimeSrc && apiName == "realtime_quote" {
+		sel, _ := tc.GetDependency("RealtimeSourceSelector")
+		if sel != nil {
+			if selector, ok := sel.(*realtimestore.RealtimeSourceSelector); ok && selector.ShouldWriteToStore(realtimestore.SourceSina) {
+				store := realtimestore.DefaultLatestQuoteStore()
+				for _, row := range rows {
+					tsCode, _ := row["ts_code"].(string)
+					if tsCode == "" {
+						continue
+					}
+					mapped := sinaRowToTushareStoreRow(row)
+					store.Update(tsCode, mapped)
+				}
+			}
+		}
 	}
 	return map[string]interface{}{"total_rows": n}, nil
 }

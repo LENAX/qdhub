@@ -14,6 +14,7 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
+	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
@@ -26,6 +27,10 @@ type WorkflowExecutorImpl struct {
 	metadataRepo      metadata.Repository
 	// RealtimeAdapterRegistry 由外层注入，用于 Streaming Collector 构建 QuotePullCollector 时访问 Sina/Eastmoney 实时接口。
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry
+	// realtimeEnv：production 时 ts_realtime_mkt_tick 走 Tushare WS；非 production 时降级为 realtime_quote + Sina Pull。
+	realtimeEnv string
+	// realtimeSourceSelector 多源时仅当前选中源写 Store；传 nil 时 WS 始终写（兼容）。
+	realtimeSourceSelector *realtimestore.RealtimeSourceSelector
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
@@ -34,12 +39,19 @@ func NewWorkflowExecutor(
 	taskEngineAdapter workflow.TaskEngineAdapter,
 	metadataRepo metadata.Repository,
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry,
+	realtimeEnv string,
+	realtimeSourceSelector *realtimestore.RealtimeSourceSelector,
 ) workflow.WorkflowExecutor {
+	if realtimeEnv == "" {
+		realtimeEnv = "development"
+	}
 	return &WorkflowExecutorImpl{
 		workflowRepo:            workflowRepo,
 		taskEngineAdapter:       taskEngineAdapter,
 		metadataRepo:            metadataRepo,
 		realtimeAdapterRegistry: realtimeAdapterRegistry,
+		realtimeEnv:             realtimeEnv,
+		realtimeSourceSelector:  realtimeSourceSelector,
 	}
 }
 
@@ -214,6 +226,11 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		return "", fmt.Errorf("realtime adapter registry is nil")
 	}
 
+	// 开发环境：ts_realtime_mkt_tick 不走 Tushare WS，降级为 realtime_quote + Sina Pull。
+	if containsAPI(req.APINames, "ts_realtime_mkt_tick") && e.realtimeEnv != "production" {
+		req = cloneRealtimeRequestWithAPIs(req, []string{"realtime_quote"})
+	}
+
 	if containsAPI(req.APINames, "ts_realtime_mkt_tick") {
 		topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
 		collector := &realtime.TushareWSTickCollector{
@@ -221,6 +238,7 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 			TargetDBPath: req.TargetDBPath,
 			Topic:        topic,
 			Codes:        codes,
+			Selector:     e.realtimeSourceSelector,
 		}
 		builder := workflows.NewTushareWSStreamingBuilder(registry, workflows.TushareWSStreamingParams{
 			DataSourceName: req.DataSourceName,
@@ -299,6 +317,14 @@ func containsAPI(apiNames []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// cloneRealtimeRequestWithAPIs 复制请求并替换 APINames，用于开发环境将 ts_realtime_mkt_tick 降级为 realtime_quote。
+func cloneRealtimeRequestWithAPIs(req workflow.RealtimeDataSyncRequest, apiNames []string) workflow.RealtimeDataSyncRequest {
+	out := req
+	out.APINames = make([]string, len(apiNames))
+	copy(out.APINames, apiNames)
+	return out
 }
 
 func resolveTushareWSFixedParams(fixedByAPI map[string]map[string]interface{}) (string, []string) {

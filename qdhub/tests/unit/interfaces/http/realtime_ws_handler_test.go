@@ -21,7 +21,7 @@ func TestRealtimeWSHandler_SubscribeSubset(t *testing.T) {
 	store.Update("000002.SZ", map[string]interface{}{"ts_code": "000002.SZ", "price": 20.22})
 
 	r := gin.New()
-	h := httpapi.NewRealtimeWSHandler(store, nil)
+	h := httpapi.NewRealtimeWSHandler(store, nil, nil)
 	h.RegisterRoutes(r.Group("/api/v1"))
 	srv := httptest.NewServer(r)
 	defer srv.Close()

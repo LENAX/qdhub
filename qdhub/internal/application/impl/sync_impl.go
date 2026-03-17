@@ -17,6 +17,7 @@ import (
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
+	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
@@ -49,6 +50,10 @@ type SyncApplicationServiceImpl struct {
 
 	// 可选：用于增量模式下从目标 DuckDB 查询 MAX(列) 得到数据最新日期
 	quantDBFactory datastore.QuantDBFactory
+
+	// 多实时数据源：production 时双 workflow，仅当前选中源写 Store；失败时切换
+	realtimeEnv             string
+	realtimeSourceSelector  *realtimestore.RealtimeSourceSelector
 }
 
 // NewSyncApplicationService creates a new SyncApplicationService implementation.
@@ -64,20 +69,77 @@ func NewSyncApplicationService(
 	uow contracts.UnitOfWork,
 	metadataRepo metadata.Repository,
 	quantDBFactory datastore.QuantDBFactory,
+	realtimeEnv string,
+	realtimeSourceSelector *realtimestore.RealtimeSourceSelector,
 ) contracts.SyncApplicationService {
-	return &SyncApplicationServiceImpl{
-		syncPlanRepo:       syncPlanRepo,
-		cronCalculator:     cronCalculator,
-		planScheduler:      planScheduler,
-		dataSourceRepo:     dataSourceRepo,
-		dataStoreRepo:      dataStoreRepo,
-		workflowExecutor:   workflowExecutor,
-		dependencyResolver: dependencyResolver,
-		taskEngineAdapter:  taskEngineAdapter,
-		uow:                uow,
-		metadataRepo:       metadataRepo,
-		quantDBFactory:     quantDBFactory,
+	if realtimeEnv == "" {
+		realtimeEnv = "development"
 	}
+	return &SyncApplicationServiceImpl{
+		syncPlanRepo:            syncPlanRepo,
+		cronCalculator:          cronCalculator,
+		planScheduler:           planScheduler,
+		dataSourceRepo:          dataSourceRepo,
+		dataStoreRepo:           dataStoreRepo,
+		workflowExecutor:        workflowExecutor,
+		dependencyResolver:      dependencyResolver,
+		taskEngineAdapter:       taskEngineAdapter,
+		uow:                     uow,
+		metadataRepo:            metadataRepo,
+		quantDBFactory:          quantDBFactory,
+		realtimeEnv:              realtimeEnv,
+		realtimeSourceSelector:   realtimeSourceSelector,
+	}
+}
+
+// ==================== Realtime multi-source helpers ====================
+
+// execSyncedAPIToSource 从 SyncedAPIs 推断数据源：ts_realtime_mkt_tick -> tushare_ws，realtime_quote -> sina。
+func execSyncedAPIToSource(syncedAPIs []string) string {
+	for _, api := range syncedAPIs {
+		if api == "ts_realtime_mkt_tick" {
+			return realtimestore.SourceTushareWS
+		}
+		if api == "realtime_quote" {
+			return realtimestore.SourceSina
+		}
+	}
+	return ""
+}
+
+// execCorrespondsToCurrentActive 判断该执行是否对应当前选中的实时数据源（生产+实时且 exec 的 API 对应 current source）。
+func (s *SyncApplicationServiceImpl) execCorrespondsToCurrentActive(plan *sync.SyncPlan, exec *sync.SyncExecution) bool {
+	if plan == nil || exec == nil || s.realtimeSourceSelector == nil {
+		return false
+	}
+	if plan.Mode != sync.PlanModeRealtime || s.realtimeEnv != "production" {
+		return false
+	}
+	src := execSyncedAPIToSource(exec.SyncedAPIs)
+	if src == "" {
+		return false
+	}
+	return s.realtimeSourceSelector.CurrentSource() == src
+}
+
+// otherRealtimeSource 返回另一实时源（用于故障切换）。
+func otherRealtimeSource(source string) string {
+	if source == realtimestore.SourceTushareWS {
+		return realtimestore.SourceSina
+	}
+	if source == realtimestore.SourceSina {
+		return realtimestore.SourceTushareWS
+	}
+	return ""
+}
+
+func containsString(slice []string, s string) bool {
+	for _, x := range slice {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ==================== Sync Plan Management ====================
@@ -496,6 +558,7 @@ func (s *SyncApplicationServiceImpl) ResolveSyncPlan(ctx context.Context, planID
 
 // ExecuteSyncPlan executes a sync plan.
 func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID shared.ID, req contracts.ExecuteSyncPlanRequest) (shared.ID, error) {
+	var dualRealtimeSecondInstanceID shared.ID // 生产双实时 workflow 时由 realtime 分支赋值
 	// Get sync plan
 	plan, err := s.syncPlanRepo.Get(planID)
 	if err != nil {
@@ -665,7 +728,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 				}
 			}
 		}
-		instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, workflow.RealtimeDataSyncRequest{
+		baseReq := workflow.RealtimeDataSyncRequest{
 			DataSourceName:   ds.Name,
 			Token:            token.TokenValue,
 			TargetDBPath:     eff.TargetDBPath,
@@ -675,9 +738,29 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			IndexCodes:       indexCodes,
 			PullIntervalSecs: pullSecs,
 			FixedParamsByAPI: fixedParamsByAPI,
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
+		}
+		// 生产环境且计划含 ts_realtime_mkt_tick：同时启动 WS 与 Sina 双 workflow，创建两个 execution。
+		if s.realtimeEnv == "production" && containsString(apiNames, "ts_realtime_mkt_tick") {
+			reqWS := baseReq
+			reqWS.APINames = []string{"ts_realtime_mkt_tick"}
+			id1, err1 := s.workflowExecutor.ExecuteRealtimeDataSync(ctx, reqWS)
+			if err1 != nil {
+				return "", fmt.Errorf("failed to execute realtime WS workflow: %w", err1)
+			}
+			reqSina := baseReq
+			reqSina.APINames = []string{"realtime_quote"}
+			id2, err2 := s.workflowExecutor.ExecuteRealtimeDataSync(ctx, reqSina)
+			if err2 != nil {
+				return "", fmt.Errorf("failed to execute realtime Sina workflow: %w", err2)
+			}
+			instanceID = id1
+			dualRealtimeSecondInstanceID = id2
+		} else {
+			var err error
+			instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, baseReq)
+			if err != nil {
+				return "", fmt.Errorf("failed to execute realtime workflow: %w", err)
+			}
 		}
 	} else {
 		// 批量工作流：用当前 DB 策略重新解析执行图，避免 api_sync_strategies 已改（如 moneyflow 改为 trade_date）后仍用旧图导致传 ts_code
@@ -704,7 +787,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		}
 	}
 
-	// Create sync execution record and update plan status using UoW
+	// Create sync execution record(s) and update plan status using UoW
 	var executionID shared.ID
 	err = s.uow.Do(ctx, func(repos contracts.Repositories) error {
 		// Verify plan exists in transaction (for foreign key constraint)
@@ -716,21 +799,43 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			return fmt.Errorf("plan not found in transaction: %s", planID)
 		}
 
-		// Create sync execution record (use effective params including target from data store)
-		execution := sync.NewSyncExecution(planID, instanceID)
-		execution.ExecuteParams = &sync.ExecuteParams{
+		baseParams := &sync.ExecuteParams{
 			TargetDBPath: eff.TargetDBPath,
 			StartDate:    eff.StartDate,
 			EndDate:      eff.EndDate,
 			StartTime:    eff.StartTime,
 			EndTime:      eff.EndTime,
 		}
-		execution.SyncedAPIs = s.extractAPINames(needSyncTasks)
-		execution.SkippedAPIs = skipAPIs
-		execution.MarkRunning()
-
-		if err := repos.SyncPlanRepo().AddPlanExecution(execution); err != nil {
-			return fmt.Errorf("failed to create sync execution: %w", err)
+		if !dualRealtimeSecondInstanceID.IsEmpty() {
+			// 双实时 workflow：创建两个 execution
+			exec1 := sync.NewSyncExecution(planID, instanceID)
+			exec1.ExecuteParams = baseParams
+			exec1.SyncedAPIs = []string{"ts_realtime_mkt_tick"}
+			exec1.SkippedAPIs = skipAPIs
+			exec1.MarkRunning()
+			if err := repos.SyncPlanRepo().AddPlanExecution(exec1); err != nil {
+				return fmt.Errorf("failed to create sync execution (WS): %w", err)
+			}
+			exec2 := sync.NewSyncExecution(planID, dualRealtimeSecondInstanceID)
+			exec2.ExecuteParams = baseParams
+			exec2.SyncedAPIs = []string{"realtime_quote"}
+			exec2.SkippedAPIs = skipAPIs
+			exec2.MarkRunning()
+			if err := repos.SyncPlanRepo().AddPlanExecution(exec2); err != nil {
+				return fmt.Errorf("failed to create sync execution (Sina): %w", err)
+			}
+			executionID = exec1.ID
+		} else {
+			// 单 execution
+			execution := sync.NewSyncExecution(planID, instanceID)
+			execution.ExecuteParams = baseParams
+			execution.SyncedAPIs = s.extractAPINames(needSyncTasks)
+			execution.SkippedAPIs = skipAPIs
+			execution.MarkRunning()
+			if err := repos.SyncPlanRepo().AddPlanExecution(execution); err != nil {
+				return fmt.Errorf("failed to create sync execution: %w", err)
+			}
+			executionID = execution.ID
 		}
 
 		// Mark plan as running (use the plan from transaction)
@@ -738,8 +843,6 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		if err := repos.SyncPlanRepo().Update(txPlan); err != nil {
 			return fmt.Errorf("failed to update sync plan status: %w", err)
 		}
-
-		executionID = execution.ID
 		return nil
 	})
 
@@ -1521,32 +1624,40 @@ func (s *SyncApplicationServiceImpl) HandleExecutionCallback(ctx context.Context
 				errorMsg = *req.ErrorMessage
 			}
 			exec.MarkFailed(errorMsg)
+			// 生产实时且当前失败执行对应当前选中源：记录错误、切换到另一源，不标记 plan 完成
+			if s.realtimeSourceSelector != nil && s.execCorrespondsToCurrentActive(plan, exec) {
+				src := execSyncedAPIToSource(exec.SyncedAPIs)
+				s.realtimeSourceSelector.RecordSourceError(src, errorMsg)
+				if other := otherRealtimeSource(src); other != "" {
+					s.realtimeSourceSelector.SwitchTo(other)
+				}
+			}
 		}
 
 		if err := repos.SyncPlanRepo().UpdatePlanExecution(exec); err != nil {
 			return fmt.Errorf("failed to update execution: %w", err)
 		}
 
-		// Update plan status
+		// Update plan status（当前选中源失败且已切换时不再 MarkCompleted，另一源继续运行）
 		if plan != nil {
 			if effectiveSuccess && plan.IncrementalMode && exec.ExecuteParams != nil && exec.ExecuteParams.EndDate != "" {
 				plan.SetLastSuccessfulEndDate(exec.ExecuteParams.EndDate)
 			}
-			// Get next run time from scheduler or calculate it
-			var nextRunAt *time.Time
-			if plan.CronExpression != nil && *plan.CronExpression != "" {
-				// Try to get from scheduler first (most accurate)
-				if s.planScheduler != nil {
-					nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+			skipMarkCompleted := !effectiveSuccess && s.execCorrespondsToCurrentActive(plan, exec)
+			if !skipMarkCompleted {
+				var nextRunAt *time.Time
+				if plan.CronExpression != nil && *plan.CronExpression != "" {
+					if s.planScheduler != nil {
+						nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+					}
+					if nextRunAt == nil {
+						nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+					}
 				}
-				// Fallback to calculation if scheduler not available or plan not scheduled
-				if nextRunAt == nil {
-					nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+				plan.MarkCompleted(nextRunAt)
+				if err := repos.SyncPlanRepo().Update(plan); err != nil {
+					return fmt.Errorf("failed to update sync plan: %w", err)
 				}
-			}
-			plan.MarkCompleted(nextRunAt)
-			if err := repos.SyncPlanRepo().Update(plan); err != nil {
-				return fmt.Errorf("failed to update sync plan: %w", err)
 			}
 		}
 
@@ -1727,8 +1838,14 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 						errMsg = *wfStatus.ErrorMessage
 					}
 					exec.MarkFailed(errMsg)
-					// 保留工作流原始错误信息，便于前端/执行详情展示（如被 ban、超时、断连无法重连）
 					exec.WorkflowErrorMessage = wfStatus.ErrorMessage
+					if s.realtimeSourceSelector != nil && s.execCorrespondsToCurrentActive(plan, exec) {
+						src := execSyncedAPIToSource(exec.SyncedAPIs)
+						s.realtimeSourceSelector.RecordSourceError(src, errMsg)
+						if other := otherRealtimeSource(src); other != "" {
+							s.realtimeSourceSelector.SwitchTo(other)
+						}
+					}
 				case sync.ExecStatusCancelled:
 					exec.MarkCancelled()
 				}
@@ -1744,23 +1861,26 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 						progress.ErrorMessage = exec.ErrorMessage
 					}
 					// When execution is synced to terminal from workflow, also mark plan completed
-					// so plan status does not stay "running" if DataSyncCompleteHandler was never invoked
-					plan, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
-					if planErr == nil && plan != nil && plan.Status == sync.PlanStatusRunning {
-						var nextRunAt *time.Time
-						if plan.CronExpression != nil && *plan.CronExpression != "" {
-							if s.planScheduler != nil {
-								nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+					// (skip when production realtime current-active failure: other source keeps running)
+					planForStatus, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
+					if planErr == nil && planForStatus != nil && planForStatus.Status == sync.PlanStatusRunning {
+						skipMark := newStatus == sync.ExecStatusFailed && s.execCorrespondsToCurrentActive(planForStatus, exec)
+						if !skipMark {
+							var nextRunAt *time.Time
+							if planForStatus.CronExpression != nil && *planForStatus.CronExpression != "" {
+								if s.planScheduler != nil {
+									nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+								}
+								if nextRunAt == nil {
+									nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*planForStatus.CronExpression, time.Now())
+								}
 							}
-							if nextRunAt == nil {
-								nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+							planForStatus.MarkCompleted(nextRunAt)
+							if updatePlanErr := s.syncPlanRepo.Update(planForStatus); updatePlanErr != nil {
+								logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-sync: %v", updatePlanErr)
+							} else {
+								logrus.Infof("[SyncExecution] Plan %s marked completed after auto-sync from workflow", exec.SyncPlanID)
 							}
-						}
-						plan.MarkCompleted(nextRunAt)
-						if updatePlanErr := s.syncPlanRepo.Update(plan); updatePlanErr != nil {
-							logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-sync: %v", updatePlanErr)
-						} else {
-							logrus.Infof("[SyncExecution] Plan %s marked completed after auto-sync from workflow", exec.SyncPlanID)
 						}
 					}
 				}
@@ -1772,6 +1892,14 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 
 		errMsg := "workflow instance not found during progress query"
 		exec.MarkFailed(errMsg)
+		planForFail, _ := s.syncPlanRepo.Get(exec.SyncPlanID)
+		if planForFail != nil && s.realtimeSourceSelector != nil && s.execCorrespondsToCurrentActive(planForFail, exec) {
+			src := execSyncedAPIToSource(exec.SyncedAPIs)
+			s.realtimeSourceSelector.RecordSourceError(src, errMsg)
+			if other := otherRealtimeSource(src); other != "" {
+				s.realtimeSourceSelector.SwitchTo(other)
+			}
+		}
 
 		if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
 			logrus.Warnf("[SyncExecution] Failed to persist auto-failed execution %s: %v", executionID, updateErr)
@@ -1782,23 +1910,26 @@ func (s *SyncApplicationServiceImpl) GetExecutionProgress(ctx context.Context, e
 				progress.ErrorMessage = exec.ErrorMessage
 			}
 
-			// 当执行被自动标记为终态时，也需要把计划从 running 拉回正常状态，避免长期显示“运行中”
-			plan, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
-			if planErr == nil && plan != nil && plan.Status == sync.PlanStatusRunning {
-				var nextRunAt *time.Time
-				if plan.CronExpression != nil && *plan.CronExpression != "" {
-					if s.planScheduler != nil {
-						nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+			// 当执行被自动标记为终态时，也需要把计划从 running 拉回正常状态（生产实时当前源失败且已切换时不标记）
+			planForFail, planErr := s.syncPlanRepo.Get(exec.SyncPlanID)
+			if planErr == nil && planForFail != nil && planForFail.Status == sync.PlanStatusRunning {
+				skipMark := s.execCorrespondsToCurrentActive(planForFail, exec)
+				if !skipMark {
+					var nextRunAt *time.Time
+					if planForFail.CronExpression != nil && *planForFail.CronExpression != "" {
+						if s.planScheduler != nil {
+							nextRunAt = s.planScheduler.GetNextRunTime(exec.SyncPlanID.String())
+						}
+						if nextRunAt == nil {
+							nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*planForFail.CronExpression, time.Now())
+						}
 					}
-					if nextRunAt == nil {
-						nextRunAt, _ = s.cronCalculator.CalculateNextRunTime(*plan.CronExpression, time.Now())
+					planForFail.MarkCompleted(nextRunAt)
+					if updatePlanErr := s.syncPlanRepo.Update(planForFail); updatePlanErr != nil {
+						logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-fail: %v", updatePlanErr)
+					} else {
+						logrus.Infof("[SyncExecution] Plan %s marked completed after auto-fail (workflow instance missing)", exec.SyncPlanID)
 					}
-				}
-				plan.MarkCompleted(nextRunAt)
-				if updatePlanErr := s.syncPlanRepo.Update(plan); updatePlanErr != nil {
-					logrus.Warnf("[SyncExecution] Failed to mark plan completed after auto-fail: %v", updatePlanErr)
-				} else {
-					logrus.Infof("[SyncExecution] Plan %s marked completed after auto-fail (workflow instance missing)", exec.SyncPlanID)
 				}
 			}
 		}
@@ -1867,13 +1998,20 @@ func (s *SyncApplicationServiceImpl) ReconcileRunningExecutions(ctx context.Cont
 				logrus.Warnf("[SyncExecution] reconcile: execution %s has empty workflow instance id, marking as failed", exec.ID)
 				errMsg := "workflow instance id is empty during reconcile"
 				exec.MarkFailed(errMsg)
+				if s.realtimeSourceSelector != nil && s.execCorrespondsToCurrentActive(plan, exec) {
+					src := execSyncedAPIToSource(exec.SyncedAPIs)
+					s.realtimeSourceSelector.RecordSourceError(src, errMsg)
+					if other := otherRealtimeSource(src); other != "" {
+						s.realtimeSourceSelector.SwitchTo(other)
+					}
+				}
 				if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
 					logrus.Warnf("[SyncExecution] reconcile: failed to update execution %s: %v", exec.ID, updateErr)
 					continue
 				}
 
-				// 若计划仍标记为 running，则一并标记为 completed，避免前端长期显示运行中
-				if plan.Status == sync.PlanStatusRunning {
+				// 若计划仍标记为 running，则一并标记为 completed（生产实时当前源失败且已切换时不标记）
+				if plan.Status == sync.PlanStatusRunning && !s.execCorrespondsToCurrentActive(plan, exec) {
 					var nextRunAt *time.Time
 					if plan.CronExpression != nil && *plan.CronExpression != "" {
 						if s.planScheduler != nil {

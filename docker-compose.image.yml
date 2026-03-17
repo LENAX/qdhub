@@ -6,6 +6,7 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - QDHUB_ENV=production
       - QDHUB_SERVER_HOST=0.0.0.0
       - QDHUB_SERVER_PORT=8080
       - QDHUB_SERVER_ENABLE_SWAGGER=${QDHUB_SERVER_ENABLE_SWAGGER:-false}

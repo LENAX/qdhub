@@ -47,6 +47,8 @@ func TestSyncService_Integration_ResolveSyncPlan_Transactional(t *testing.T) {
 		uowImpl,
 		metadataRepo,
 		nil,
+		"",
+		nil,
 	)
 
 	// Create a data source
@@ -129,6 +131,8 @@ func TestSyncService_Integration_ExecuteSyncPlan_Transactional(t *testing.T) {
 		nil,
 		uowImpl,
 		metadataRepo,
+		nil,
+		"",
 		nil,
 	)
 

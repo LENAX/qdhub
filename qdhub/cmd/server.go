@@ -219,6 +219,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	config.AdminPassword = viper.GetString("auth.admin_password")
 	config.GuestPassword = viper.GetString("auth.guest_password")
+	if v := viper.GetString("env"); v != "" {
+		config.RealtimeEnv = v // QDHUB_ENV=production | development
+	}
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)

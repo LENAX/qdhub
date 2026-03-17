@@ -19,17 +19,19 @@ import (
 type RealtimeWSHandler struct {
 	store        *realtimestore.LatestQuoteStore
 	watchlistSvc contracts.WatchlistApplicationService // 可选：为空时不做收藏联动
+	selector     *realtimestore.RealtimeSourceSelector  // 可选：多源时返回 current_source/sources_health/sources_error
 	upgrader     websocket.Upgrader
 }
 
-// NewRealtimeWSHandler store 为 nil 时使用 DefaultLatestQuoteStore；watchlistSvc 为 nil 时未订阅或全市场仍推全市场
-func NewRealtimeWSHandler(store *realtimestore.LatestQuoteStore, watchlistSvc contracts.WatchlistApplicationService) *RealtimeWSHandler {
+// NewRealtimeWSHandler store 为 nil 时使用 DefaultLatestQuoteStore；watchlistSvc 为 nil 时未订阅或全市场仍推全市场；selector 为 nil 时仅返回 current_source=sina、sources_health 仅 sina、sources_error 空。
+func NewRealtimeWSHandler(store *realtimestore.LatestQuoteStore, watchlistSvc contracts.WatchlistApplicationService, selector *realtimestore.RealtimeSourceSelector) *RealtimeWSHandler {
 	if store == nil {
 		store = realtimestore.DefaultLatestQuoteStore()
 	}
 	return &RealtimeWSHandler{
 		store:        store,
 		watchlistSvc: watchlistSvc,
+		selector:     selector,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -38,6 +40,19 @@ func NewRealtimeWSHandler(store *realtimestore.LatestQuoteStore, watchlistSvc co
 
 func (h *RealtimeWSHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/ws/realtime-quotes", h.HandleQuotesWS)
+}
+
+// setSourceAwareness 写入 current_source、sources_health、sources_error，供前端有限感知多源与故障原因。
+func (h *RealtimeWSHandler) setSourceAwareness(payload map[string]interface{}) {
+	if h.selector == nil {
+		payload["current_source"] = realtimestore.SourceSina
+		payload["sources_health"] = map[string]string{realtimestore.SourceSina: realtimestore.HealthHealthy}
+		payload["sources_error"] = map[string]string{realtimestore.SourceSina: ""}
+		return
+	}
+	payload["current_source"] = h.selector.CurrentSource()
+	payload["sources_health"] = h.selector.SourcesHealth()
+	payload["sources_error"] = h.selector.SourcesError()
 }
 
 type realtimeSubscribeReq struct {
@@ -139,6 +154,7 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 					"items":     h.store.GetBatch(pushCodes),
 				}
 			}
+			h.setSourceAwareness(payload)
 			b, err := json.Marshal(payload)
 			if err != nil {
 				return

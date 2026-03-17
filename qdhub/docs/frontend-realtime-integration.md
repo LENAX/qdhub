@@ -22,6 +22,10 @@
   - **东方财富（`src="dc"` / `eastmoney`）**：realtime_quote（大批量）、realtime_tick（SSE Push）、realtime_list。
   - **Tushare（仅 ts_realtime_mkt_tick）**：通过 Tushare 官方 WebSocket `wss://ws.tushare.pro/listening` 订阅全市场 tick，后端落库并写入**内存最新价缓存**，供前端 WebSocket 订阅。
 
+- **环境与主数据源**
+  - **环境变量 `QDHUB_ENV`**：`production`（生产）或 `development`（开发，默认）。仅当 `QDHUB_ENV=production` 时，计划中的 `ts_realtime_mkt_tick` 才会走 Tushare WebSocket；否则开发环境一律用 **Sina `realtime_quote`** 替代，不启用 Tushare WS（避免 IP 限制）。
+  - **生产环境双 Collector**：当 `QDHUB_ENV=production` 且计划含 `ts_realtime_mkt_tick` 时，后端**同时启动** Tushare WS 与 Sina `realtime_quote` 两个流；**仅当前选中的数据源**写入内存缓存（LatestQuoteStore）。当前源故障（如 Tushare 被 ban）时自动切换到另一源，另一源已在运行，无需重连。前端通过 WebSocket 推送中的 `current_source`、`sources_health`、`sources_error` 做有限感知（见下）。
+
 ### 1.2 前端典型用法
 
 1. **同步侧**：通过 **SyncPlan**（`plan_mode="realtime"`）选择上述实时 API，调用 `POST /api/v1/sync-plans/:id/execute` 启动实时流，数据写入 DuckDB（及对 `ts_realtime_mkt_tick` 同时写内存缓存）。
@@ -191,6 +195,9 @@
 | **timestamp** | number | 服务端生成快照的时间戳（毫秒） |
 | **ts_codes** | string[] | 仅当 `scope === "subset"` 时存在，当前订阅的代码列表 |
 | **items** | object | key 为 `ts_code`，value 为该标的的最新一条行情（字段见下） |
+| **current_source** | string | 当前写入缓存的数据源：`tushare_ws` 或 `sina`。开发环境仅 Sina 时为 `sina`。 |
+| **sources_health** | object | 各数据源健康程度，如 `{ "tushare_ws": "healthy", "sina": "unavailable" }`。取值：`healthy`、`degraded`、`unavailable`。 |
+| **sources_error** | object | 各数据源**最近一次故障原因**，如 `{ "tushare_ws": "在线Ip数量超限, 请联系管理员", "sina": "" }`。健康或从未故障时该 key 为空字符串，便于前端展示具体原因（被 ban、断连、403 等）。 |
 
 **items 中单条行情字段**（与 Tushare HQ_STK_TICK / `ts_realtime_mkt_tick` 对齐）：
 

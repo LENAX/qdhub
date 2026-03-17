@@ -44,6 +44,8 @@ type TushareWSTickCollector struct {
 	TargetDBPath string
 	Topic        string
 	Codes        []string
+	// Selector 多源时仅当前选中源写 Store；nil 时始终写（兼容旧行为）。
+	Selector *realtimestore.RealtimeSourceSelector
 }
 
 var _ coreRealtime.DataCollector = (*TushareWSTickCollector)(nil)
@@ -182,9 +184,12 @@ func (c *TushareWSTickCollector) runOnce(
 		}
 
 		store := realtimestore.DefaultLatestQuoteStore()
+		writeStore := c.Selector == nil || c.Selector.ShouldWriteToStore(realtimestore.SourceTushareWS)
 		for _, row := range rows {
 			if tsCode, _ := row["ts_code"].(string); tsCode != "" {
-				store.Update(tsCode, row)
+				if writeStore {
+					store.Update(tsCode, row)
+				}
 			}
 		}
 

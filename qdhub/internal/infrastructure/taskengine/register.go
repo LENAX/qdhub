@@ -14,6 +14,7 @@ import (
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
 	"qdhub/internal/infrastructure/realtimebuffer"
+	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/taskengine/handlers"
 	"qdhub/internal/infrastructure/taskengine/jobs"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -43,6 +44,8 @@ type Dependencies struct {
 	RealtimeAdapterRegistry realtime.RealtimeAdapterRegistry
 	// RealtimeBufferRegistry 实时同步 buffer 按实例 ID 管理，Collector Push、Handler 消费。
 	RealtimeBufferRegistry realtimebuffer.Registry
+	// RealtimeSourceSelector 多源时仅当前选中源写 Store；RealtimeQuoteStreamHandlerJob 与 TushareWSTickCollector 使用。
+	RealtimeSourceSelector *realtimestore.RealtimeSourceSelector
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -223,6 +226,9 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 	}
 	if deps.RealtimeBufferRegistry != nil {
 		registry.RegisterDependencyWithKey("RealtimeBufferRegistry", deps.RealtimeBufferRegistry)
+	}
+	if deps.RealtimeSourceSelector != nil {
+		registry.RegisterDependencyWithKey("RealtimeSourceSelector", deps.RealtimeSourceSelector)
 	}
 
 	// Register engine itself as dependency (for template tasks)

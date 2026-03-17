@@ -40,6 +40,7 @@ import (
 	"qdhub/internal/infrastructure/quantdb/duckdb"
 	"qdhub/internal/infrastructure/quantdb/writequeue"
 	"qdhub/internal/infrastructure/realtimebuffer"
+	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
 	"qdhub/internal/infrastructure/taskengine/workflows"
@@ -150,11 +151,12 @@ type Container struct {
 	MetadataRepo    metadata.Repository
 
 	// Task Engine (backward compatibility: direct field access)
-	TaskEngine         *engine.Engine
-	TaskEngineAdapter  workflow.TaskEngineAdapter
-	WorkflowFactory    *workflows.WorkflowFactory
-	WorkflowExecutor   workflow.WorkflowExecutor
-	DataSourceRegistry *datasource.Registry
+	TaskEngine             *engine.Engine
+	TaskEngineAdapter      workflow.TaskEngineAdapter
+	WorkflowFactory        *workflows.WorkflowFactory
+	WorkflowExecutor       workflow.WorkflowExecutor
+	DataSourceRegistry     *datasource.Registry
+	RealtimeSourceSelector *realtimestore.RealtimeSourceSelector
 
 	// Scheduler (backward compatibility: direct field access)
 	CronCalculator     sync.CronScheduleCalculator
@@ -225,6 +227,9 @@ type Config struct {
 	JWTSecret         string        // JWT 签名密钥
 	JWTExpiration     time.Duration // Access token 过期时间
 	RefreshExpiration time.Duration // Refresh token 过期时间
+
+	// Realtime: 生产/开发环境，控制主数据源（production=tushare_ws+sina 双 Collector，development=仅 sina）
+	RealtimeEnv string // "production" | "development"，默认 development；对应 QDHUB_ENV
 }
 
 // DefaultConfig returns default configuration.
@@ -250,6 +255,7 @@ func DefaultConfig() Config {
 		JWTSecret:         "change-me-in-production",
 		JWTExpiration:     24 * time.Hour,
 		RefreshExpiration: 7 * 24 * time.Hour,
+		RealtimeEnv:       "development", // 开发默认不启用 Tushare WS；生产通过 QDHUB_ENV=production 设置
 	}
 }
 
@@ -907,10 +913,12 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	taskEngineDeps.CommonDataCache = cache.NewMemoryCommonDataCache(0)
 	log.Printf("[Container] ✅ CommonDataCache (memory, TTL 24h) registered")
 
-	// 实时同步：Adapter 注册表（sina/eastmoney）+ Buffer 按实例管理
+	// 实时同步：Adapter 注册表（sina/eastmoney）+ Buffer 按实例管理 + 多源选源器
+	c.RealtimeSourceSelector = realtimestore.NewRealtimeSourceSelector()
+	taskEngineDeps.RealtimeSourceSelector = c.RealtimeSourceSelector
 	taskEngineDeps.RealtimeAdapterRegistry = realtime.NewRegistryWithDefaults()
 	taskEngineDeps.RealtimeBufferRegistry = realtimebuffer.NewDefaultRegistry(256)
-	log.Printf("[Container] ✅ RealtimeAdapterRegistry & RealtimeBufferRegistry registered")
+	log.Printf("[Container] ✅ RealtimeAdapterRegistry & RealtimeBufferRegistry & RealtimeSourceSelector registered")
 
 	// 可选：若配置了默认 DuckDB 路径，通过共享 Factory 获取连接（避免独立 DuckDB 引擎实例）
 	if c.config.DefaultDuckDBPath != "" {
@@ -943,6 +951,8 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		c.TaskEngineAdapter,
 		c.MetadataRepo,
 		taskEngineDeps.RealtimeAdapterRegistry,
+		c.config.RealtimeEnv,
+		taskEngineDeps.RealtimeSourceSelector,
 	)
 
 	logrus.Info("Task Engine initialized")
@@ -1061,6 +1071,8 @@ func (c *Container) initApplicationServices() error {
 		c.UoW,
 		c.MetadataRepo,
 		c.QuantDBFactory,
+		c.config.RealtimeEnv,
+		c.RealtimeSourceSelector,
 	)
 
 	// DataQuality service（独立应用服务，归属 datastore 领域，依赖 SyncSvc 用于一键修复）
@@ -1194,7 +1206,7 @@ func (c *Container) initHTTPServer() error {
 	if c.WatchlistSvc != nil {
 		watchlistHandler = httpserver.NewWatchlistHandler(c.WatchlistSvc, c.AnalysisSvc)
 	}
-	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc)
+	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc, c.RealtimeSourceSelector)
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
