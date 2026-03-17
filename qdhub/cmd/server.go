@@ -222,6 +222,15 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if v := viper.GetString("env"); v != "" {
 		config.RealtimeEnv = v // QDHUB_ENV=production | development
 	}
+	if v := os.Getenv("TUSHARE_REALTIME_SOURCE"); v != "" {
+		config.TushareRealtimeSource = v // forward | direct，默认 forward
+	}
+	if v := os.Getenv("TUSHARE_FORWARD_WS_URL"); v != "" {
+		config.TushareForwardWSURL = v
+	}
+	if v := os.Getenv("TUSHARE_FORWARD_RSA_PUBLIC_KEY_PATH"); v != "" {
+		config.TushareForwardRSAPublicKeyPath = v
+	}
 
 	// Create and initialize container
 	ctr := container.NewContainer(config)

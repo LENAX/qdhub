@@ -27,10 +27,12 @@ type WorkflowExecutorImpl struct {
 	metadataRepo      metadata.Repository
 	// RealtimeAdapterRegistry 由外层注入，用于 Streaming Collector 构建 QuotePullCollector 时访问 Sina/Eastmoney 实时接口。
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry
-	// realtimeEnv：production 时 ts_realtime_mkt_tick 走 Tushare WS；非 production 时降级为 realtime_quote + Sina Pull。
-	realtimeEnv string
-	// realtimeSourceSelector 多源时仅当前选中源写 Store；传 nil 时 WS 始终写（兼容）。
-	realtimeSourceSelector *realtimestore.RealtimeSourceSelector
+	realtimeEnv             string
+	realtimeSourceSelector  *realtimestore.RealtimeSourceSelector
+	// tushareRealtimeSource: "forward"=从 ts_proxy 接收，"direct"=直连 Tushare WS。默认 forward。
+	tushareRealtimeSource         string
+	tushareForwardWSURL           string
+	tushareForwardRSAPublicKeyPath string
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
@@ -41,17 +43,26 @@ func NewWorkflowExecutor(
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry,
 	realtimeEnv string,
 	realtimeSourceSelector *realtimestore.RealtimeSourceSelector,
+	tushareRealtimeSource string,
+	tushareForwardWSURL string,
+	tushareForwardRSAPublicKeyPath string,
 ) workflow.WorkflowExecutor {
 	if realtimeEnv == "" {
 		realtimeEnv = "development"
 	}
+	if tushareRealtimeSource == "" {
+		tushareRealtimeSource = "forward"
+	}
 	return &WorkflowExecutorImpl{
-		workflowRepo:            workflowRepo,
-		taskEngineAdapter:       taskEngineAdapter,
-		metadataRepo:            metadataRepo,
-		realtimeAdapterRegistry: realtimeAdapterRegistry,
-		realtimeEnv:             realtimeEnv,
-		realtimeSourceSelector:  realtimeSourceSelector,
+		workflowRepo:                   workflowRepo,
+		taskEngineAdapter:              taskEngineAdapter,
+		metadataRepo:                   metadataRepo,
+		realtimeAdapterRegistry:        realtimeAdapterRegistry,
+		realtimeEnv:                     realtimeEnv,
+		realtimeSourceSelector:         realtimeSourceSelector,
+		tushareRealtimeSource:          tushareRealtimeSource,
+		tushareForwardWSURL:            tushareForwardWSURL,
+		tushareForwardRSAPublicKeyPath: tushareForwardRSAPublicKeyPath,
 	}
 }
 
@@ -232,20 +243,37 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 	}
 
 	if containsAPI(req.APINames, "ts_realtime_mkt_tick") {
-		topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
-		collector := &realtime.TushareWSTickCollector{
-			Token:        req.Token,
-			TargetDBPath: req.TargetDBPath,
-			Topic:        topic,
-			Codes:        codes,
-			Selector:     e.realtimeSourceSelector,
+		useForward := e.tushareRealtimeSource == "forward" &&
+			strings.TrimSpace(e.tushareForwardWSURL) != "" &&
+			strings.TrimSpace(e.tushareForwardRSAPublicKeyPath) != ""
+
+		var collector taskrealtime.DataCollector
+		var collectorName string
+		if useForward {
+			collector = &realtime.ForwardTickCollector{
+				ForwardWSURL:            e.tushareForwardWSURL,
+				ForwardRSAPublicKeyPath: e.tushareForwardRSAPublicKeyPath,
+				TargetDBPath:            req.TargetDBPath,
+				Selector:                e.realtimeSourceSelector,
+			}
+			collectorName = "tushare_forward_tick"
+		} else {
+			topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
+			collector = &realtime.TushareWSTickCollector{
+				Token:        req.Token,
+				TargetDBPath: req.TargetDBPath,
+				Topic:        topic,
+				Codes:        codes,
+				Selector:     e.realtimeSourceSelector,
+			}
+			collectorName = "tushare_ws_tick"
 		}
 		builder := workflows.NewTushareWSStreamingBuilder(registry, workflows.TushareWSStreamingParams{
 			DataSourceName: req.DataSourceName,
 			Token:          req.Token,
 			TargetDBPath:   req.TargetDBPath,
 			APIName:        "ts_realtime_mkt_tick",
-		}, "tushare_ws_tick", collector)
+		}, collectorName, collector)
 		wf, err := builder.Build()
 		if err != nil {
 			return "", fmt.Errorf("build tushare ws streaming workflow: %w", err)

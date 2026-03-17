@@ -16,6 +16,7 @@ CMD_DIR := cmd
 
 .PHONY: all build clean test lint run help
 .PHONY: build-linux build-darwin build-windows build-all
+.PHONY: build-ts-proxy build-ts-proxy-diagnose build-ts-proxy-linux-amd64 build-ts-proxy-diagnose-linux-amd64
 .PHONY: test-unit test-integration test-e2e test-all
 .PHONY: deploy-dev deploy-prod
 .PHONY: deps tidy fmt vet
@@ -47,6 +48,10 @@ help:
 	@echo "  make compose-prod   Docker Compose prod (no override)"
 	@echo "  make compose-up     Compose up -d (uses override if present)"
 	@echo "  make compose-down   Compose down"
+	@echo "  make build-ts-proxy              Build ts_proxy for current platform"
+	@echo "  make build-ts-proxy-linux-amd64  Build ts_proxy for linux/amd64"
+	@echo "  make build-ts-proxy-diagnose     Build ts_proxy_diagnose for current platform"
+	@echo "  make build-ts-proxy-diagnose-linux-amd64  Build ts_proxy_diagnose for linux/amd64"
 	@echo ""
 
 # Dependencies
@@ -72,6 +77,19 @@ build-windows: deps
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-windows-amd64.exe .
 
 build-all: build-linux build-darwin build-windows
+
+# ts_proxy (Tushare forwarding server) and ts_proxy_diagnose (connectivity diagnostic)
+build-ts-proxy: deps
+	$(GO) build -o $(BIN_DIR)/ts_proxy ./ts_proxy
+
+build-ts-proxy-diagnose: deps
+	$(GO) build -o $(BIN_DIR)/ts_proxy_diagnose ./ts_proxy_diagnose
+
+build-ts-proxy-linux-amd64: deps
+	GOOS=linux GOARCH=amd64 $(GO) build -o $(BIN_DIR)/ts_proxy-linux-amd64 ./ts_proxy
+
+build-ts-proxy-diagnose-linux-amd64: deps
+	GOOS=linux GOARCH=amd64 $(GO) build -o $(BIN_DIR)/ts_proxy_diagnose-linux-amd64 ./ts_proxy_diagnose
 
 # Test targets
 test: test-unit

@@ -674,7 +674,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 	require.NoError(t, err)
 
 	// 8. 创建 WorkflowExecutor（此处只验证内建工作流，不涉及实时 Adapter，传 nil）
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
 
 	// 9. 创建 MetadataApplicationService
 	metadataAppService := impl.NewMetadataApplicationService(
@@ -718,6 +718,8 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		uowImpl,
 		metadataRepo,
 		quantDBFactory,
+		"",
+		nil,
 	)
 
 	// 13. 有 QuantDB 时创建 Analysis 应用服务（含兜底），供 Analysis E2E 使用

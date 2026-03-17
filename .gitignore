@@ -15,6 +15,8 @@ qdhub/coverage.out
 qdhub/coverage_all.out
 qdhub/coverage_all.out
 */bin/*
+qdhub/ts_proxy/ts_proxy
+qdhub/ts_proxy_diagnose/ts_proxy_diagnose
 */*.db-shm
 */*.db-wal
 qdhub/data/*
@@ -60,3 +62,6 @@ bak/qdhub.duckdb
 qdhub/data/qdhub.db-shm
 qdhub/data/qdhub.db-wal
 roadmap.md
+bak
+qdhub/data
+.gitignore

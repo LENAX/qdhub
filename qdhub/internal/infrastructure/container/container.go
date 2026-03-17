@@ -230,6 +230,11 @@ type Config struct {
 
 	// Realtime: 生产/开发环境，控制主数据源（production=tushare_ws+sina 双 Collector，development=仅 sina）
 	RealtimeEnv string // "production" | "development"，默认 development；对应 QDHUB_ENV
+
+	// Tushare 实时数据来源：forward=从 ts_proxy 转发端接收，direct=直连 Tushare WS。默认 forward。
+	TushareRealtimeSource       string // "forward" | "direct"
+	TushareForwardWSURL         string // 转发端 WS 地址，如 ws://host:8888/realtime
+	TushareForwardRSAPublicKeyPath string // 转发端 RSA 公钥路径（方案 B 客户端加密 AES 密钥）
 }
 
 // DefaultConfig returns default configuration.
@@ -255,7 +260,10 @@ func DefaultConfig() Config {
 		JWTSecret:         "change-me-in-production",
 		JWTExpiration:     24 * time.Hour,
 		RefreshExpiration: 7 * 24 * time.Hour,
-		RealtimeEnv:       "development", // 开发默认不启用 Tushare WS；生产通过 QDHUB_ENV=production 设置
+		RealtimeEnv:                   "development",
+		TushareRealtimeSource:         "forward", // 默认从转发端接收
+		TushareForwardWSURL:           "",
+		TushareForwardRSAPublicKeyPath: "",
 	}
 }
 
@@ -953,6 +961,9 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		taskEngineDeps.RealtimeAdapterRegistry,
 		c.config.RealtimeEnv,
 		taskEngineDeps.RealtimeSourceSelector,
+		c.config.TushareRealtimeSource,
+		c.config.TushareForwardWSURL,
+		c.config.TushareForwardRSAPublicKeyPath,
 	)
 
 	logrus.Info("Task Engine initialized")

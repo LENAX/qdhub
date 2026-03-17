@@ -62,7 +62,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	require.NoError(t, err)
 
 	// 创建WorkflowExecutor（HTTP E2E 不直接依赖实时 Adapter，传 nil）
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil)
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
 
 	// 创建依赖解析器
 	dependencyResolver := sync.NewDependencyResolver()
@@ -74,7 +74,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	uowImpl := uow.NewUnitOfWork(db)
 	metadataSvc := impl.NewMetadataApplicationService(dataSourceRepo, metadataRepo, nil, workflowExecutor, nil)
 	dataStoreSvc := impl.NewDataStoreApplicationService(dataStoreRepo, dataSourceRepo, syncPlanRepo, workflowExecutor, nil)
-	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil)
+	syncSvc := impl.NewSyncApplicationService(syncPlanRepo, cronCalculator, planScheduler, dataSourceRepo, dataStoreRepo, workflowExecutor, dependencyResolver, taskEngineAdapter, uowImpl, metadataRepo, nil, "", nil)
 	workflowSvc := impl.NewWorkflowApplicationService(workflowRepo, taskEngineAdapter)
 
 	// 创建认证相关组件
