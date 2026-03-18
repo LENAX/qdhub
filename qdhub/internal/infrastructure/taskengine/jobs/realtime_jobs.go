@@ -170,11 +170,9 @@ func RealtimeSyncDataHandlerJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("RealtimeSyncDataHandler: target_db_path is required")
 	}
 
-	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
-	if err != nil {
+	if _, err := GetQuantDBForPath(tc, targetDBPath); err != nil {
 		return nil, fmt.Errorf("RealtimeSyncDataHandler: get QuantDB: %w", err)
 	}
-	defer quantDB.Close()
 
 	bufRegInterface, ok := tc.GetDependency("RealtimeBufferRegistry")
 	if !ok || bufRegInterface == nil {
@@ -462,7 +460,6 @@ func TushareTickDBBatchWriteJob(tc *task.TaskContext) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("TushareTickDBBatchWrite: get QuantDB: %w", err)
 	}
-	defer quantDB.Close()
 	if err := ensureTushareTickTable(ctx, quantDB, apiName); err != nil {
 		return nil, err
 	}

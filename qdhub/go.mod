@@ -6,6 +6,7 @@ require (
 	github.com/LENAX/task-engine v1.0.18
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/casbin/casbin/v2 v2.128.0
+	github.com/duckdb/duckdb-go/v2 v2.5.0
 	github.com/gin-contrib/authz v1.0.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
@@ -14,7 +15,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.10.9
-	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/memwey/casbin-sqlx-adapter v0.3.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -40,7 +40,7 @@ require (
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/ThreeDotsLabs/watermill v1.5.1 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/apache/arrow-go/v18 v18.1.0 // indirect
+	github.com/apache/arrow-go/v18 v18.4.1 // indirect
 	github.com/begmaroman/go-dag v0.0.0-20250122180112-b4fa161b074b // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -49,9 +49,17 @@ require (
 	github.com/casbin/govaluate v1.10.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgraph-io/badger/v4 v4.9.1 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
+	github.com/duckdb/duckdb-go-bindings v0.1.21 // indirect
+	github.com/duckdb/duckdb-go-bindings/darwin-amd64 v0.1.21 // indirect
+	github.com/duckdb/duckdb-go-bindings/darwin-arm64 v0.1.21 // indirect
+	github.com/duckdb/duckdb-go-bindings/linux-amd64 v0.1.21 // indirect
+	github.com/duckdb/duckdb-go-bindings/linux-arm64 v0.1.21 // indirect
+	github.com/duckdb/duckdb-go-bindings/windows-amd64 v0.1.21 // indirect
+	github.com/duckdb/duckdb-go/arrowmapping v0.0.22 // indirect
+	github.com/duckdb/duckdb-go/mapping v0.0.22 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -85,7 +93,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.55.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -104,7 +112,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c // indirect
+	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect

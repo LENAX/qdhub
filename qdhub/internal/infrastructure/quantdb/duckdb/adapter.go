@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	_ "github.com/marcboeker/go-duckdb" // DuckDB driver
+	_ "github.com/duckdb/duckdb-go/v2" // DuckDB driver
 
 	"qdhub/internal/domain/datastore"
 )
@@ -68,6 +68,11 @@ func (a *Adapter) Connect(ctx context.Context) error {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return fmt.Errorf("failed to ping duckdb: %w", err)
+	}
+
+	// 对持久化 DuckDB（非空路径）关闭空闲连接池，确保 Close 时真正释放连接并刷 WAL。
+	if a.storagePath != "" {
+		db.SetMaxIdleConns(0)
 	}
 
 	a.db = db
