@@ -13,6 +13,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const listenDur = 2 * time.Second
+
 func main() {
 	addr := flag.String("addr", "", "WebSocket address (e.g. ws://host:8888/realtime)")
 	rsaPubPath := flag.String("rsa-pub", os.Getenv("RSA_PUBLIC_KEY_PATH"), "Optional: server RSA public key path for scheme B key exchange")
@@ -65,17 +67,25 @@ func main() {
 		fmt.Printf("SESSION_CIPHER_FAIL\t%v\n", err)
 		os.Exit(1)
 	}
-	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		fmt.Printf("READ_FRAME_FAIL\t%v\n", err)
+	deadline := time.Now().Add(listenDur)
+	conn.SetReadDeadline(deadline)
+	frameNum := 0
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		plain, err := cipher.Decrypt(msg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "DECRYPT_FAIL\t%v\n", err)
+			continue
+		}
+		frameNum++
+		fmt.Printf("--- frame %d (%dB) ---\n%s\n", frameNum, len(plain), string(plain))
+	}
+	if frameNum == 0 {
+		fmt.Printf("READ_FRAME_FAIL\tno frame received within %v\n", listenDur)
 		os.Exit(1)
 	}
-	plain, err := cipher.Decrypt(msg)
-	if err != nil {
-		fmt.Printf("DECRYPT_FAIL\t%v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("RECV_OK\t%dB decrypted (first frame)\n", len(plain))
-	fmt.Println("DIAGNOSE_OK")
+	fmt.Printf("DIAGNOSE_OK\t%d frame(s) in %v\n", frameNum, listenDur)
 }

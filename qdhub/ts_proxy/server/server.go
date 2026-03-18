@@ -138,7 +138,9 @@ func (b *Broadcast) PushTick(row normalize.TickRow) {
 		err = sess.conn.WriteMessage(websocket.BinaryMessage, ciphertext)
 		sess.mu.Unlock()
 		if err != nil {
-			logrus.Warnf("[ts_proxy] write: %v", err)
+			logrus.Warnf("[ts_proxy] write to client: %v, dropping session", err)
+			_ = sess.conn.Close()
+			b.remove(sess)
 		}
 	}
 }

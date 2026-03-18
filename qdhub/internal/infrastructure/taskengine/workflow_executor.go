@@ -237,12 +237,13 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		return "", fmt.Errorf("realtime adapter registry is nil")
 	}
 
-	// 开发环境：ts_realtime_mkt_tick 不走 Tushare WS，降级为 realtime_quote + Sina Pull。
-	if containsAPI(req.APINames, "ts_realtime_mkt_tick") && e.realtimeEnv != "production" {
+	// 本地开发模式不启动 Tushare WS，避免 IP 被 ban；降级为 realtime_quote + Sina Pull。
+	if e.realtimeEnv != "production" && containsAPI(req.APINames, "ts_realtime_mkt_tick") {
 		req = cloneRealtimeRequestWithAPIs(req, []string{"realtime_quote"})
 	}
 
-	if containsAPI(req.APINames, "ts_realtime_mkt_tick") {
+	// 仅生产环境启动 Tushare WS（或 forward）；开发环境上一步已替换为 realtime_quote。
+	if e.realtimeEnv == "production" && containsAPI(req.APINames, "ts_realtime_mkt_tick") {
 		useForward := e.tushareRealtimeSource == "forward" &&
 			strings.TrimSpace(e.tushareForwardWSURL) != "" &&
 			strings.TrimSpace(e.tushareForwardRSAPublicKeyPath) != ""
@@ -300,6 +301,11 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		collector     taskrealtime.DataCollector
 		collectorName string
 	)
+
+	// 开发环境仅 Sina 时，将 Selector 设为 sina，使 Sina 数据写入 LatestQuoteStore，前端可无感读取（设计 doc 3.2）。
+	if e.realtimeEnv == "development" && e.realtimeSourceSelector != nil {
+		e.realtimeSourceSelector.SwitchTo(realtimestore.SourceSina)
+	}
 
 	// realtime_tick 使用 SSE Push 模式，通过 TickPushCollector + eastmoney 适配器消费分笔数据。
 	if len(req.APINames) > 0 && req.APINames[0] == "realtime_tick" {

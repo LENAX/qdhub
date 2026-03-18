@@ -10,8 +10,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=tsproxy
-Group=tsproxy
+# 以 root 运行时注释掉 User/Group，否则需先创建用户: useradd -r -s /bin/false tsproxy
+# User=tsproxy
+# Group=tsproxy
 
 # 环境变量由 ts_proxy 读取（flag 会 fallback 到 env）。可选环境文件示例：
 # TUSHARE_TOKEN=xxx
@@ -19,9 +20,9 @@ Group=tsproxy
 # LISTEN_ADDR=:8888
 # TUSHARE_TOPIC=HQ_STK_TICK
 # TUSHARE_CODES=0*.SZ,3*.SZ,6*.SH
-EnvironmentFile=-/etc/ts_proxy/env
+EnvironmentFile=-/root/ts_realtime/ts_proxy.env
 
-ExecStart=/opt/ts_proxy/ts_proxy
+ExecStart=/root/ts_realtime/ts_proxy-linux-amd64
 
 Restart=always
 RestartSec=5

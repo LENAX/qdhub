@@ -135,6 +135,9 @@ func (c *Client) runOnce(ctx context.Context) error {
 			if err != nil {
 				return
 			}
+			if len(msg) < 2 {
+				continue
+			}
 			code, record, err := normalize.ParseTushareMessage(msg)
 			if err != nil {
 				logrus.Warnf("[tushare] parse message: %v", err)

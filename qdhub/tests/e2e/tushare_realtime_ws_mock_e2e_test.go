@@ -24,7 +24,7 @@ import (
 // TestE2E_TushareRealtimeWSMockFlow 验证 mock 数据在内存缓存与 WS 推送链路可达。
 func TestE2E_TushareRealtimeWSMockFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handler := httpapi.NewRealtimeWSHandler(realtimestore.DefaultLatestQuoteStore(), nil)
+	handler := httpapi.NewRealtimeWSHandler(realtimestore.DefaultLatestQuoteStore(), nil, nil)
 	code := fmt.Sprintf("E2E_%d.SZ", time.Now().UnixNano())
 
 	r := gin.New()

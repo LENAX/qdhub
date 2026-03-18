@@ -245,7 +245,8 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 		bid DOUBLE, ask DOUBLE, volume DOUBLE, amount DOUBLE,
 		b1_v VARCHAR(32), b1_p DOUBLE, b2_v VARCHAR(32), b2_p DOUBLE, b3_v VARCHAR(32), b3_p DOUBLE, b4_v VARCHAR(32), b4_p DOUBLE, b5_v VARCHAR(32), b5_p DOUBLE,
 		a1_v VARCHAR(32), a1_p DOUBLE, a2_v VARCHAR(32), a2_p DOUBLE, a3_v VARCHAR(32), a3_p DOUBLE, a4_v VARCHAR(32), a4_p DOUBLE, a5_v VARCHAR(32), a5_p DOUBLE,
-		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE
+		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE,
+		PRIMARY KEY (ts_code, date, time)
 	)`)
 	require.NoError(t, err)
 	qdb.Close()
@@ -519,7 +520,8 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 		bid DOUBLE, ask DOUBLE, volume DOUBLE, amount DOUBLE,
 		b1_v VARCHAR(32), b1_p DOUBLE, b2_v VARCHAR(32), b2_p DOUBLE, b3_v VARCHAR(32), b3_p DOUBLE, b4_v VARCHAR(32), b4_p DOUBLE, b5_v VARCHAR(32), b5_p DOUBLE,
 		a1_v VARCHAR(32), a1_p DOUBLE, a2_v VARCHAR(32), a2_p DOUBLE, a3_v VARCHAR(32), a3_p DOUBLE, a4_v VARCHAR(32), a4_p DOUBLE, a5_v VARCHAR(32), a5_p DOUBLE,
-		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE
+		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE,
+		PRIMARY KEY (ts_code, date, time)
 	)`)
 	qdb.Close()
 
@@ -1168,7 +1170,8 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 		bid DOUBLE, ask DOUBLE, volume DOUBLE, amount DOUBLE,
 		b1_v VARCHAR(32), b1_p DOUBLE, b2_v VARCHAR(32), b2_p DOUBLE, b3_v VARCHAR(32), b3_p DOUBLE, b4_v VARCHAR(32), b4_p DOUBLE, b5_v VARCHAR(32), b5_p DOUBLE,
 		a1_v VARCHAR(32), a1_p DOUBLE, a2_v VARCHAR(32), a2_p DOUBLE, a3_v VARCHAR(32), a3_p DOUBLE, a4_v VARCHAR(32), a4_p DOUBLE, a5_v VARCHAR(32), a5_p DOUBLE,
-		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE
+		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE,
+		PRIMARY KEY (ts_code, date, time)
 	)`)
 	_ = qdb.Close()
 
@@ -1365,7 +1368,8 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 		bid DOUBLE, ask DOUBLE, volume DOUBLE, amount DOUBLE,
 		b1_v VARCHAR(32), b1_p DOUBLE, b2_v VARCHAR(32), b2_p DOUBLE, b3_v VARCHAR(32), b3_p DOUBLE, b4_v VARCHAR(32), b4_p DOUBLE, b5_v VARCHAR(32), b5_p DOUBLE,
 		a1_v VARCHAR(32), a1_p DOUBLE, a2_v VARCHAR(32), a2_p DOUBLE, a3_v VARCHAR(32), a3_p DOUBLE, a4_v VARCHAR(32), a4_p DOUBLE, a5_v VARCHAR(32), a5_p DOUBLE,
-		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE
+		date VARCHAR(16), time VARCHAR(16), trade_time VARCHAR(32), close DOUBLE, vol DOUBLE,
+		PRIMARY KEY (ts_code, date, time)
 	)`)
 	_ = qdb.Close()
 

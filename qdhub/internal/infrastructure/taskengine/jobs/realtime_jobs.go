@@ -358,6 +358,17 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 
 	raw := tc.GetParam("data")
 	rows := normalizeRealtimeRows(raw)
+	// 兼容 task-engine 将 DataArrivedPayload 整体放入 params["data"] 时，从 payload 取 source
+	if source == "" && raw != nil {
+		if m, ok := raw.(map[string]interface{}); ok {
+			if s, _ := m["source"].(string); s != "" {
+				source = s
+			}
+		}
+	}
+	if source == "" {
+		source = defaultRealtimeSrc
+	}
 	// 删除每行中的 target_db_path 元数据，避免作为表字段写入 DuckDB。
 	for _, r := range rows {
 		delete(r, "target_db_path")

@@ -119,7 +119,9 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 	primaryKeys := make([]string, 0)
 	hasTSCode := false
 	hasTradeTime := false
-	var tsCodeColName, tradeTimeColName string
+	hasDate := false
+	hasTime := false
+	var tsCodeColName, tradeTimeColName, dateColName, timeColName string
 
 	for _, f := range fields {
 		fieldName := strings.TrimSpace(f.Name)
@@ -137,7 +139,7 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 		}
 		schema.Columns = append(schema.Columns, col)
 
-		// 记录 ts_code / trade_time 是否存在（忽略大小写，但保留实际列名）
+		// 记录 ts_code / trade_time / date / time 是否存在（忽略大小写，但保留实际列名）
 		if strings.EqualFold(fieldName, "ts_code") {
 			hasTSCode = true
 			tsCodeColName = fieldName
@@ -145,6 +147,14 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 		if strings.EqualFold(fieldName, "trade_time") {
 			hasTradeTime = true
 			tradeTimeColName = fieldName
+		}
+		if strings.EqualFold(fieldName, "date") {
+			hasDate = true
+			dateColName = fieldName
+		}
+		if strings.EqualFold(fieldName, "time") {
+			hasTime = true
+			timeColName = fieldName
 		}
 
 		if f.IsPrimary {
@@ -178,11 +188,18 @@ func buildTableSchema(tableName string, fields []metadata.FieldMeta) *datastore.
 		Comment:    "记录创建时间",
 	})
 
-	// 如果同时包含 ts_code 和 trade_time，则强制使用它们作为联合主键
-	if hasTSCode && hasTradeTime {
+	// realtime_quote（Sina 等）使用 ts_code, date, time 联合主键，避免同一标的同一时刻多次拉取覆盖
+	if tableName == "realtime_quote" && hasTSCode && hasDate && hasTime {
+		schema.PrimaryKeys = []string{tsCodeColName, dateColName, timeColName}
+		for i, col := range schema.Columns {
+			if col.Name == tsCodeColName || col.Name == dateColName || col.Name == timeColName {
+				col.Nullable = false
+				schema.Columns[i] = col
+			}
+		}
+	} else if hasTSCode && hasTradeTime {
+		// 其他表若同时包含 ts_code 和 trade_time，则使用它们作为联合主键
 		schema.PrimaryKeys = []string{tsCodeColName, tradeTimeColName}
-
-		// 确保联合主键列为 NOT NULL
 		for i, col := range schema.Columns {
 			if col.Name == tsCodeColName || col.Name == tradeTimeColName {
 				col.Nullable = false
