@@ -177,7 +177,28 @@ flowchart LR
 
 ---
 
-## 十、与现有代码/文档的对应
+## 十、本地开发环境利用内地 ts_proxy 调试
+
+**思路**：内地已部署的 ts_proxy 在内地连接 Tushare（不触发 Tushare IP 限制）；本地开发机上的 QDHub 只连接 ts_proxy，不直连 Tushare，因此本地调试也能获得真实行情且不会触发 IP 限制。
+
+| 角色 | 说明 |
+|------|------|
+| **内地 ts_proxy** | 在内地 ECS 按 [ts_proxy/DEPLOY.md](ts_proxy/DEPLOY.md) 部署，订阅 Tushare 并对外提供 WS（方案 B 加密）。 |
+| **本地 QDHub** | 在「实时数据源管理」中配置一条 `type=tushare_forward` 的源，`config` 填内地 ts_proxy 的 `ws_url` 与本地保存的 RSA 公钥路径，对该源执行 **connect**；ForwardTickCollector 会连 ts_proxy、完成密钥交换并接收加密 tick，写入 LatestQuoteStore，前端 WebSocket 即可收到行情。 |
+
+**访问方式（任选其一）**：
+
+1. **安全组临时放行**：内地 ECS 安全组入方向对 ts_proxy 端口（如 8888）增加来源为「开发机当前公网 IP」的规则；本地 `ws_url` 填 `ws://<内地公网IP>:8888/realtime`。调试结束后可移除该规则。
+2. **SSH 本地转发**：在开发机执行 `ssh -L 127.0.0.1:8888:127.0.0.1:8888 user@<内地IP>`，本地 QDHub 的 `ws_url` 填 `ws://127.0.0.1:8888/realtime`，流量经 SSH 到内地再连本机 ts_proxy。
+3. **内网穿透**：若 ts_proxy 在内网，可通过 frp/ngrok 等将内地 8888 暴露到公网或开发机可访问的地址，QDHub 连该地址即可。
+
+**本地准备**：从内地侧拿到 RSA **公钥**（如 `public.pem`），在开发机保存为本地路径，创建 realtime source 时 `config.rsa_public_key_path` 填该路径；`config.ws_url` 填上述任一种方式得到的 ts_proxy WS 地址。
+
+**效果**：无需在开发机配置 Tushare Token、无需开发机在内地，即可用真实 Tushare 行情做前端/后端联调，且不占用 Tushare 对香港或其它出口 IP 的限额。
+
+---
+
+## 十一、与现有代码/文档的对应
 
 - **数据格式**：转发服务端归一化后的 row 与 `ws_collector.go` 的 parseRows / normalizeTushareTickRecord 及 realtime_jobs 的 normalizeRealtimeRows 一致，便于香港侧直接复用。
 - **多源与前端**：若增加隧道/转发源，需在 design-realtime-multi-source-failover.md 与 frontend-realtime-integration.md 中补充该源的 `current_source` / `sources_health` / `sources_error` 约定。

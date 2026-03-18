@@ -62,7 +62,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	require.NoError(t, err)
 
 	// 创建WorkflowExecutor（HTTP E2E 不直接依赖实时 Adapter，传 nil）
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, nil, "", "", "")
 
 	// 创建依赖解析器
 	dependencyResolver := sync.NewDependencyResolver()
@@ -90,7 +90,7 @@ func setupE2EHTTPServer(t *testing.T, db *persistence.DB, taskEngine *engine.Eng
 	// 创建HTTP服务器
 	config := httpapi.DefaultServerConfig()
 	config.Mode = gin.TestMode
-	server := httpapi.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, jwtManager, enforcer, "")
+	server := httpapi.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, jwtManager, enforcer, "")
 
 	// 创建测试服务器
 	ts := httptest.NewServer(server.Engine())

@@ -63,7 +63,7 @@ func setupE2EApplicationServices(t *testing.T, db *persistence.DB, taskEngine *e
 	require.NoError(t, err)
 
 	// 创建WorkflowExecutor（应用服务 E2E 不依赖实时 Adapter，传 nil）
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, nil, "", "", "")
 
 	// 创建依赖解析器
 	dependencyResolver := sync.NewDependencyResolver()

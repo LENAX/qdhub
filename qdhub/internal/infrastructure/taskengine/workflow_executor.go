@@ -11,12 +11,18 @@ import (
 	"github.com/LENAX/task-engine/pkg/core/task"
 
 	"qdhub/internal/domain/metadata"
+	domainrealtime "qdhub/internal/domain/realtime"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
 	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
+
+// RealtimeSourceResolver returns enabled realtime sources ordered by priority for a given purpose (used by WorkflowExecutor).
+type RealtimeSourceResolver interface {
+	GetOrderedByPurpose(purpose string) ([]*domainrealtime.RealtimeSource, error)
+}
 
 // WorkflowExecutorImpl implements workflow.WorkflowExecutor.
 // This implementation executes built-in workflows by directly interacting with
@@ -30,12 +36,14 @@ type WorkflowExecutorImpl struct {
 	realtimeEnv             string
 	realtimeSourceSelector  *realtimestore.RealtimeSourceSelector
 	// tushareRealtimeSource: "forward"=从 ts_proxy 接收，"direct"=直连 Tushare WS。默认 forward。
-	tushareRealtimeSource         string
-	tushareForwardWSURL           string
+	tushareRealtimeSource          string
+	tushareForwardWSURL            string
 	tushareForwardRSAPublicKeyPath string
+	realtimeSourceResolver         RealtimeSourceResolver // optional: when set, use GetOrderedByPurpose for collector config
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
+// realtimeSourceResolver is optional; when set, collector config and selector active source come from GetOrderedByPurpose(purpose).
 func NewWorkflowExecutor(
 	workflowRepo workflow.WorkflowDefinitionRepository,
 	taskEngineAdapter workflow.TaskEngineAdapter,
@@ -43,6 +51,7 @@ func NewWorkflowExecutor(
 	realtimeAdapterRegistry realtime.RealtimeAdapterRegistry,
 	realtimeEnv string,
 	realtimeSourceSelector *realtimestore.RealtimeSourceSelector,
+	realtimeSourceResolver RealtimeSourceResolver,
 	tushareRealtimeSource string,
 	tushareForwardWSURL string,
 	tushareForwardRSAPublicKeyPath string,
@@ -60,6 +69,7 @@ func NewWorkflowExecutor(
 		realtimeAdapterRegistry:        realtimeAdapterRegistry,
 		realtimeEnv:                     realtimeEnv,
 		realtimeSourceSelector:         realtimeSourceSelector,
+		realtimeSourceResolver:         realtimeSourceResolver,
 		tushareRealtimeSource:          tushareRealtimeSource,
 		tushareForwardWSURL:            tushareForwardWSURL,
 		tushareForwardRSAPublicKeyPath: tushareForwardRSAPublicKeyPath,
@@ -244,30 +254,70 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 
 	// 仅生产环境启动 Tushare WS（或 forward）；开发环境上一步已替换为 realtime_quote。
 	if e.realtimeEnv == "production" && containsAPI(req.APINames, "ts_realtime_mkt_tick") {
-		useForward := e.tushareRealtimeSource == "forward" &&
-			strings.TrimSpace(e.tushareForwardWSURL) != "" &&
-			strings.TrimSpace(e.tushareForwardRSAPublicKeyPath) != ""
-
 		var collector taskrealtime.DataCollector
 		var collectorName string
-		if useForward {
-			collector = &realtime.ForwardTickCollector{
-				ForwardWSURL:            e.tushareForwardWSURL,
-				ForwardRSAPublicKeyPath: e.tushareForwardRSAPublicKeyPath,
-				TargetDBPath:            req.TargetDBPath,
-				Selector:                e.realtimeSourceSelector,
+		// Prefer RealtimeSource from resolver (GetOrderedByPurpose); fallback to env.
+		if e.realtimeSourceResolver != nil {
+			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeTsRealtimeMktTick)
+			if err == nil && len(sources) > 0 {
+				first := sources[0]
+				if e.realtimeSourceSelector != nil {
+					e.realtimeSourceSelector.SwitchTo(first.Type)
+				}
+				cfg, _ := first.ConfigMap()
+				if first.Type == domainrealtime.TypeTushareForward {
+					wsURL, _ := cfg["ws_url"].(string)
+					rsaPath, _ := cfg["rsa_public_key_path"].(string)
+					if strings.TrimSpace(wsURL) != "" && strings.TrimSpace(rsaPath) != "" {
+						collector = &realtime.ForwardTickCollector{
+							ForwardWSURL:            strings.TrimSpace(wsURL),
+							ForwardRSAPublicKeyPath: strings.TrimSpace(rsaPath),
+							TargetDBPath:            req.TargetDBPath,
+							Selector:                e.realtimeSourceSelector,
+						}
+						collectorName = "tushare_forward_tick"
+					}
+				}
+				if collector == nil && first.Type == domainrealtime.TypeTushareWS {
+					topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
+					token := req.Token
+					if t, _ := cfg["token"].(string); strings.TrimSpace(t) != "" {
+						token = t
+					}
+					collector = &realtime.TushareWSTickCollector{
+						Token:        token,
+						TargetDBPath: req.TargetDBPath,
+						Topic:        topic,
+						Codes:        codes,
+						Selector:     e.realtimeSourceSelector,
+					}
+					collectorName = "tushare_ws_tick"
+				}
 			}
-			collectorName = "tushare_forward_tick"
-		} else {
-			topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
-			collector = &realtime.TushareWSTickCollector{
-				Token:        req.Token,
-				TargetDBPath: req.TargetDBPath,
-				Topic:        topic,
-				Codes:        codes,
-				Selector:     e.realtimeSourceSelector,
+		}
+		if collector == nil {
+			useForward := e.tushareRealtimeSource == "forward" &&
+				strings.TrimSpace(e.tushareForwardWSURL) != "" &&
+				strings.TrimSpace(e.tushareForwardRSAPublicKeyPath) != ""
+			if useForward {
+				collector = &realtime.ForwardTickCollector{
+					ForwardWSURL:            e.tushareForwardWSURL,
+					ForwardRSAPublicKeyPath: e.tushareForwardRSAPublicKeyPath,
+					TargetDBPath:            req.TargetDBPath,
+					Selector:                e.realtimeSourceSelector,
+				}
+				collectorName = "tushare_forward_tick"
+			} else {
+				topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
+				collector = &realtime.TushareWSTickCollector{
+					Token:        req.Token,
+					TargetDBPath: req.TargetDBPath,
+					Topic:        topic,
+					Codes:        codes,
+					Selector:     e.realtimeSourceSelector,
+				}
+				collectorName = "tushare_ws_tick"
 			}
-			collectorName = "tushare_ws_tick"
 		}
 		builder := workflows.NewTushareWSStreamingBuilder(registry, workflows.TushareWSStreamingParams{
 			DataSourceName: req.DataSourceName,
@@ -309,15 +359,34 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 
 	// realtime_tick 使用 SSE Push 模式，通过 TickPushCollector + eastmoney 适配器消费分笔数据。
 	if len(req.APINames) > 0 && req.APINames[0] == "realtime_tick" {
+		if e.realtimeSourceResolver != nil {
+			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeRealtimeTick)
+			if err == nil && len(sources) > 0 && e.realtimeSourceSelector != nil {
+				e.realtimeSourceSelector.SwitchTo(sources[0].Type)
+			}
+		}
 		collector = &realtime.TickPushCollector{
 			DataSourceName:  req.DataSourceName,
-			Token:           req.Token,
+			Token:            req.Token,
 			TargetDBPath:    req.TargetDBPath,
 			TsCodes:         req.TsCodes,
 			AdapterRegistry: e.realtimeAdapterRegistry,
 		}
 		collectorName = "tushare_tick_push"
 	} else {
+		sourcesOrder := []string{"sina"}
+		if e.realtimeSourceResolver != nil {
+			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeRealtimeQuote)
+			if err == nil && len(sources) > 0 {
+				sourcesOrder = make([]string, 0, len(sources))
+				for _, s := range sources {
+					sourcesOrder = append(sourcesOrder, s.Type)
+				}
+				if e.realtimeSourceSelector != nil {
+					e.realtimeSourceSelector.SwitchTo(sources[0].Type)
+				}
+			}
+		}
 		collector = &realtime.QuotePullCollector{
 			DataSourceName:   req.DataSourceName,
 			Token:            req.Token,
@@ -327,7 +396,7 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 			IndexCodes:       req.IndexCodes,
 			PullIntervalSecs: req.PullIntervalSecs,
 			AdapterRegistry:  e.realtimeAdapterRegistry,
-			Sources:          []string{"sina"},
+			Sources:          sourcesOrder,
 		}
 		collectorName = "tushare_quote_pull"
 	}

@@ -247,3 +247,20 @@ type TaskInstanceRow struct {
 	ErrorMessage   sql.NullString `db:"error_message"`
 	CreatedAt      sql.NullTime   `db:"created_at"`
 }
+
+// RealtimeSourceRow represents realtime_sources table row.
+type RealtimeSourceRow struct {
+	ID                   string         `db:"id"`
+	Name                 string         `db:"name"`
+	Type                 string         `db:"type"`
+	Config               string         `db:"config"`
+	Priority             int            `db:"priority"`
+	IsPrimary            int            `db:"is_primary"`
+	HealthCheckOnStartup int            `db:"health_check_on_startup"`
+	Enabled              int            `db:"enabled"`
+	LastHealthStatus     sql.NullString `db:"last_health_status"`
+	LastHealthAt         sql.NullTime   `db:"last_health_at"`
+	LastHealthError      sql.NullString `db:"last_health_error"`
+	CreatedAt            time.Time      `db:"created_at"`
+	UpdatedAt            time.Time      `db:"updated_at"`
+}

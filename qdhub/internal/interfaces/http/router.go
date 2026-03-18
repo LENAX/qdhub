@@ -47,14 +47,15 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler       *AuthHandler
-	metadataHandler   *MetadataHandler
-	dataStoreHandler  *DataStoreHandler
-	syncHandler       *SyncHandler
-	workflowHandler   *WorkflowHandler
-	analysisHandler   *AnalysisHandler
-	watchlistHandler  *WatchlistHandler
-	realtimeWSHandler *RealtimeWSHandler
+	authHandler          *AuthHandler
+	metadataHandler      *MetadataHandler
+	dataStoreHandler     *DataStoreHandler
+	syncHandler          *SyncHandler
+	workflowHandler      *WorkflowHandler
+	analysisHandler      *AnalysisHandler
+	watchlistHandler     *WatchlistHandler
+	realtimeWSHandler    *RealtimeWSHandler
+	realtimeSourceHandler *RealtimeSourceHandler
 
 	// Auth components
 	jwtManager *authinfra.JWTManager
@@ -69,6 +70,7 @@ type Server struct {
 // analysisSvc 可选，nil 时不注册 /analysis 路由。
 // watchlistHandler 可选，nil 时不注册 /watchlist 路由。
 // realtimeWSHandler 可选，nil 时不注册 /ws/realtime-quotes；非空时可注入 watchlist 实现收藏默认推送。
+// realtimeSourceHandler 可选，nil 时不注册 /realtime-sources 路由。
 func NewServer(
 	config ServerConfig,
 	authSvc contracts.AuthApplicationService,
@@ -80,6 +82,7 @@ func NewServer(
 	analysisSvc contracts.AnalysisApplicationService,
 	watchlistHandler *WatchlistHandler,
 	realtimeWSHandler *RealtimeWSHandler,
+	realtimeSourceHandler *RealtimeSourceHandler,
 	jwtManager *authinfra.JWTManager,
 	enforcer *casbin.Enforcer,
 	debugDBDSN string,
@@ -101,10 +104,11 @@ func NewServer(
 		dataStoreHandler:  NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
 		syncHandler:       NewSyncHandler(syncSvc),
 		workflowHandler:   NewWorkflowHandler(workflowSvc),
-		realtimeWSHandler: realtimeWSHandler,
-		jwtManager:        jwtManager,
-		enforcer:          enforcer,
-		debugDBDSN:        debugDBDSN,
+		realtimeWSHandler:    realtimeWSHandler,
+		realtimeSourceHandler: realtimeSourceHandler,
+		jwtManager:           jwtManager,
+		enforcer:             enforcer,
+		debugDBDSN:           debugDBDSN,
 	}
 	if analysisSvc != nil {
 		server.analysisHandler = NewAnalysisHandler(analysisSvc)
@@ -179,6 +183,9 @@ func (s *Server) setupRoutes() {
 			}
 			if s.watchlistHandler != nil {
 				s.watchlistHandler.RegisterRoutes(protected)
+			}
+			if s.realtimeSourceHandler != nil {
+				s.realtimeSourceHandler.RegisterRoutes(protected)
 			}
 		}
 	}

@@ -120,6 +120,7 @@ func TestE2E_ForwardRealtimeTick(t *testing.T) {
 		taskEngineDeps.RealtimeAdapterRegistry,
 		"production", // 避免 ts_realtime_mkt_tick 被替换为 realtime_quote
 		selector,
+		nil, // no RealtimeSource table in this e2e; use env
 		"forward",
 		wsURL,
 		pubPath,

@@ -22,12 +22,14 @@ import (
 	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	domainrealtime "qdhub/internal/domain/realtime"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/watchlist"
 	"qdhub/internal/domain/workflow"
 	analysisinfra "qdhub/internal/infrastructure/analysis"
 	authinfra "qdhub/internal/infrastructure/auth"
+	"qdhub/internal/infrastructure/healthcheck"
 	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare"
@@ -170,8 +172,8 @@ type Container struct {
 	DataQualitySvc contracts.DataQualityApplicationService
 	SyncSvc        contracts.SyncApplicationService
 	WorkflowSvc    contracts.WorkflowApplicationService
-	AuthSvc        contracts.AuthApplicationService
-	AnalysisSvc    contracts.AnalysisApplicationService
+	AuthSvc    contracts.AuthApplicationService
+	AnalysisSvc contracts.AnalysisApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
@@ -193,6 +195,10 @@ type Container struct {
 	// Watchlist (user stock watchlist, same DB as auth)
 	WatchlistRepo watchlist.Repository
 	WatchlistSvc  contracts.WatchlistApplicationService
+
+	// Realtime data sources (CRUD, health check, workflow resolution)
+	RealtimeSourceRepo domainrealtime.RealtimeSourceRepository
+	RealtimeSourceSvc  contracts.RealtimeSourceApplicationService
 }
 
 // Config holds container configuration.
@@ -859,6 +865,7 @@ func (c *Container) initRepositories() error {
 	c.UserRoleRepo = userRepoImpl // UserRepositoryImpl implements both interfaces
 
 	c.WatchlistRepo = repository.NewWatchlistRepository(c.DB)
+	c.RealtimeSourceRepo = repository.NewRealtimeSourceRepository(c.DB)
 
 	logrus.Info("Repositories initialized")
 	return nil
@@ -961,6 +968,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		taskEngineDeps.RealtimeAdapterRegistry,
 		c.config.RealtimeEnv,
 		taskEngineDeps.RealtimeSourceSelector,
+		c.RealtimeSourceRepo, // RealtimeSourceRepository implements RealtimeSourceResolver
 		c.config.TushareRealtimeSource,
 		c.config.TushareForwardWSURL,
 		c.config.TushareForwardRSAPublicKeyPath,
@@ -1041,6 +1049,9 @@ func (c *Container) initAuth() error {
 		if err := authinfra.EnsureWSPolicies(enforcer); err != nil {
 			return fmt.Errorf("failed to ensure ws policies: %w", err)
 		}
+		if err := authinfra.EnsureRealtimeSourcesPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure realtime-sources policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -1100,6 +1111,71 @@ func (c *Container) initApplicationServices() error {
 
 	// Watchlist service (user stock watchlist)
 	c.WatchlistSvc = impl.NewWatchlistApplicationService(c.WatchlistRepo)
+
+	// Realtime source management (CRUD, health check)
+	c.RealtimeSourceSvc = impl.NewRealtimeSourceApplicationService(c.RealtimeSourceRepo, &healthcheck.Checker{})
+
+	// Startup health check for enabled realtime sources with health_check_on_startup=true
+	logrus.Info("Realtime sources: running startup connectivity check (health_check_on_startup=true)...")
+	if c.RealtimeSourceRepo != nil {
+		sources, err := c.RealtimeSourceRepo.ListEnabledForHealthCheck()
+		if err != nil {
+			logrus.Warnf("Realtime source startup health check: list failed: %v", err)
+		} else if len(sources) == 0 {
+			logrus.Info("Realtime sources: no sources with health_check_on_startup=true, skip.")
+		} else {
+			for _, src := range sources {
+				logrus.Infof("Realtime sources: checking %s (%s)...", src.Name, src.Type)
+				var status, errMsg string
+				var err error
+				if src.Type == domainrealtime.TypeTushareForward {
+					wsURL, rsaPath := "", ""
+					// 应用配置（config/env）若同时提供 URL 与公钥路径，则启动自检优先用应用配置（便于本地开发用 config.yaml 覆盖 DB seed 的 /root/.key）
+					if strings.TrimSpace(c.config.TushareForwardWSURL) != "" && strings.TrimSpace(c.config.TushareForwardRSAPublicKeyPath) != "" {
+						wsURL = strings.TrimSpace(c.config.TushareForwardWSURL)
+						rsaPath = strings.TrimSpace(c.config.TushareForwardRSAPublicKeyPath)
+					}
+					if wsURL == "" || rsaPath == "" {
+						if cfg, _ := src.ConfigMap(); cfg != nil {
+							wsURL, _ = cfg["ws_url"].(string)
+							rsaPath, _ = cfg["rsa_public_key_path"].(string)
+							wsURL = strings.TrimSpace(wsURL)
+							rsaPath = strings.TrimSpace(rsaPath)
+						}
+						if wsURL == "" && c.config.TushareForwardWSURL != "" {
+							wsURL = strings.TrimSpace(c.config.TushareForwardWSURL)
+						}
+						if rsaPath == "" && c.config.TushareForwardRSAPublicKeyPath != "" {
+							rsaPath = strings.TrimSpace(c.config.TushareForwardRSAPublicKeyPath)
+						}
+					}
+					if wsURL != "" && rsaPath != "" {
+						status, errMsg, err = healthcheck.CheckTushareForwardWithURL(context.Background(), wsURL, rsaPath)
+					} else {
+						status, errMsg, err = healthcheck.Check(context.Background(), src)
+					}
+				} else {
+					status, errMsg, err = healthcheck.Check(context.Background(), src)
+				}
+				if err != nil {
+					status = healthcheck.StatusUnhealthy
+					errMsg = err.Error()
+				}
+				src.UpdateHealth(status, errMsg)
+				if uerr := c.RealtimeSourceRepo.Update(src); uerr != nil {
+					logrus.Warnf("Realtime source startup health check: update %s: %v", src.ID, uerr)
+				} else {
+					if errMsg != "" {
+						logrus.Infof("Realtime source %s (%s) health: %s (%s)", src.Name, src.Type, status, errMsg)
+					} else {
+						logrus.Infof("Realtime source %s (%s) health: %s", src.Name, src.Type, status)
+					}
+				}
+			}
+		}
+	} else {
+		logrus.Info("Realtime sources: repo not initialized, skip startup check.")
+	}
 
 	// Deferred injection: executor needs SyncSvc (breaks init cycle)
 	c.planExecutor.SetSyncService(c.SyncSvc)
@@ -1218,6 +1294,10 @@ func (c *Container) initHTTPServer() error {
 		watchlistHandler = httpserver.NewWatchlistHandler(c.WatchlistSvc, c.AnalysisSvc)
 	}
 	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc, c.RealtimeSourceSelector)
+	var realtimeSourceHandler *httpserver.RealtimeSourceHandler
+	if c.RealtimeSourceSvc != nil && c.RealtimeSourceSelector != nil {
+		realtimeSourceHandler = httpserver.NewRealtimeSourceHandler(c.RealtimeSourceSvc, c.RealtimeSourceSelector, nil)
+	}
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
@@ -1229,6 +1309,7 @@ func (c *Container) initHTTPServer() error {
 		c.AnalysisSvc,
 		watchlistHandler,
 		realtimeWSHandler,
+		realtimeSourceHandler,
 		c.JWTManager,
 		c.Enforcer,
 		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库
