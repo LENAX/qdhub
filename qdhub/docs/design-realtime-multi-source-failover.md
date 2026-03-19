@@ -71,7 +71,16 @@ flowchart TB
 - **统一字段**：Store 中统一为 Tushare 字段名，Sina 写前做映射。
 - **前端有限感知**：[realtime_ws_handler.go](internal/interfaces/http/realtime_ws_handler.go) 注入 Selector；推送在 `type`、`scope`、`timestamp`、`items` 基础上增加 **`current_source`**、**`sources_health`**、**`sources_error`**（各源最近故障原因，健康时可空）。Selector 为 nil 时仅返回 sina 及单源、无错误。
 
-### 3.3 生产端：双 workflow 启动与故障切换
+### 3.3 统一启停语义：StartRealtimeSync / StopRealtimeSync
+
+- 所有「启动/停止实时同步」的入口（交易时间窗自动调度、灾备切换、前端 connect/disconnect）统一通过 **StartRealtimeSync(sourceID)** / **StopRealtimeSync(sourceID)** 执行，保证语义一致：**connect = 启动同步，disconnect = 停止同步**。
+- **源类型与标准 SyncPlan 映射**（与 migration 033 约定一致）：
+  - `tushare_proxy` → 计划 `realtime-ts-forward`（ts_realtime_mkt_tick，主源，配交易时间窗）
+  - `sina` → 计划 `realtime-sina-quote`（realtime_quote）
+  - `tushare_ws` → 计划 `realtime-tushare-ws-tick`（ts_realtime_mkt_tick）
+- 前端 `POST /realtime-sources/:id/connect` 调用 **RealtimeSyncConnector.Connect(id)**，内部执行 StartRealtimeSync；disconnect 同理执行 StopRealtimeSync。执行记录可通过 `/api/v1/sync-plans/:id/progress` 或 executions API 查看。
+
+### 3.4 生产端：双 workflow 启动与故障切换
 
 **双 workflow 启动**：
 
@@ -83,7 +92,7 @@ flowchart TB
 
 **Sync 层**：注入 RealtimeSourceSelector；ExecuteSyncPlan 在 production 且 ts_realtime_mkt_tick 时发起双 workflow；三处失败处理中根据 exec.SyncedAPIs 与当前 active 判断是否调用 SwitchTo。
 
-### 3.4 配置注入链（补充）
+### 3.5 配置注入链（补充）
 
 - **WorkflowExecutor**：`realtimeEnv`；production 时按请求 APINames 提交 WS 或 Pull（由 Sync 两次调用实现双 workflow）。
 - **RealtimeSourceSelector**：container 创建并注入；WS/Sina 写 Store 处注入或通过全局/Store 层访问。

@@ -19,15 +19,18 @@ import (
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/application/impl"
+	"qdhub/internal/domain/analysis"
 	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	domainrealtime "qdhub/internal/domain/realtime"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/watchlist"
 	"qdhub/internal/domain/workflow"
 	analysisinfra "qdhub/internal/infrastructure/analysis"
 	authinfra "qdhub/internal/infrastructure/auth"
+	"qdhub/internal/infrastructure/healthcheck"
 	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare"
@@ -170,16 +173,20 @@ type Container struct {
 	DataQualitySvc contracts.DataQualityApplicationService
 	SyncSvc        contracts.SyncApplicationService
 	WorkflowSvc    contracts.WorkflowApplicationService
-	AuthSvc        contracts.AuthApplicationService
-	AnalysisSvc    contracts.AnalysisApplicationService
+	AuthSvc    contracts.AuthApplicationService
+	AnalysisSvc contracts.AnalysisApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
 
 	// QuantDB adapter (支持 DuckDB, ClickHouse 等)
 	QuantDBAdapter    datastore.QuantDB
+	RealtimeQuantDB   datastore.QuantDB // 可选：realtime DuckDB，供 /analysis/news/stream
 	QuantDBFactory    datastore.QuantDBFactory
 	QuantDBWriteQueue datastore.QuantDBWriteQueue
+
+	// NewsUpdateNotifier 新闻表刷盘后通知 SSE 推送，与 WriteQueue、AnalysisHandler 共用
+	NewsUpdateNotifier httpserver.NewsUpdateNotifier
 
 	// Unit of Work for transaction management
 	UoW contracts.UnitOfWork
@@ -193,6 +200,10 @@ type Container struct {
 	// Watchlist (user stock watchlist, same DB as auth)
 	WatchlistRepo watchlist.Repository
 	WatchlistSvc  contracts.WatchlistApplicationService
+
+	// Realtime data sources (CRUD, health check, workflow resolution)
+	RealtimeSourceRepo domainrealtime.RealtimeSourceRepository
+	RealtimeSourceSvc  contracts.RealtimeSourceApplicationService
 }
 
 // Config holds container configuration.
@@ -233,8 +244,8 @@ type Config struct {
 
 	// Tushare 实时数据来源：forward=从 ts_proxy 转发端接收，direct=直连 Tushare WS。默认 forward。
 	TushareRealtimeSource       string // "forward" | "direct"
-	TushareForwardWSURL         string // 转发端 WS 地址，如 ws://host:8888/realtime
-	TushareForwardRSAPublicKeyPath string // 转发端 RSA 公钥路径（方案 B 客户端加密 AES 密钥）
+	TushareProxyWSURL         string // ts_proxy WS 地址，如 ws://host:8888/realtime
+	TushareProxyRSAPublicKeyPath string // ts_proxy RSA 公钥路径（方案 B 客户端加密 AES 密钥）
 }
 
 // DefaultConfig returns default configuration.
@@ -262,8 +273,8 @@ func DefaultConfig() Config {
 		RefreshExpiration: 7 * 24 * time.Hour,
 		RealtimeEnv:                   "development",
 		TushareRealtimeSource:         "forward", // 默认从转发端接收
-		TushareForwardWSURL:           "",
-		TushareForwardRSAPublicKeyPath: "",
+TushareProxyWSURL:           "",
+			TushareProxyRSAPublicKeyPath: "",
 	}
 }
 
@@ -296,6 +307,11 @@ func (c *Container) Initialize(ctx context.Context) error {
 	// Step 4: Initialize Task Engine
 	if err := c.initTaskEngine(ctx); err != nil {
 		return fmt.Errorf("failed to initialize task engine: %w", err)
+	}
+
+	// Step 4.5: Realtime DuckDB 建表 migration（幂等，为 ts_proxy/sina/news 建表）
+	if err := c.runRealtimeDuckDBMigration(ctx); err != nil {
+		logrus.Warnf("Realtime DuckDB migration: %v", err)
 	}
 
 	// Step 5: Initialize scheduler
@@ -859,6 +875,7 @@ func (c *Container) initRepositories() error {
 	c.UserRoleRepo = userRepoImpl // UserRepositoryImpl implements both interfaces
 
 	c.WatchlistRepo = repository.NewWatchlistRepository(c.DB)
+	c.RealtimeSourceRepo = repository.NewRealtimeSourceRepository(c.DB)
 
 	logrus.Info("Repositories initialized")
 	return nil
@@ -912,8 +929,16 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 	taskEngineDeps.QuantDBFactory = c.QuantDBFactory
 	log.Printf("[Container] ✅ QuantDBFactory (DuckDB) registered; sync/table jobs use target_db_path from data store")
 
+	// 新闻写入即推：广播器供 WriteQueue 刷盘回调和 /analysis/news/stream SSE 订阅
+	c.NewsUpdateNotifier = httpserver.NewNewsUpdateBroadcaster()
+	onTableFlushed := func(path, tableName string) {
+		if tableName == "news" && c.NewsUpdateNotifier != nil {
+			log.Printf("[NewsSSE] news table flushed, path=%s, notifying SSE subscribers", path)
+			c.NewsUpdateNotifier.Notify()
+		}
+	}
 	// QuantDBWriteQueue：按 path 缓冲写队列，防止并发写和内存爆炸
-	c.QuantDBWriteQueue = writequeue.NewQueue(c.config.WriteQueue, c.QuantDBFactory)
+	c.QuantDBWriteQueue = writequeue.NewQueue(c.config.WriteQueue, c.QuantDBFactory, onTableFlushed)
 	taskEngineDeps.QuantDBWriteQueue = c.QuantDBWriteQueue
 	log.Printf("[Container] ✅ QuantDBWriteQueue registered")
 
@@ -961,13 +986,43 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		taskEngineDeps.RealtimeAdapterRegistry,
 		c.config.RealtimeEnv,
 		taskEngineDeps.RealtimeSourceSelector,
+		c.RealtimeSourceRepo, // RealtimeSourceRepository implements RealtimeSourceResolver
 		c.config.TushareRealtimeSource,
-		c.config.TushareForwardWSURL,
-		c.config.TushareForwardRSAPublicKeyPath,
+		c.config.TushareProxyWSURL,
+		c.config.TushareProxyRSAPublicKeyPath,
 	)
 
 	logrus.Info("Task Engine initialized")
 	return nil
+}
+
+// realtimeDuckDBStoreID 与 migration 032 / quantdb.realtimeDuckDBStoreID 一致。
+const realtimeDuckDBStoreID = "realtime-duckdb-0000-4000-8000-000000000001"
+
+// runRealtimeDuckDBMigration 在 realtime_ticks.duckdb 上执行建表 DDL（幂等）；无 realtime 存储或非 DuckDB 时跳过并打警告。
+func (c *Container) runRealtimeDuckDBMigration(ctx context.Context) error {
+	if c.DataStoreRepo == nil || c.QuantDBFactory == nil {
+		logrus.Warn("Realtime DuckDB migration skipped: DataStoreRepo or QuantDBFactory not initialized")
+		return nil
+	}
+	store, err := c.DataStoreRepo.Get(shared.ID(realtimeDuckDBStoreID))
+	if err != nil || store == nil {
+		logrus.Warnf("Realtime DuckDB migration skipped: realtime store not found (id=%s): %v", realtimeDuckDBStoreID, err)
+		return nil
+	}
+	if store.Type != datastore.DataStoreTypeDuckDB || strings.TrimSpace(store.StoragePath) == "" {
+		logrus.Warnf("Realtime DuckDB migration skipped: store type=%s or storage_path empty", store.Type)
+		return nil
+	}
+	db, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: store.StoragePath,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return quantdb.RunRealtimeDuckDBMigration(ctx, db)
 }
 
 // initScheduler initializes the scheduler (scheduler module).
@@ -1041,6 +1096,9 @@ func (c *Container) initAuth() error {
 		if err := authinfra.EnsureWSPolicies(enforcer); err != nil {
 			return fmt.Errorf("failed to ensure ws policies: %w", err)
 		}
+		if err := authinfra.EnsureRealtimeSourcesPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure realtime-sources policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -1100,6 +1158,75 @@ func (c *Container) initApplicationServices() error {
 
 	// Watchlist service (user stock watchlist)
 	c.WatchlistSvc = impl.NewWatchlistApplicationService(c.WatchlistRepo)
+
+	// Realtime source management (CRUD, health check)
+	// 交易日判断：有 QuantDB 时用 trade_cal 表排除节假日，否则仅按星期
+	tradingDayProvider := healthcheck.NewDuckDBTradingDayProvider(c.QuantDBAdapter)
+	realtimeChecker := &healthcheck.Checker{TradingDayProvider: tradingDayProvider}
+	c.RealtimeSourceSvc = impl.NewRealtimeSourceApplicationService(c.RealtimeSourceRepo, realtimeChecker)
+
+	// Startup health check for enabled realtime sources with health_check_on_startup=true
+	logrus.Info("Realtime sources: running startup connectivity check (health_check_on_startup=true)...")
+	if c.RealtimeSourceRepo != nil {
+		sources, err := c.RealtimeSourceRepo.ListEnabledForHealthCheck()
+		if err != nil {
+			logrus.Warnf("Realtime source startup health check: list failed: %v", err)
+		} else if len(sources) == 0 {
+			logrus.Info("Realtime sources: no sources with health_check_on_startup=true, skip.")
+		} else {
+			for _, src := range sources {
+				logrus.Infof("Realtime sources: checking %s (%s)...", src.Name, src.Type)
+				var status, errMsg string
+				var err error
+				if src.Type == domainrealtime.TypeTushareProxy {
+					wsURL, rsaPath := "", ""
+					// 应用配置（config/env）若同时提供 URL 与公钥路径，则启动自检优先用应用配置（便于本地开发用 config.yaml 覆盖 DB seed 的 /root/.key）
+					if strings.TrimSpace(c.config.TushareProxyWSURL) != "" && strings.TrimSpace(c.config.TushareProxyRSAPublicKeyPath) != "" {
+						wsURL = strings.TrimSpace(c.config.TushareProxyWSURL)
+						rsaPath = strings.TrimSpace(c.config.TushareProxyRSAPublicKeyPath)
+					}
+					if wsURL == "" || rsaPath == "" {
+						if cfg, _ := src.ConfigMap(); cfg != nil {
+							wsURL, _ = cfg["ws_url"].(string)
+							rsaPath, _ = cfg["rsa_public_key_path"].(string)
+							wsURL = strings.TrimSpace(wsURL)
+							rsaPath = strings.TrimSpace(rsaPath)
+						}
+						if wsURL == "" && c.config.TushareProxyWSURL != "" {
+							wsURL = strings.TrimSpace(c.config.TushareProxyWSURL)
+						}
+						if rsaPath == "" && c.config.TushareProxyRSAPublicKeyPath != "" {
+							rsaPath = strings.TrimSpace(c.config.TushareProxyRSAPublicKeyPath)
+						}
+					}
+					if wsURL != "" && rsaPath != "" {
+						status, errMsg, err = healthcheck.CheckTushareProxyWithURL(context.Background(), wsURL, rsaPath, tradingDayProvider)
+					} else {
+						status = healthcheck.StatusUnhealthy
+						errMsg = "missing ws_url or rsa_public_key_path: set in realtime_sources.config (JSON: ws_url, rsa_public_key_path) or in config file (tushare.proxy_ws_url, tushare.proxy_rsa_public_key_path) or env (TUSHARE_PROXY_WS_URL, TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH)"
+					}
+				} else {
+					status, errMsg, err = healthcheck.Check(context.Background(), src)
+				}
+				if err != nil {
+					status = healthcheck.StatusUnhealthy
+					errMsg = err.Error()
+				}
+				src.UpdateHealth(status, errMsg)
+				if uerr := c.RealtimeSourceRepo.Update(src); uerr != nil {
+					logrus.Warnf("Realtime source startup health check: update %s: %v", src.ID, uerr)
+				} else {
+					if errMsg != "" {
+						logrus.Infof("Realtime source %s (%s) health: %s (%s)", src.Name, src.Type, status, errMsg)
+					} else {
+						logrus.Infof("Realtime source %s (%s) health: %s", src.Name, src.Type, status)
+					}
+				}
+			}
+		}
+	} else {
+		logrus.Info("Realtime sources: repo not initialized, skip startup check.")
+	}
 
 	// Deferred injection: executor needs SyncSvc (breaks init cycle)
 	c.planExecutor.SetSyncService(c.SyncSvc)
@@ -1210,7 +1337,24 @@ func (c *Container) initHTTPServer() error {
 		} else {
 			readers = analysisinfra.NewReaders(analysisQuantDB)
 		}
-		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
+		var realtimeNewsReader analysis.NewsReader
+		var realtimeTickReader analysis.TickReader
+		if c.DataStoreRepo != nil && c.QuantDBFactory != nil {
+			store, err := c.DataStoreRepo.Get(shared.ID(realtimeDuckDBStoreID))
+			if err == nil && store != nil && store.Type == datastore.DataStoreTypeDuckDB && strings.TrimSpace(store.StoragePath) != "" {
+				realtimeDB, err := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+					Type:        datastore.DataStoreTypeDuckDB,
+					StoragePath: store.StoragePath,
+				})
+				if err == nil {
+					c.RealtimeQuantDB = realtimeDB
+					realtimeNewsReader = analysisinfra.NewRealtimeNewsReader(realtimeDB)
+					realtimeTickReader = analysisinfra.NewRealtimeTickReader(realtimeDB)
+					logrus.Info("[Container] Analysis using realtime DuckDB for news + intraday ticks.")
+				}
+			}
+		}
+		c.AnalysisSvc = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers), realtimeNewsReader, realtimeTickReader)
 	}
 
 	var watchlistHandler *httpserver.WatchlistHandler
@@ -1218,6 +1362,15 @@ func (c *Container) initHTTPServer() error {
 		watchlistHandler = httpserver.NewWatchlistHandler(c.WatchlistSvc, c.AnalysisSvc)
 	}
 	realtimeWSHandler := httpserver.NewRealtimeWSHandler(nil, c.WatchlistSvc, c.RealtimeSourceSelector)
+	var realtimeSourceHandler *httpserver.RealtimeSourceHandler
+	if c.RealtimeSourceSvc != nil && c.RealtimeSourceSelector != nil {
+		var connector httpserver.RealtimeSourceConnector
+		if c.RealtimeSourceRepo != nil && c.SyncSvc != nil && c.SyncPlanRepo != nil {
+			ctrl := impl.NewRealtimeSyncController(c.RealtimeSourceRepo, c.SyncSvc, c.SyncPlanRepo, c.RealtimeSourceSelector)
+			connector = httpserver.NewRealtimeSyncConnector(ctrl)
+		}
+		realtimeSourceHandler = httpserver.NewRealtimeSourceHandler(c.RealtimeSourceSvc, c.RealtimeSourceSelector, connector)
+	}
 	c.HTTPServer = httpserver.NewServer(
 		serverConfig,
 		c.AuthSvc,
@@ -1227,8 +1380,10 @@ func (c *Container) initHTTPServer() error {
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,
+		c.NewsUpdateNotifier,
 		watchlistHandler,
 		realtimeWSHandler,
+		realtimeSourceHandler,
 		c.JWTManager,
 		c.Enforcer,
 		c.config.DBDSN, // 临时：供 GET /api/v1/debug/database 返回，便于 e2e 验证是否连错库
@@ -1277,6 +1432,11 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	if c.QuantDBAdapter != nil {
 		if err := c.QuantDBAdapter.Close(); err != nil {
 			logrus.Errorf("Error closing QuantDB adapter: %v", err)
+		}
+	}
+	if c.RealtimeQuantDB != nil {
+		if err := c.RealtimeQuantDB.Close(); err != nil {
+			logrus.Errorf("Error closing Realtime QuantDB: %v", err)
 		}
 	}
 

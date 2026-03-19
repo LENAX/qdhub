@@ -28,6 +28,8 @@ type AnalysisApplicationService interface {
 	GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error)
 	GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error)
 	ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)
+	// ListNewsFromRealtime 从 realtime 数据源（realtime DuckDB news 表）拉取新闻，供 /analysis/news/stream 使用；无 realtime 时回退到 ListNews。
+	ListNewsFromRealtime(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)
 	GetLimitUpLadder(ctx context.Context, tradeDate string) ([]analysis.LimitUpLadder, error)
 	GetFirstLimitUpStocks(ctx context.Context, tradeDate string) ([]analysis.LimitStock, error)
 	GetLimitUpComparison(ctx context.Context, todayDate string) (*analysis.LimitUpComparison, error)

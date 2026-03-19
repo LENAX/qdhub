@@ -263,6 +263,11 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	extractedData := extractKeyFields(result.Data, []string{"ts_code", "trade_date", "cal_date"})
 
+	// 新闻追平场景：区间跨度大且拉取 0 条时打 WARN，便于发现补齐失败
+	if apiName == "news" && savedCount == 0 {
+		warnNewsCatchUpZeroRecords(params)
+	}
+
 	return map[string]interface{}{
 		"count":          savedCount,
 		"total":          len(result.Data),
@@ -272,6 +277,25 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		"extracted_data": extractedData,
 		"sync_batch_id":  syncBatchID,
 	}, nil
+}
+
+// warnNewsCatchUpZeroRecords 若 params 中 start_date/end_date 跨度超过 newsCatchUpThreshold，打 WARN（追平未拉到数据）。
+func warnNewsCatchUpZeroRecords(params map[string]interface{}) {
+	sd, _ := params["start_date"].(string)
+	ed, _ := params["end_date"].(string)
+	if sd == "" || ed == "" {
+		return
+	}
+	const layout = "2006-01-02 15:04:05"
+	start, err1 := time.Parse(layout, sd)
+	end, err2 := time.Parse(layout, ed)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	span := end.Sub(start)
+	if span > newsCatchUpThreshold {
+		logrus.Warnf("[NewsBackfill] 新闻追平未拉取到数据，区间 %s ~ %s（跨度 %v），请检查 API 或时间对齐", sd, ed, span.Round(time.Second))
+	}
 }
 
 // getCommonDataAPIsFromParams 从任务参数中解析 common_data_apis（公共数据 API 名列表）。
@@ -1442,8 +1466,16 @@ func UpdateSyncCheckpointJob(tc *task.TaskContext) (interface{}, error) {
 const newsSyncCheckpointTable = "news_sync_checkpoint"
 const newsAPIName = "news"
 
-// GetNewsSyncRangeJob 新闻实时同步：从 news_sync_checkpoint 表读取上次同步时间，输出 start_datetime/end_datetime。
-// 表在 target_db_path 对应的 DuckDB 中，若不存在则创建；无记录时 start = now-24h。
+const (
+	newsCatchUpThreshold = 5 * time.Minute // 库内最新数据落后超过此值则触发追平
+	newsCatchUpMaxSpan   = 24 * time.Hour  // 单次追平最大时间跨度（含强制补全）
+	newsFirstSyncSpan    = 24 * time.Hour  // 无数据时首次同步回溯长度
+)
+
+// GetNewsSyncRangeJob 新闻实时同步：根据库内最新数据或固定窗口输出 start_datetime/end_datetime。
+// - 若新闻表不存在或无数据：start = now-24h, end = now（首次/全量追平）
+// - 若 max(datetime) 落后当前超过 5 分钟：start = max(datetime), end = now，单次最多 24h（追平）
+// - 否则：start = now-1min, end = now+1min（实时滑动窗口）
 //
 // Input params:
 //   - target_db_path: string - 目标 DuckDB 路径
@@ -1453,41 +1485,175 @@ const newsAPIName = "news"
 //   - end_datetime: string   - 本次同步结束时间
 func GetNewsSyncRangeJob(tc *task.TaskContext) (interface{}, error) {
 	ctx := context.Background()
+	now := time.Now()
 	targetDBPath := tc.GetParamString("target_db_path")
-	if targetDBPath == "" {
-		return nil, fmt.Errorf("target_db_path is required")
+	if targetDBPath == "" || targetDBPath == "${target_db_path}" {
+		// 占位未替换时用首次同步范围，避免永远只拉 2 分钟导致数据追不上
+		start := now.Add(-newsFirstSyncSpan)
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := now.Format("2006-01-02 15:04:05")
+		logrus.Warnf("[GetNewsSyncRange] target_db_path empty or placeholder (value=%q), use first-sync range: %s -> %s", targetDBPath, startDt, endDt)
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
 	}
+
 	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
-		return nil, fmt.Errorf("get QuantDB: %w", err)
+		return nil, fmt.Errorf("get QuantDB for target_db_path: %w", err)
 	}
-	createSQL := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS "%s" (
-			api_name VARCHAR PRIMARY KEY,
-			last_sync_datetime VARCHAR NOT NULL,
-			last_sync_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			record_count INTEGER DEFAULT 0
-		)
-	`, newsSyncCheckpointTable)
-	if _, err := quantDB.Execute(ctx, createSQL); err != nil {
-		return nil, fmt.Errorf("create news_sync_checkpoint: %w", err)
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := quantDB.Connect(connectCtx); err != nil {
+		return nil, fmt.Errorf("connect QuantDB: %w", err)
 	}
-	query := fmt.Sprintf(`SELECT last_sync_datetime FROM "%s" WHERE api_name = ?`, newsSyncCheckpointTable)
-	rows, err := quantDB.Query(ctx, query, newsAPIName)
-	if err != nil {
-		logrus.Warnf("[GetNewsSyncRange] query checkpoint: %v", err)
+	defer quantDB.Close()
+
+	exists, err := quantDB.TableExists(ctx, newsAPIName)
+	if err != nil || !exists {
+		// 表不存在或查询失败：按首次同步，拉最近 24h
+		start := now.Add(-newsFirstSyncSpan)
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := now.Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (no table/first): %s -> %s", startDt, endDt)
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
 	}
-	now := time.Now()
-	endDt := now.Format("2006-01-02 15:04:05")
-	startDt := now.Add(-24 * time.Hour).Format("2006-01-02 15:04:05")
-	if len(rows) > 0 {
-		if v, ok := rows[0]["last_sync_datetime"]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				startDt = s
-			}
+
+	rows, err := quantDB.Query(ctx, `SELECT max(datetime) AS max_dt FROM news`)
+	if err != nil || len(rows) == 0 {
+		// 无数据：首次同步
+		start := now.Add(-newsFirstSyncSpan)
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := now.Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (empty table): %s -> %s", startDt, endDt)
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
+	}
+
+	// 取 max_dt（DuckDB 可能返回小写列名）
+	raw := rows[0]["max_dt"]
+	if raw == nil {
+		raw = rows[0]["MAX_DT"]
+	}
+	if raw == nil {
+		start := now.Add(-newsFirstSyncSpan)
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := now.Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (null max): %s -> %s", startDt, endDt)
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
+	}
+
+	// 解析库内最新时间（DuckDB 可能返回 string / []byte / time.Time）
+	var maxTime time.Time
+	switch v := raw.(type) {
+	case time.Time:
+		maxTime = v
+	case *time.Time:
+		if v == nil {
+			start := now.Add(-newsFirstSyncSpan)
+			startDt := start.Format("2006-01-02 15:04:05")
+			endDt := now.Format("2006-01-02 15:04:05")
+			return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+		}
+		maxTime = *v
+	case string:
+		if v == "" {
+			start := now.Add(-newsFirstSyncSpan)
+			startDt := start.Format("2006-01-02 15:04:05")
+			endDt := now.Format("2006-01-02 15:04:05")
+			return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+		}
+		var errParse error
+		maxTime, errParse = parseNewsMaxDateTime(v)
+		if errParse != nil {
+			// 解析失败时用首次同步范围，避免误用实时窗口导致永远不追平
+			start := now.Add(-newsFirstSyncSpan)
+			startDt := start.Format("2006-01-02 15:04:05")
+			endDt := now.Format("2006-01-02 15:04:05")
+			logrus.Warnf("[GetNewsSyncRange] parse max_dt failed (raw=%q), use first-sync range: %s -> %s", v, startDt, endDt)
+			return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+		}
+	case []byte:
+		vStr := strings.TrimSpace(string(v))
+		if vStr == "" {
+			start := now.Add(-newsFirstSyncSpan)
+			startDt := start.Format("2006-01-02 15:04:05")
+			endDt := now.Format("2006-01-02 15:04:05")
+			return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+		}
+		var errParse error
+		maxTime, errParse = parseNewsMaxDateTime(vStr)
+		if errParse != nil {
+			start := now.Add(-newsFirstSyncSpan)
+			startDt := start.Format("2006-01-02 15:04:05")
+			endDt := now.Format("2006-01-02 15:04:05")
+			logrus.Warnf("[GetNewsSyncRange] parse max_dt failed (raw=%q), use first-sync range: %s -> %s", vStr, startDt, endDt)
+			return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+		}
+	default:
+		start := now.Add(-1 * time.Minute).Truncate(time.Minute)
+		end := start.Add(2 * time.Minute)
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := end.Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (unknown max type %T): %s -> %s", raw, startDt, endDt)
+		return map[string]interface{}{"start_datetime": startDt, "end_datetime": endDt}, nil
+	}
+
+	lag := now.Sub(maxTime)
+	forceBackfillCheck := false
+	if v := tc.GetParam("force_backfill_check"); v != nil {
+		switch t := v.(type) {
+		case bool:
+			forceBackfillCheck = t
+		case string:
+			forceBackfillCheck = strings.EqualFold(strings.TrimSpace(t), "true")
 		}
 	}
-	logrus.Printf("📍 [GetNewsSyncRange] news sync range: %s -> %s", startDt, endDt)
+
+	// 强制补全：根据「上次最后数据时间 → 当前时间」做一次补充，用于填补断层（如定时 10 分钟一次或手动触发）
+	if forceBackfillCheck {
+		start := maxTime
+		if now.Sub(start) > newsCatchUpMaxSpan {
+			start = now.Add(-newsCatchUpMaxSpan)
+		}
+		startDt := start.Format("2006-01-02 15:04:05")
+		endDt := now.Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (forced backfill, last→now): %s -> %s (lag=%v)", startDt, endDt, lag.Round(time.Second))
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
+	}
+
+	if lag <= newsCatchUpThreshold {
+		// 实时模式：当前时间 -1 分钟、秒固定为 00，与 Tushare 新闻按整分钟对齐的区间一致，避免带秒导致拉不到数据
+		base := now.Truncate(time.Minute)
+		startDt := base.Add(-1 * time.Minute).Format("2006-01-02 15:04:05")
+		endDt := base.Add(1 * time.Minute).Format("2006-01-02 15:04:05")
+		logrus.Printf("📍 [GetNewsSyncRange] news sync range (realtime): %s -> %s", startDt, endDt)
+		return map[string]interface{}{
+			"start_datetime": startDt,
+			"end_datetime":   endDt,
+		}, nil
+	}
+
+	// 追平：从 max(datetime) 到 now，单次最多 24h
+	start := maxTime
+	if now.Sub(start) > newsCatchUpMaxSpan {
+		start = now.Add(-newsCatchUpMaxSpan)
+	}
+	startDt := start.Format("2006-01-02 15:04:05")
+	endDt := now.Format("2006-01-02 15:04:05")
+	logrus.Printf("📍 [GetNewsSyncRange] news sync range (catch-up, lag=%v): %s -> %s", lag.Round(time.Second), startDt, endDt)
 	return map[string]interface{}{
 		"start_datetime": startDt,
 		"end_datetime":   endDt,
@@ -1501,38 +1667,34 @@ func GetNewsSyncRangeJob(tc *task.TaskContext) (interface{}, error) {
 //
 // 上游 GetNewsSyncRangeJob 输出的 end_datetime 通过 _cached_GetNewsSyncRange 传入。
 func UpdateNewsCheckpointJob(tc *task.TaskContext) (interface{}, error) {
-	ctx := context.Background()
+	// 实时新闻使用固定 2 分钟滑动窗口，不再依赖 checkpoint，直接返回成功。
+	return map[string]interface{}{"updated": false, "reason": "checkpoint skipped (sliding window mode)"}, nil
+}
+
+// FlushTargetDBJob 将指定路径的 WriteQueue 缓冲立即刷盘到 DuckDB。
+// 用于工作流结束后立刻持久化数据。
+//
+// Input params:
+//   - target_db_path: string - 目标 DuckDB 路径
+func FlushTargetDBJob(tc *task.TaskContext) (interface{}, error) {
 	targetDBPath := tc.GetParamString("target_db_path")
 	if targetDBPath == "" {
-		return nil, fmt.Errorf("target_db_path is required")
+		return map[string]interface{}{"flushed": false, "reason": "target_db_path empty"}, nil
 	}
-	endDatetime := ""
-	if cached := tc.GetParam("_cached_GetNewsSyncRange"); cached != nil {
-		if m, ok := cached.(map[string]interface{}); ok {
-			if s, ok := m["end_datetime"].(string); ok {
-				endDatetime = s
-			}
-		}
+	wqIntf, ok := tc.GetDependency("QuantDBWriteQueue")
+	if !ok || wqIntf == nil {
+		return map[string]interface{}{"flushed": false, "reason": "QuantDBWriteQueue not injected"}, nil
 	}
-	if endDatetime == "" {
-		endDatetime = time.Now().Format("2006-01-02 15:04:05")
+	wq, ok := wqIntf.(datastore.QuantDBWriteQueue)
+	if !ok {
+		return map[string]interface{}{"flushed": false, "reason": "dependency is not QuantDBWriteQueue"}, nil
 	}
-	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
-	if err != nil {
-		return nil, fmt.Errorf("get QuantDB: %w", err)
+	ctx := context.Background()
+	if err := wq.FlushPath(ctx, targetDBPath); err != nil {
+		return nil, fmt.Errorf("FlushPath %s: %w", targetDBPath, err)
 	}
-	upsertSQL := fmt.Sprintf(`
-		INSERT INTO "%s" (api_name, last_sync_datetime, last_sync_time, record_count)
-		VALUES (?, ?, CURRENT_TIMESTAMP, 0)
-		ON CONFLICT(api_name) DO UPDATE SET
-			last_sync_datetime = excluded.last_sync_datetime,
-			last_sync_time = CURRENT_TIMESTAMP
-	`, newsSyncCheckpointTable)
-	if _, err := quantDB.Execute(ctx, upsertSQL, newsAPIName, endDatetime); err != nil {
-		return nil, fmt.Errorf("update news_sync_checkpoint: %w", err)
-	}
-	logrus.Printf("✅ [UpdateNewsCheckpoint] last_sync_datetime=%s", endDatetime)
-	return map[string]interface{}{"updated": true, "end_datetime": endDatetime}, nil
+	logrus.Printf("[FlushTargetDB] flushed path=%s", targetDBPath)
+	return map[string]interface{}{"flushed": true, "path": targetDBPath}, nil
 }
 
 // GenerateTimeWindowSubTasksJob 根据时间窗口和一维参数列表（如 src）生成 SyncAPIData 子任务。
@@ -2339,6 +2501,25 @@ func parseFlexibleDateTime(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unsupported datetime format: %s", s)
+}
+
+// parseNewsMaxDateTime 解析 news 表 max(datetime) 返回值，支持带小数秒等常见格式。
+// 先按 parseFlexibleDateTime 解析；失败则截取前 19 字符 "yyyy-mm-dd HH:MM:SS" 再解析。
+func parseNewsMaxDateTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, fmt.Errorf("empty datetime string")
+	}
+	if t, err := parseFlexibleDateTime(s); err == nil {
+		return t, nil
+	}
+	// 支持 "2006-01-02 15:04:05.123" 等：截取到秒
+	if len(s) >= 19 {
+		if t, err := time.Parse("2006-01-02 15:04:05", s[:19]); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported news datetime format: %s", s)
 }
 
 // parseFreqToDuration 将简单频率字符串（如 "D", "3H"）解析为 time.Duration。

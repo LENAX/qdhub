@@ -703,15 +703,13 @@ func (ps PlanStatus) String() string {
 }
 
 // PlanMode represents sync plan execution mode.
-// batch         - 现有批量同步模式，通过 BatchDataSync 工作流按时间/代码维度拉取历史数据。
-// realtime      - 新增实时同步模式，通过流式工作流与 RealtimeAdapter 获取实时行情。
-// news_realtime - 新闻实时同步，通过 builtin:news_realtime_sync 按 news_sync_checkpoint 增量拉取新闻快讯。
+// batch    - 批量同步模式，通过 BatchDataSync 工作流按时间/代码维度拉取历史数据。
+// realtime - 实时同步模式（含行情实时与新闻实时），通过流式工作流获取实时数据。
 type PlanMode string
 
 const (
-	PlanModeBatch        PlanMode = "batch"
-	PlanModeRealtime     PlanMode = "realtime"
-	PlanModeNewsRealtime PlanMode = "news_realtime"
+	PlanModeBatch    PlanMode = "batch"
+	PlanModeRealtime PlanMode = "realtime"
 )
 
 // String returns the string representation of the plan mode.
@@ -721,7 +719,7 @@ func (pm PlanMode) String() string {
 
 // IsValid returns whether the plan mode is valid.
 func (pm PlanMode) IsValid() bool {
-	return pm == PlanModeBatch || pm == PlanModeRealtime || pm == PlanModeNewsRealtime
+	return pm == PlanModeBatch || pm == PlanModeRealtime
 }
 
 // RealtimeAllowedAPIs 白名单：仅这些 API 支持在 PlanModeRealtime 下运行。

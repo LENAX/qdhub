@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,22 @@ import (
 
 	"qdhub/internal/infrastructure/container"
 )
+
+// expandHomePath 将路径开头的 ~ 或 ~/ 展开为当前用户 HOME 目录。
+func expandHomePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || (p != "~" && !strings.HasPrefix(p, "~/")) {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	return filepath.Join(home, p[2:])
+}
 
 var serverCmd = &cobra.Command{
 	Use:   "server [config-file]",
@@ -222,14 +239,28 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if v := viper.GetString("env"); v != "" {
 		config.RealtimeEnv = v // QDHUB_ENV=production | development
 	}
+	// Tushare 实时数据来源与 ts_proxy 转发（支持 config 文件，环境变量可覆盖）
+	if v := viper.GetString("tushare.realtime_source"); v != "" {
+		config.TushareRealtimeSource = v
+	}
 	if v := os.Getenv("TUSHARE_REALTIME_SOURCE"); v != "" {
 		config.TushareRealtimeSource = v // forward | direct，默认 forward
 	}
-	if v := os.Getenv("TUSHARE_FORWARD_WS_URL"); v != "" {
-		config.TushareForwardWSURL = v
+	if v := viper.GetString("tushare.proxy_ws_url"); v != "" {
+		config.TushareProxyWSURL = v
+	} else if v := viper.GetString("tushare.forward_ws_url"); v != "" {
+		config.TushareProxyWSURL = v
 	}
-	if v := os.Getenv("TUSHARE_FORWARD_RSA_PUBLIC_KEY_PATH"); v != "" {
-		config.TushareForwardRSAPublicKeyPath = v
+	if v := os.Getenv("TUSHARE_PROXY_WS_URL"); v != "" {
+		config.TushareProxyWSURL = v
+	}
+	if v := viper.GetString("tushare.proxy_rsa_public_key_path"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
+	} else if v := viper.GetString("tushare.forward_rsa_public_key_path"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
+	}
+	if v := os.Getenv("TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
 	}
 
 	// Create and initialize container

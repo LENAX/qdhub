@@ -64,7 +64,7 @@ func TestWorkflowExecutor_Integration(t *testing.T) {
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	// Create WorkflowExecutor（无需实时 Adapter，传 nil）
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, nil, "", "", "")
 
 	t.Run("ExecuteMetadataCrawl - converts parameters correctly", func(t *testing.T) {
 		req := workflow.MetadataCrawlRequest{
@@ -256,7 +256,7 @@ func TestWorkflowExecutor_ParameterMapping(t *testing.T) {
 	require.NoError(t, err)
 
 	metadataRepo := repository.NewMetadataRepository(db)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, nil, "", nil, nil, "", "", "")
 
 	t.Run("MetadataCrawl - optional MaxAPICrawl not added when zero", func(t *testing.T) {
 		req := workflow.MetadataCrawlRequest{

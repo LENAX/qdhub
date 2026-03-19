@@ -47,14 +47,15 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler       *AuthHandler
-	metadataHandler   *MetadataHandler
-	dataStoreHandler  *DataStoreHandler
-	syncHandler       *SyncHandler
-	workflowHandler   *WorkflowHandler
-	analysisHandler   *AnalysisHandler
-	watchlistHandler  *WatchlistHandler
-	realtimeWSHandler *RealtimeWSHandler
+	authHandler          *AuthHandler
+	metadataHandler      *MetadataHandler
+	dataStoreHandler     *DataStoreHandler
+	syncHandler          *SyncHandler
+	workflowHandler      *WorkflowHandler
+	analysisHandler      *AnalysisHandler
+	watchlistHandler     *WatchlistHandler
+	realtimeWSHandler    *RealtimeWSHandler
+	realtimeSourceHandler *RealtimeSourceHandler
 
 	// Auth components
 	jwtManager *authinfra.JWTManager
@@ -67,8 +68,10 @@ type Server struct {
 // NewServer creates a new HTTP server with the given configuration and services.
 // debugDBDSN 可选，非空时注册 GET /api/v1/debug/database 返回当前连接的 DB DSN，用于 e2e 排查连错库。
 // analysisSvc 可选，nil 时不注册 /analysis 路由。
+// newsUpdateNotifier 可选，非 nil 时新闻写入后主动通知 /analysis/news/stream SSE 推送。
 // watchlistHandler 可选，nil 时不注册 /watchlist 路由。
 // realtimeWSHandler 可选，nil 时不注册 /ws/realtime-quotes；非空时可注入 watchlist 实现收藏默认推送。
+// realtimeSourceHandler 可选，nil 时不注册 /realtime-sources 路由。
 func NewServer(
 	config ServerConfig,
 	authSvc contracts.AuthApplicationService,
@@ -78,8 +81,10 @@ func NewServer(
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
 	analysisSvc contracts.AnalysisApplicationService,
+	newsUpdateNotifier NewsUpdateNotifier,
 	watchlistHandler *WatchlistHandler,
 	realtimeWSHandler *RealtimeWSHandler,
+	realtimeSourceHandler *RealtimeSourceHandler,
 	jwtManager *authinfra.JWTManager,
 	enforcer *casbin.Enforcer,
 	debugDBDSN string,
@@ -101,13 +106,14 @@ func NewServer(
 		dataStoreHandler:  NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
 		syncHandler:       NewSyncHandler(syncSvc),
 		workflowHandler:   NewWorkflowHandler(workflowSvc),
-		realtimeWSHandler: realtimeWSHandler,
-		jwtManager:        jwtManager,
-		enforcer:          enforcer,
-		debugDBDSN:        debugDBDSN,
+		realtimeWSHandler:    realtimeWSHandler,
+		realtimeSourceHandler: realtimeSourceHandler,
+		jwtManager:           jwtManager,
+		enforcer:             enforcer,
+		debugDBDSN:           debugDBDSN,
 	}
 	if analysisSvc != nil {
-		server.analysisHandler = NewAnalysisHandler(analysisSvc)
+		server.analysisHandler = NewAnalysisHandler(analysisSvc, newsUpdateNotifier)
 	}
 	if watchlistHandler != nil {
 		server.watchlistHandler = watchlistHandler
@@ -179,6 +185,9 @@ func (s *Server) setupRoutes() {
 			}
 			if s.watchlistHandler != nil {
 				s.watchlistHandler.RegisterRoutes(protected)
+			}
+			if s.realtimeSourceHandler != nil {
+				s.realtimeSourceHandler.RegisterRoutes(protected)
 			}
 		}
 	}

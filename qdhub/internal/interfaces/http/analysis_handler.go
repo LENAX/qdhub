@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/analysis"
@@ -15,12 +16,13 @@ import (
 
 // AnalysisHandler 分析模块 HTTP Handler
 type AnalysisHandler struct {
-	svc contracts.AnalysisApplicationService
+	svc         contracts.AnalysisApplicationService
+	newsNotifier NewsUpdateNotifier // 可选：非 nil 时新闻写入后主动通知 SSE 推送
 }
 
-// NewAnalysisHandler 创建 AnalysisHandler
-func NewAnalysisHandler(svc contracts.AnalysisApplicationService) *AnalysisHandler {
-	return &AnalysisHandler{svc: svc}
+// NewAnalysisHandler 创建 AnalysisHandler。newsNotifier 可选，用于新闻 SSE 写入即推。
+func NewAnalysisHandler(svc contracts.AnalysisApplicationService, newsNotifier NewsUpdateNotifier) *AnalysisHandler {
+	return &AnalysisHandler{svc: svc, newsNotifier: newsNotifier}
 }
 
 // RegisterRoutes 注册 /analysis 下所有路由（挂在 protected 组下，需 JWT + RBAC）
@@ -1008,6 +1010,7 @@ func (h *AnalysisHandler) StreamNews(c *gin.Context) {
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -1015,9 +1018,9 @@ func (h *AnalysisHandler) StreamNews(c *gin.Context) {
 		return
 	}
 
-	intervalSec := defaultInt(c.Query("interval_sec"), 10)
+	intervalSec := defaultInt(c.Query("interval_sec"), 5)
 	if intervalSec < 1 {
-		intervalSec = 10
+		intervalSec = 5
 	}
 	limit := defaultInt(c.Query("limit"), 20)
 	var sources *string
@@ -1025,6 +1028,14 @@ func (h *AnalysisHandler) StreamNews(c *gin.Context) {
 		sources = &v
 	}
 	since := c.Query("since")
+	if since == "" {
+		if lastID := c.GetHeader("Last-Event-ID"); lastID != "" {
+			since = lastID
+		}
+	}
+
+	c.Writer.Write([]byte("retry: 3000\n\n"))
+	flusher.Flush()
 
 	ctx := c.Request.Context()
 	keepaliveTicker := time.NewTicker(15 * time.Second)
@@ -1032,13 +1043,23 @@ func (h *AnalysisHandler) StreamNews(c *gin.Context) {
 	pollTicker := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	defer pollTicker.Stop()
 
-	sendNews := func() {
+	var notifyCh <-chan struct{}
+	var unsubscribe func()
+	if h.newsNotifier != nil {
+		notifyCh, unsubscribe = h.newsNotifier.Subscribe()
+		defer unsubscribe()
+	}
+
+	var lastLatest string
+
+	sendNews := func(reason string) {
 		req := analysis.NewsListRequest{
 			Order: "time_desc", Sources: sources,
 			Limit: limit, Offset: 0,
 		}
-		list, err := h.svc.ListNews(ctx, req)
+		list, err := h.svc.ListNewsFromRealtime(ctx, req)
 		if err != nil {
+			logrus.Warnf("[NewsSSE] sendNews reason=%s ListNewsFromRealtime err=%v", reason, err)
 			c.Writer.Write([]byte("event: error\ndata: {\"error\":\"" + strings.ReplaceAll(err.Error(), "\"", "\\\"") + "\"}\n\n"))
 			flusher.Flush()
 			return
@@ -1053,25 +1074,37 @@ func (h *AnalysisHandler) StreamNews(c *gin.Context) {
 			list = filtered
 		}
 		if len(list) == 0 {
+			logrus.Debugf("[NewsSSE] sendNews reason=%s, list empty, skip push", reason)
 			return
 		}
+		latest := list[0].PublishTime
+		if reason != "initial" && latest == lastLatest {
+			return
+		}
+		lastLatest = latest
+		logrus.Infof("[NewsSSE] sendNews reason=%s, items=%d, latest=%s", reason, len(list), latest)
 		data, _ := json.Marshal(list)
-		c.Writer.Write([]byte("event: news\ndata: "))
+		c.Writer.Write([]byte("id: " + latest + "\nevent: news\ndata: "))
 		c.Writer.Write(data)
 		c.Writer.Write([]byte("\n\n"))
 		flusher.Flush()
 	}
 
-	sendNews()
+	sendNews("initial")
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case _, ok := <-notifyCh:
+			if !ok {
+				return
+			}
+			sendNews("notify")
 		case <-keepaliveTicker.C:
 			c.Writer.Write([]byte(": keepalive\n\n"))
 			flusher.Flush()
 		case <-pollTicker.C:
-			sendNews()
+			sendNews("poll")
 		}
 	}
 }

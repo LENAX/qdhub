@@ -272,7 +272,7 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		DataSourceRegistry:      nil, // 实时不依赖 Tushare registry
 		MetadataRepo:            metadataRepo,
@@ -291,7 +291,7 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
 
 	cronCalculator := sync.NewCronScheduleCalculator()
 	dependencyResolver := sync.NewDependencyResolver()
@@ -539,7 +539,7 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -552,7 +552,7 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -761,7 +761,7 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -774,7 +774,7 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -993,7 +993,7 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -1006,7 +1006,7 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1189,7 +1189,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -1202,7 +1202,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1389,7 +1389,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -1402,7 +1402,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1599,7 +1599,7 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -1612,7 +1612,7 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1791,7 +1791,7 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 	workflowRepo, _ := repository.NewWorkflowDefinitionRepository(db)
 
 	wqCfg := config.Default().QuantDB.WriteQueue
-	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory)
+	quantDBWriteQueue := writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 	taskEngineDeps := &taskengine.Dependencies{
 		MetadataRepo:            metadataRepo,
 		DataStoreRepo:           datastoreRepo,
@@ -1804,7 +1804,7 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,

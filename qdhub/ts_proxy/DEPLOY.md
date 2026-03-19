@@ -14,7 +14,7 @@
 # 私钥（仅放在内地 ts_proxy 服务器，勿泄露）
 openssl genrsa -out private.pem 2048
 
-# 公钥（可提供给香港 QDHub 侧配置 TUSHARE_FORWARD_RSA_PUBLIC_KEY_PATH）
+# 公钥（可提供给香港 QDHub 侧配置 tushare_proxy_RSA_PUBLIC_KEY_PATH）
 openssl rsa -in private.pem -pubout -out public.pem
 ```
 
@@ -107,8 +107,8 @@ sudo systemctl status ts_proxy
 [QDHub 需配置为从转发端拉流（默认已为 forward）：]()
 
 - `TUSHARE_REALTIME_SOURCE=forward`
-- `TUSHARE_FORWARD_WS_URL=ws://内地服务器IP:8888/realtime`
-- `TUSHARE_FORWARD_RSA_PUBLIC_KEY_PATH=/path/to/public.pem`[（内地提供的公钥）]()
+- `tushare_proxy_WS_URL=ws://内地服务器IP:8888/realtime`
+- `tushare_proxy_RSA_PUBLIC_KEY_PATH=/path/to/public.pem`[（内地提供的公钥）]()
 
 [若使用直连 Tushare WS，则设置]() `TUSHARE_REALTIME_SOURCE=direct` [并无需配置上述 URL 与公钥。]()
 

@@ -89,6 +89,9 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"watchlist", "write"},
 		{"watchlist", "delete"},
 		{"ws", "read"},
+		{"realtime-sources", "read"},
+		{"realtime-sources", "write"},
+		{"realtime-sources", "delete"},
 	}
 
 	// Operator role - read and execute, limited write
@@ -111,6 +114,8 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"watchlist", "write"},
 		{"watchlist", "delete"},
 		{"ws", "read"},
+		{"realtime-sources", "read"},
+		{"realtime-sources", "write"},
 	}
 
 	// Viewer role - read only
@@ -127,6 +132,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"instances", "read"},
 		{"watchlist", "read"},
 		{"ws", "read"},
+		{"realtime-sources", "read"},
 	}
 
 	// 添加 g 规则：matcher 为 g(r.sub, p.sub)，需要 g(role, role) 为真，Enforce(role, resource, action) 才能通过
@@ -239,6 +245,34 @@ func EnsureWatchlistPolicies(enforcer *casbin.Enforcer) error {
 		if !ok {
 			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
 				return fmt.Errorf("add watchlist policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
+}
+
+// EnsureRealtimeSourcesPolicies adds realtime-sources resource policies if missing (for existing DBs created before this resource was added).
+func EnsureRealtimeSourcesPolicies(enforcer *casbin.Enforcer) error {
+	policies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "realtime-sources", "read"},
+		{"admin", "realtime-sources", "write"},
+		{"admin", "realtime-sources", "delete"},
+		{"operator", "realtime-sources", "read"},
+		{"operator", "realtime-sources", "write"},
+		{"viewer", "realtime-sources", "read"},
+	}
+	for _, p := range policies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add realtime-sources policy %s %s %s: %w", p.role, p.resource, p.action, err)
 			}
 		}
 	}

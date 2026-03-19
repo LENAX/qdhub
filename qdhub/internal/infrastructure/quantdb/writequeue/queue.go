@@ -22,22 +22,28 @@ type pendingWrite struct {
 	resp chan writeResult
 }
 
+// OnTableFlushedFunc 在指定表刷盘成功后调用，用于通知下游（如新闻 SSE）。nil 表示不通知。
+type OnTableFlushedFunc func(path, tableName string)
+
 // Queue implements datastore.QuantDBWriteQueue
 type Queue struct {
 	config  config.WriteQueueConfig
 	factory datastore.QuantDBFactory
+
+	onTableFlushed OnTableFlushedFunc // 可选：某表刷盘后回调，便于新闻写入后主动推 SSE
 
 	mu      sync.RWMutex
 	writers map[string]*pathWriter
 	closed  bool
 }
 
-// NewQueue creates a new QuantDBWriteQueue.
-func NewQueue(cfg config.WriteQueueConfig, factory datastore.QuantDBFactory) *Queue {
+// NewQueue creates a new QuantDBWriteQueue. onTableFlushed 可选，非 nil 时在对应表刷盘成功后调用。
+func NewQueue(cfg config.WriteQueueConfig, factory datastore.QuantDBFactory, onTableFlushed OnTableFlushedFunc) *Queue {
 	return &Queue{
-		config:  cfg,
-		factory: factory,
-		writers: make(map[string]*pathWriter),
+		config:         cfg,
+		factory:        factory,
+		onTableFlushed: onTableFlushed,
+		writers:        make(map[string]*pathWriter),
 	}
 }
 
@@ -64,7 +70,7 @@ func (q *Queue) getOrStartWriter(path string) (*pathWriter, error) {
 
 	pw, ok = q.writers[path]
 	if !ok {
-		pw = newPathWriter(path, q.config, q.factory)
+		pw = newPathWriter(path, q.config, q.factory, q.onTableFlushed)
 		q.writers[path] = pw
 		go pw.loop()
 	}
@@ -129,6 +135,29 @@ func (q *Queue) EnqueueAndWait(ctx context.Context, req datastore.QuantDBBatchWr
 	}
 }
 
+// FlushPath flushes all buffered writes for the given DB path to disk immediately.
+func (q *Queue) FlushPath(ctx context.Context, path string) error {
+	if !q.config.Enabled {
+		return nil
+	}
+	pw, err := q.getOrStartWriter(path)
+	if err != nil {
+		return err
+	}
+	ch := make(chan struct{})
+	select {
+	case pw.flushCh <- ch:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // directWrite executes the insert immediately without queueing.
 func (q *Queue) directWrite(ctx context.Context, req datastore.QuantDBBatchWriteRequest) error {
 	_, err := q.directWriteWithResult(ctx, req)
@@ -143,10 +172,16 @@ func (q *Queue) directWriteWithResult(ctx context.Context, req datastore.QuantDB
 	if err != nil {
 		return 0, err
 	}
+	var n int64
 	if req.SyncBatchID != "" {
-		return db.BulkInsertWithBatchID(ctx, req.TableName, req.Data, req.SyncBatchID)
+		n, err = db.BulkInsertWithBatchID(ctx, req.TableName, req.Data, req.SyncBatchID)
+	} else {
+		n, err = db.BulkInsert(ctx, req.TableName, req.Data)
 	}
-	return db.BulkInsert(ctx, req.TableName, req.Data)
+	if err == nil && q.onTableFlushed != nil && req.TableName == "news" {
+		q.onTableFlushed(req.Path, req.TableName)
+	}
+	return n, err
 }
 
 // Close shuts down the queue and flushes all pending writes.
@@ -191,17 +226,22 @@ type pathWriter struct {
 	config  config.WriteQueueConfig
 	factory datastore.QuantDBFactory
 
-	reqCh  chan pendingWrite
-	doneCh chan struct{}
+	onTableFlushed OnTableFlushedFunc
+
+	reqCh   chan pendingWrite
+	flushCh chan chan struct{} // 收到 channel 后执行 flush，然后 close(ch) 通知完成
+	doneCh  chan struct{}
 }
 
-func newPathWriter(path string, cfg config.WriteQueueConfig, factory datastore.QuantDBFactory) *pathWriter {
+func newPathWriter(path string, cfg config.WriteQueueConfig, factory datastore.QuantDBFactory, onTableFlushed OnTableFlushedFunc) *pathWriter {
 	return &pathWriter{
-		path:    path,
-		config:  cfg,
-		factory: factory,
-		reqCh:   make(chan pendingWrite, 1000), // Buffer size for incoming requests
-		doneCh:  make(chan struct{}),
+		path:           path,
+		config:         cfg,
+		factory:        factory,
+		onTableFlushed: onTableFlushed,
+		reqCh:          make(chan pendingWrite, 1000), // Buffer size for incoming requests
+		flushCh:        make(chan chan struct{}, 1),
+		doneCh:         make(chan struct{}),
 	}
 }
 
@@ -237,6 +277,11 @@ func (pw *pathWriter) loop() {
 			return
 		case <-ticker.C:
 			flushAll(MemStatusNormal)
+		case ch, ok := <-pw.flushCh:
+			if ok && ch != nil {
+				flushAll(MemStatusNormal)
+				close(ch)
+			}
 		case req, ok := <-pw.reqCh:
 			if !ok {
 				// reqCh closed (if we choose to close it)
@@ -270,6 +315,14 @@ func (pw *pathWriter) loop() {
 				buf.notifys = append(buf.notifys, req.resp)
 			}
 			totalRows += len(req.req.Data)
+
+			// 对 EnqueueAndWait（resp != nil）请求，立刻触发一次 flush，避免等待定时器导致“已取数但长时间未落库”。
+			// 这也能让依赖实时库的数据读取（如 news streaming）更快看到新数据。
+			if req.resp != nil {
+				flushAll(MemStatusNormal)
+				ticker.Reset(time.Duration(pw.config.MaxWaitSec) * time.Second)
+				continue
+			}
 
 			if len(buf.rows) >= pw.config.BatchSize {
 				// We can selectively flush just this table, or all.
@@ -320,6 +373,9 @@ func (pw *pathWriter) executeFlush(buffers map[tableKey]*batchBuffer) {
 			logrus.Errorf("[WriteQueue] BulkInsert failed path=%s, table=%s: %v", pw.path, key.tableName, flushErr)
 		} else {
 			logrus.Debugf("[WriteQueue] Flushed path=%s, table=%s, rows=%d", pw.path, key.tableName, inserted)
+			if key.tableName == "news" && pw.onTableFlushed != nil {
+				pw.onTableFlushed(pw.path, key.tableName)
+			}
 		}
 
 		// Distribute the inserted count across waiting clients.

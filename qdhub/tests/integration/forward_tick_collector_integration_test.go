@@ -99,7 +99,7 @@ func TestForwardTickCollector_Integration(t *testing.T) {
 	}
 
 	selector := realtimestore.NewRealtimeSourceSelector()
-	selector.SwitchTo(realtimestore.SourceTushareForward)
+	selector.SwitchTo(realtimestore.SourceTushareProxy)
 
 	collector := &realtime.ForwardTickCollector{
 		ForwardWSURL:            wsURL,
@@ -125,7 +125,7 @@ func TestForwardTickCollector_Integration(t *testing.T) {
 	p := gotPayload
 	gotMu.Unlock()
 	require.NotNil(t, p)
-	assert.Equal(t, realtimestore.SourceTushareForward, p.Source)
+	assert.Equal(t, realtimestore.SourceTushareProxy, p.Source)
 	data, ok := p.Data.([]map[string]interface{})
 	require.True(t, ok, "Data should be []map[string]interface{}")
 	require.Len(t, data, 1)
@@ -211,7 +211,7 @@ func TestForwardTickCollector_Integration_Streaming15s(t *testing.T) {
 	}
 
 	selector := realtimestore.NewRealtimeSourceSelector()
-	selector.SwitchTo(realtimestore.SourceTushareForward)
+	selector.SwitchTo(realtimestore.SourceTushareProxy)
 	collector := &realtime.ForwardTickCollector{
 		ForwardWSURL:            wsURL,
 		ForwardRSAPublicKeyPath: pubPath,
@@ -235,7 +235,7 @@ func TestForwardTickCollector_Integration_Streaming15s(t *testing.T) {
 
 	assert.GreaterOrEqual(t, len(snapshot), 20, "expected at least 20 ticks in 15s streaming (interval 500ms)")
 	for i, p := range snapshot {
-		assert.Equal(t, realtimestore.SourceTushareForward, p.Source)
+		assert.Equal(t, realtimestore.SourceTushareProxy, p.Source)
 		data, ok := p.Data.([]map[string]interface{})
 		require.True(t, ok)
 		require.Len(t, data, 1)
@@ -323,7 +323,7 @@ func TestForwardTickCollector_Integration_InterruptReconnect(t *testing.T) {
 	}
 
 	selector := realtimestore.NewRealtimeSourceSelector()
-	selector.SwitchTo(realtimestore.SourceTushareForward)
+	selector.SwitchTo(realtimestore.SourceTushareProxy)
 	collector := &realtime.ForwardTickCollector{
 		ForwardWSURL:            wsURL,
 		ForwardRSAPublicKeyPath: pubPath,
@@ -356,7 +356,7 @@ func TestForwardTickCollector_Integration_InterruptReconnect(t *testing.T) {
 
 	assert.GreaterOrEqual(t, len(snapshot), 6, "expected at least 6 ticks (3 before disconnect + 3 after reconnect)")
 	for _, p := range snapshot {
-		assert.Equal(t, realtimestore.SourceTushareForward, p.Source)
+		assert.Equal(t, realtimestore.SourceTushareProxy, p.Source)
 		data, ok := p.Data.([]map[string]interface{})
 		require.True(t, ok)
 		require.Len(t, data, 1)

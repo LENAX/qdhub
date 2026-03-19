@@ -1,5 +1,7 @@
 // ts_proxy_diagnose is a standalone diagnostic tool to test connectivity to the ts_proxy forwarding service.
 // Usage: go run ./ts_proxy_diagnose -addr ws://<host>:8888/realtime [-rsa-pub /path/to/server_public.pem]
+//
+// 规则：北京时间 9:15–15:00 且工作日（本工具仅按星期判断，不连 trade_cal 排除节假日）时，必须收到至少一帧否则报异常；其余时间能建连并完成 Scheme B 即可。
 package main
 
 import (
@@ -14,6 +16,25 @@ import (
 )
 
 const listenDur = 2 * time.Second
+
+var beijingTZ *time.Location
+
+func init() {
+	beijingTZ, _ = time.LoadLocation("Asia/Shanghai")
+	if beijingTZ == nil {
+		beijingTZ = time.FixedZone("CST", 8*3600)
+	}
+}
+
+// isBeijingTradingWindow 是否处于北京时间 9:15–15:00 工作日
+func isBeijingTradingWindow(utcTime time.Time) bool {
+	t := utcTime.In(beijingTZ)
+	if t.Weekday() == time.Sunday || t.Weekday() == time.Saturday {
+		return false
+	}
+	minutes := t.Hour()*60 + t.Minute()
+	return minutes >= 9*60+15 && minutes < 15*60
+}
 
 func main() {
 	addr := flag.String("addr", "", "WebSocket address (e.g. ws://host:8888/realtime)")
@@ -84,8 +105,12 @@ func main() {
 		fmt.Printf("--- frame %d (%dB) ---\n%s\n", frameNum, len(plain), string(plain))
 	}
 	if frameNum == 0 {
-		fmt.Printf("READ_FRAME_FAIL\tno frame received within %v\n", listenDur)
-		os.Exit(1)
+		if isBeijingTradingWindow(time.Now().UTC()) {
+			fmt.Printf("READ_FRAME_FAIL\tin trading window but no frame received within %v\n", listenDur)
+			os.Exit(1)
+		}
+		fmt.Printf("CONNECT_AND_KEY_OK\tno data in %v (outside trading window; connection and scheme B are OK)\n", listenDur)
+		return
 	}
 	fmt.Printf("DIAGNOSE_OK\t%d frame(s) in %v\n", frameNum, listenDur)
 }
