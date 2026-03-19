@@ -132,7 +132,7 @@ func (d *RealtimeSourceDAO) GetOrderedByPurpose(tx *sqlx.Tx, purpose string) ([]
 	var types []string
 	switch purpose {
 	case realtime.PurposeTsRealtimeMktTick:
-		types = []string{realtime.TypeTushareForward, realtime.TypeTushareWS}
+		types = []string{realtime.TypeTushareProxy, realtime.TypeTushareWS}
 	case realtime.PurposeRealtimeQuote:
 		types = []string{realtime.TypeSina, realtime.TypeEastmoney}
 	case realtime.PurposeRealtimeTick:

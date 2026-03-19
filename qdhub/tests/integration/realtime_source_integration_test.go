@@ -31,7 +31,7 @@ func setupRealtimeSourceIntegration(t *testing.T) (*repository.RealtimeSourceRep
 	return repo, svc, cleanup
 }
 
-// ensureRealtimeSourcesTable 在 realtime_sources 表不存在时执行 028/029 迁移（兼容 cwd 为 tests/integration 时 migrations 未跑全的情况）。
+// ensureRealtimeSourcesTable 在 realtime_sources 表不存在时执行 028/029/030 迁移（兼容 cwd 为 tests/integration 时 migrations 未跑全的情况）。
 func ensureRealtimeSourcesTable(t *testing.T, db *persistence.DB) {
 	t.Helper()
 	var count int
@@ -39,7 +39,7 @@ func ensureRealtimeSourcesTable(t *testing.T, db *persistence.DB) {
 	if err != nil || count > 0 {
 		return
 	}
-	for _, name := range []string{"028_realtime_sources.up.sql", "029_seed_realtime_sources.sqlite.up.sql"} {
+	for _, name := range []string{"028_realtime_sources.up.sql", "029_seed_realtime_sources.sqlite.up.sql", "030_fix_realtime_sources.sqlite.up.sql"} {
 		for _, base := range []string{"migrations", "../migrations", "../../migrations"} {
 			p := filepath.Join(base, name)
 			body, err := os.ReadFile(p)
@@ -53,6 +53,44 @@ func ensureRealtimeSourcesTable(t *testing.T, db *persistence.DB) {
 	}
 }
 
+// TestRealtimeSources_AfterMigration030_ThreeCoreRecords 验证 migration 030 后三条核心 realtime_sources 的 type、priority、is_primary、enabled、health_check_on_startup。
+func TestRealtimeSources_AfterMigration030_ThreeCoreRecords(t *testing.T) {
+	db, cleanup := setupIntegrationDB(t)
+	defer cleanup()
+	ensureRealtimeSourcesTable(t, db)
+
+	repo := repository.NewRealtimeSourceRepository(db)
+	list, err := repo.List()
+	require.NoError(t, err)
+
+	byType := make(map[string]*realtime.RealtimeSource)
+	for _, s := range list {
+		byType[s.Type] = s
+	}
+
+	// ts_proxy (type=tushare_proxy)
+	if s, ok := byType[realtime.TypeTushareProxy]; ok {
+		assert.Equal(t, "ts_proxy", s.Name, "tushare_proxy display name")
+		assert.Equal(t, 1, s.Priority)
+		assert.True(t, s.IsPrimary)
+		assert.True(t, s.Enabled)
+		assert.True(t, s.HealthCheckOnStartup)
+	}
+	// sina
+	if s, ok := byType[realtime.TypeSina]; ok {
+		assert.Equal(t, 2, s.Priority)
+		assert.True(t, s.Enabled)
+		assert.False(t, s.HealthCheckOnStartup)
+	}
+	// tushare_ws
+	if s, ok := byType[realtime.TypeTushareWS]; ok {
+		assert.Equal(t, 4, s.Priority)
+		assert.False(t, s.IsPrimary)
+		assert.False(t, s.Enabled)
+		assert.False(t, s.HealthCheckOnStartup)
+	}
+}
+
 // TestRealtimeSource_CRUD 测试 Repository 与 ApplicationService 层 CRUD。
 func TestRealtimeSource_CRUD(t *testing.T) {
 	repo, svc, cleanup := setupRealtimeSourceIntegration(t)
@@ -62,11 +100,11 @@ func TestRealtimeSource_CRUD(t *testing.T) {
 	// Create
 	req := contracts.CreateRealtimeSourceRequest{
 		Name:                 "Test Forward",
-		Type:                 realtime.TypeTushareForward,
+		Type:                 realtime.TypeTushareProxy,
 		Config:               `{"ws_url":"ws://localhost:8888/realtime","rsa_public_key_path":"/tmp/pub.pem"}`,
 		Priority:             1,
 		IsPrimary:            true,
-		HealthCheckOnStartup:  false,
+		HealthCheckOnStartup: false,
 		Enabled:              true,
 	}
 	src, err := svc.Create(ctx, req)
@@ -128,45 +166,45 @@ func TestRealtimeSource_Validation(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	// tushare_forward 缺少 ws_url
+	// tushare_proxy 缺少 ws_url
 	_, err := svc.Create(ctx, contracts.CreateRealtimeSourceRequest{
-		Name:    "Bad Forward",
-		Type:    realtime.TypeTushareForward,
-		Config:  `{"rsa_public_key_path":"/tmp/pub.pem"}`,
+		Name:     "Bad Forward",
+		Type:     realtime.TypeTushareProxy,
+		Config:   `{"rsa_public_key_path":"/tmp/pub.pem"}`,
 		Priority: 1,
-		Enabled: true,
+		Enabled:  true,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ws_url")
 
-	// tushare_forward 缺少 rsa_public_key_path
+	// tushare_proxy 缺少 rsa_public_key_path
 	_, err = svc.Create(ctx, contracts.CreateRealtimeSourceRequest{
-		Name:    "Bad Forward 2",
-		Type:    realtime.TypeTushareForward,
-		Config:  `{"ws_url":"ws://x/realtime"}`,
+		Name:     "Bad Forward 2",
+		Type:     realtime.TypeTushareProxy,
+		Config:   `{"ws_url":"ws://x/realtime"}`,
 		Priority: 1,
-		Enabled: true,
+		Enabled:  true,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rsa_public_key_path")
 
 	// invalid type
 	_, err = svc.Create(ctx, contracts.CreateRealtimeSourceRequest{
-		Name:    "Bad Type",
-		Type:    "invalid_type",
-		Config:  "{}",
+		Name:     "Bad Type",
+		Type:     "invalid_type",
+		Config:   "{}",
 		Priority: 1,
-		Enabled: true,
+		Enabled:  true,
 	})
 	require.Error(t, err)
 
-	// valid tushare_forward
+	// valid tushare_proxy
 	src, err := svc.Create(ctx, contracts.CreateRealtimeSourceRequest{
-		Name:    "Valid Forward",
-		Type:    realtime.TypeTushareForward,
-		Config:  `{"ws_url":"ws://localhost/realtime","rsa_public_key_path":"/tmp/pub.pem"}`,
+		Name:     "Valid Forward",
+		Type:     realtime.TypeTushareProxy,
+		Config:   `{"ws_url":"ws://localhost/realtime","rsa_public_key_path":"/tmp/pub.pem"}`,
 		Priority: 1,
-		Enabled: true,
+		Enabled:  true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, src)
@@ -208,13 +246,13 @@ func TestRealtimeSource_ConfigSerialization(t *testing.T) {
 	ctx := context.Background()
 
 	config := map[string]interface{}{
-		"ws_url":                "ws://test:8888/realtime",
-		"rsa_public_key_path":   "/root/.key/public.pem",
+		"ws_url":              "ws://test:8888/realtime",
+		"rsa_public_key_path": "/root/.key/public.pem",
 	}
 	configJSON, _ := json.Marshal(config)
 	src, err := svc.Create(ctx, contracts.CreateRealtimeSourceRequest{
 		Name:     "Config Test",
-		Type:     realtime.TypeTushareForward,
+		Type:     realtime.TypeTushareProxy,
 		Config:   string(configJSON),
 		Priority: 1,
 		Enabled:  true,
@@ -239,7 +277,7 @@ func TestRealtimeSource_TriggerHealthCheck(t *testing.T) {
 	// 创建一条源
 	src, err := svcWithChecker.Create(ctx, contracts.CreateRealtimeSourceRequest{
 		Name:     "Health Target",
-		Type:     realtime.TypeTushareForward,
+		Type:     realtime.TypeTushareProxy,
 		Config:   `{"ws_url":"ws://127.0.0.1:99999/realtime","rsa_public_key_path":"/nonexistent"}`,
 		Priority: 1,
 		Enabled:  true,
@@ -266,11 +304,11 @@ func TestRealtimeSource_GetOrderedByPurpose(t *testing.T) {
 	repo, _, cleanup := setupRealtimeSourceIntegration(t)
 	defer cleanup()
 
-	// ts_realtime_mkt_tick -> tushare_forward, tushare_ws
+	// ts_realtime_mkt_tick -> tushare_proxy, tushare_ws
 	ordered, err := repo.GetOrderedByPurpose(realtime.PurposeTsRealtimeMktTick)
 	require.NoError(t, err)
 	for _, s := range ordered {
-		assert.Contains(t, []string{realtime.TypeTushareForward, realtime.TypeTushareWS}, s.Type)
+		assert.Contains(t, []string{realtime.TypeTushareProxy, realtime.TypeTushareWS}, s.Type)
 	}
 	// priority 升序
 	for i := 1; i < len(ordered); i++ {

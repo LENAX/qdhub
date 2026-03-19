@@ -656,7 +656,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		taskEngineDeps.QuantDB = duckDBAdapter
 		quantDBFactory = duckdb.NewFactory()
 		wqCfg := appconfig.Default().QuantDB.WriteQueue
-		quantDBWriteQueue = writequeue.NewQueue(wqCfg, quantDBFactory)
+		quantDBWriteQueue = writequeue.NewQueue(wqCfg, quantDBFactory, nil)
 		taskEngineDeps.QuantDBFactory = quantDBFactory
 		taskEngineDeps.QuantDBWriteQueue = quantDBWriteQueue
 		t.Logf("✅ 已注册 QuantDB / QuantDBFactory / QuantDBWriteQueue")
@@ -733,7 +733,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		} else {
 			readers = analysisinfra.NewReaders(duckDBAdapter)
 		}
-		analysisAppService = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers))
+		analysisAppService = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers), nil)
 		t.Logf("✅ Analysis 应用服务已创建（含兜底）")
 	}
 

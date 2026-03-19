@@ -62,6 +62,9 @@ type SyncApplicationService interface {
 	// CancelExecution cancels a running sync execution.
 	CancelExecution(ctx context.Context, executionID shared.ID) error
 
+	// ExecuteNewsRealtimeOnce 执行一次轻量级新闻实时同步（2分钟窗口，仅 10jqka），供轮询循环调用。
+	ExecuteNewsRealtimeOnce(ctx context.Context) error
+
 	// ReconcileRunningWindow 运行时段协调：对配置了 schedule_start_cron/schedule_end_cron 的 realtime 计划，
 	// 根据当前时间判断是否在时段内，在则自动启动、不在则自动停止。
 	ReconcileRunningWindow(ctx context.Context) error

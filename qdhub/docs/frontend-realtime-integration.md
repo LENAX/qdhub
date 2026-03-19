@@ -228,6 +228,8 @@
 - 推送频率约 500ms 一次，前端可根据 `timestamp` 做去抖或限频渲染。
 - 断线重连后需重新发送 `subscribe`（服务端不持久化订阅状态）。
 
+**当 `items` 为空但连接正常时**：若收到 `type === "snapshot"` 且 `scope === "subset"`、`ts_codes` 非空但 `items` 为空，且 `sources_health[current_source] === "healthy"`，表示数据源连接正常但缓存中尚未收到这些标的的 tick（例如刚连接、非交易时段或上游尚未推送）。前端建议展示「等待行情数据」或「暂无该标的的实时数据」，避免用户误以为连接异常；等后端收到 tick 后，后续 snapshot 的 `items` 会逐步有数据。
+
 ---
 
 ## 四、DuckDB 表与查询建议

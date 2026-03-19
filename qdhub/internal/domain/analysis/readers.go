@@ -154,6 +154,12 @@ type NewsReader interface {
 	List(ctx context.Context, req NewsListRequest) ([]NewsItem, error)
 }
 
+// TickReader 分时 tick 数据读取（用于实时 DuckDB fallback）
+type TickReader interface {
+	GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]TickRow, error)
+	GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]TickRow, error)
+}
+
 // LimitUpListReader 涨停列表（带连板天数，按日）
 type LimitUpListReader interface {
 	GetByDate(ctx context.Context, tradeDate string) ([]LimitUpStock, error)

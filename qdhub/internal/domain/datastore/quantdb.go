@@ -136,6 +136,10 @@ type QuantDBWriteQueue interface {
 	// Returns the number of rows inserted and any error that occurred during the write.
 	EnqueueAndWait(ctx context.Context, req QuantDBBatchWriteRequest) (int64, error)
 
+	// FlushPath flushes all buffered writes for the given DB path to disk immediately.
+	// No-op if the queue is disabled or the path has no writer yet.
+	FlushPath(ctx context.Context, path string) error
+
 	// Close shuts down the queue and flushes all pending writes.
 	Close() error
 }

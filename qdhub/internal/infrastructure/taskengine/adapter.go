@@ -61,12 +61,15 @@ func (a *TaskEngineAdapterImpl) SubmitWorkflow(ctx context.Context, definition *
 		return "", fmt.Errorf("workflow not found: %s", workflowID)
 	}
 
-	// Use Task Engine's native ReplaceParams method to replace placeholders
-	// This will replace placeholders in both Workflow-level and Task-level parameters
-	// We do this on the reloaded copy, not the original definition
+	// 用执行参数（含 datastore / data source 等配置）替换占位符：Workflow 级 + 所有 Task 级
+	// params 的 key 为占位符名称（不含 ${}），如 target_db_path、data_source_name、token
 	if len(params) > 0 {
 		if err := workflowCopy.ReplaceParams(params); err != nil {
 			return "", fmt.Errorf("failed to replace workflow parameters: %w", err)
+		}
+		// 显式替换所有任务的参数，确保每个任务的 JobFunction 参数中的 ${xxx} 均被 datastore 等配置替代
+		if err := workflowCopy.ReplaceAllTaskParams(params); err != nil {
+			return "", fmt.Errorf("failed to replace task parameters: %w", err)
 		}
 	}
 

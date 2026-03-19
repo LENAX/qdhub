@@ -184,7 +184,7 @@ flowchart LR
 | 角色 | 说明 |
 |------|------|
 | **内地 ts_proxy** | 在内地 ECS 按 [ts_proxy/DEPLOY.md](ts_proxy/DEPLOY.md) 部署，订阅 Tushare 并对外提供 WS（方案 B 加密）。 |
-| **本地 QDHub** | 在「实时数据源管理」中配置一条 `type=tushare_forward` 的源，`config` 填内地 ts_proxy 的 `ws_url` 与本地保存的 RSA 公钥路径，对该源执行 **connect**；ForwardTickCollector 会连 ts_proxy、完成密钥交换并接收加密 tick，写入 LatestQuoteStore，前端 WebSocket 即可收到行情。 |
+| **本地 QDHub** | 在「实时数据源管理」中配置一条 `type=tushare_proxy` 的源，`config` 填内地 ts_proxy 的 `ws_url` 与本地保存的 RSA 公钥路径，对该源执行 **connect**；ForwardTickCollector 会连 ts_proxy、完成密钥交换并接收加密 tick，写入 LatestQuoteStore，前端 WebSocket 即可收到行情。 |
 
 **访问方式（任选其一）**：
 

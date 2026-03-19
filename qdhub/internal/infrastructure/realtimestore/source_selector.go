@@ -4,9 +4,10 @@ import "sync"
 
 const (
 	SourceTushareWS      = "tushare_ws"
-	SourceTushareForward = "tushare_forward" // 从 ts_proxy 转发端接收
+	SourceTushareProxy = "tushare_proxy" // 从 ts_proxy 转发端接收
 	SourceSina           = "sina"
 	SourceEastmoney      = "eastmoney" // 东财
+	SourceNews           = "news"      // 新闻快讯，pull-based
 
 	HealthHealthy     = "healthy"
 	HealthDegraded    = "degraded"
@@ -42,7 +43,7 @@ func (s *RealtimeSourceSelector) ShouldWriteToStore(source string) bool {
 func (s *RealtimeSourceSelector) SwitchTo(source string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if source == SourceTushareWS || source == SourceSina || source == SourceTushareForward || source == SourceEastmoney {
+	if source == SourceTushareWS || source == SourceSina || source == SourceTushareProxy || source == SourceEastmoney {
 		s.active = source
 	}
 }
@@ -68,8 +69,8 @@ func (s *RealtimeSourceSelector) RecordSourceError(source, errMsg string) {
 func (s *RealtimeSourceSelector) SourcesHealth() map[string]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make(map[string]string, len(s.sourceErrors)+4)
-	for _, src := range []string{SourceTushareWS, SourceTushareForward, SourceSina, SourceEastmoney} {
+	out := make(map[string]string, len(s.sourceErrors)+5)
+	for _, src := range []string{SourceTushareWS, SourceTushareProxy, SourceSina, SourceEastmoney, SourceNews} {
 		if _, hasErr := s.sourceErrors[src]; hasErr {
 			out[src] = HealthUnavailable
 		} else {
@@ -88,7 +89,7 @@ func (s *RealtimeSourceSelector) SourcesError() map[string]string {
 		out[k] = v
 	}
 	// 保证至少返回各源 key，便于前端统一处理
-	for _, src := range []string{SourceTushareWS, SourceTushareForward, SourceSina, SourceEastmoney} {
+	for _, src := range []string{SourceTushareWS, SourceTushareProxy, SourceSina, SourceEastmoney, SourceNews} {
 		if _, ok := out[src]; !ok {
 			out[src] = ""
 		}

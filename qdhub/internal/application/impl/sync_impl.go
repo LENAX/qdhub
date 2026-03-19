@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sync/atomic"
 	"strings"
 	"time"
 
@@ -20,6 +21,11 @@ import (
 	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
+
+const planIDRealtimeNews = "realtime-news"
+const newsForceBackfillCheckInterval = 10 * time.Minute
+
+var lastNewsForcedBackfillCheckUnix int64
 
 // SyncApplicationServiceImpl implements SyncApplicationService.
 type SyncApplicationServiceImpl struct {
@@ -650,25 +656,25 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 		logrus.Infof("[ExecuteSyncPlan] IncrementalMode=true for plan %s, resolved date range: %s -> %s (requiresDate=%v)",
 			plan.ID, eff.StartDate, eff.EndDate, requiresDate)
 	}
-	// 日期范围校验仅针对批量模式：实时/新闻实时计划不做日期校验
-	if plan.Mode != sync.PlanModeRealtime && plan.Mode != sync.PlanModeNewsRealtime && requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
+	// 日期范围校验仅针对批量模式：实时计划不做日期校验
+	if plan.Mode != sync.PlanModeRealtime && requiresDate && (eff.StartDate == "" || eff.EndDate == "") {
 		return "", shared.NewDomainError(shared.ErrCodeValidation,
 			"missing date range: set default_execute_params on the plan or pass start_dt, end_dt", nil)
 	}
 
-	// Get tasks（新闻实时同步模式不依赖 tasks，仅用 DataSource/DataStore）
+	isNewsRealtime := string(plan.ID) == planIDRealtimeNews
+
 	tasks, err := s.syncPlanRepo.GetTasksByPlan(planID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get tasks: %w", err)
 	}
-	if len(tasks) == 0 && plan.Mode != sync.PlanModeNewsRealtime {
+	if len(tasks) == 0 && !isNewsRealtime {
 		return "", shared.NewDomainError(shared.ErrCodeInvalidState, "no tasks found for plan", nil)
 	}
 
-	// Filter tasks by sync frequency（新闻实时模式跳过，不依赖 needSyncTasks）
 	var needSyncTasks []*sync.SyncTask
 	var skipAPIs []string
-	if plan.Mode != sync.PlanModeNewsRealtime {
+	if !isNewsRealtime {
 		needSyncTasks, skipAPIs = s.filterTasksByFrequency(tasks)
 		if len(needSyncTasks) == 0 {
 			return "", shared.NewDomainError(shared.ErrCodeInvalidState, "all tasks are skipped due to sync frequency", nil)
@@ -694,8 +700,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 	}
 
 	var instanceID shared.ID
-	if plan.Mode == sync.PlanModeNewsRealtime {
-		// 新闻实时同步：使用 builtin:news_realtime_sync，从 plan 的 DataSource/DataStore 取 Token、TargetDBPath
+	if isNewsRealtime {
 		params := map[string]interface{}{
 			"data_source_name": ds.Name,
 			"token":            token.TokenValue,
@@ -1316,6 +1321,111 @@ func lastCronRunBefore(sched cron.Schedule, t time.Time) time.Time {
 		last = n
 	}
 	return last
+}
+
+// newsBackfillLagThreshold 新闻数据落后超过此值则打 WARN 并视为需要补齐（与 sync_jobs.newsCatchUpThreshold 一致）。
+const newsBackfillLagThreshold = 5 * time.Minute
+
+// checkNewsDataLag 检测新闻表最新数据与当前时间的滞后；若超过阈值打 WARN。不改变执行流程。
+func (s *SyncApplicationServiceImpl) checkNewsDataLag(ctx context.Context, targetDBPath string) {
+	if s.quantDBFactory == nil || targetDBPath == "" {
+		return
+	}
+	db, err := s.quantDBFactory.Create(datastore.QuantDBConfig{
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: targetDBPath,
+	})
+	if err != nil {
+		return
+	}
+	if err := db.Connect(ctx); err != nil {
+		return
+	}
+	defer db.Close()
+	exists, err := db.TableExists(ctx, "news")
+	if err != nil || !exists {
+		return
+	}
+	rows, err := db.Query(ctx, `SELECT max(datetime) AS max_dt FROM news`)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	raw := rows[0]["max_dt"]
+	if raw == nil {
+		raw = rows[0]["MAX_DT"]
+	}
+	if raw == nil {
+		return
+	}
+	var maxTime time.Time
+	switch v := raw.(type) {
+	case time.Time:
+		maxTime = v
+	case *time.Time:
+		if v != nil {
+			maxTime = *v
+		} else {
+			return
+		}
+	case string:
+		t, err := time.Parse("2006-01-02 15:04:05", v)
+		if err != nil {
+			t, err = time.Parse("2006-01-02T15:04:05Z07:00", v)
+		}
+		if err != nil {
+			return
+		}
+		maxTime = t
+	default:
+		return
+	}
+	lag := time.Since(maxTime)
+	if lag > newsBackfillLagThreshold {
+		logrus.Warnf("[NewsBackfill] 新闻数据落后 %v（最新: %s），本次将执行追平", lag.Round(time.Second), maxTime.Format("2006-01-02 15:04:05"))
+	}
+}
+
+// ExecuteNewsRealtimeOnce 直接提交一次轻量级新闻实时同步工作流（不走 ExecuteSyncPlan 的状态管理）。
+func (s *SyncApplicationServiceImpl) ExecuteNewsRealtimeOnce(ctx context.Context) error {
+	now := time.Now()
+	forceBackfillCheck := false
+	lastUnix := atomic.LoadInt64(&lastNewsForcedBackfillCheckUnix)
+	if lastUnix == 0 || now.Sub(time.Unix(lastUnix, 0)) >= newsForceBackfillCheckInterval {
+		if atomic.CompareAndSwapInt64(&lastNewsForcedBackfillCheckUnix, lastUnix, now.Unix()) {
+			forceBackfillCheck = true
+		}
+	}
+
+	plan, err := s.syncPlanRepo.Get(shared.ID(planIDRealtimeNews))
+	if err != nil || plan == nil {
+		return fmt.Errorf("load news plan: %w", err)
+	}
+	ds, err := s.dataSourceRepo.Get(plan.DataSourceID)
+	if err != nil || ds == nil {
+		return fmt.Errorf("load data source: %w", err)
+	}
+	token, err := s.dataSourceRepo.GetTokenByDataSource(plan.DataSourceID)
+	if err != nil || token == nil {
+		return fmt.Errorf("load token: %w", err)
+	}
+	dataStore, err := s.dataStoreRepo.Get(plan.DataStoreID)
+	if err != nil || dataStore == nil {
+		return fmt.Errorf("load data store: %w", err)
+	}
+	// 异步检测 lag，不阻塞 workflow 提交，避免 DuckDB Connect 争用导致“等很久也不启动”
+	go func(path string) {
+		lagCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.checkNewsDataLag(lagCtx, path)
+	}(dataStore.StoragePath)
+	params := map[string]interface{}{
+		"data_source_name": ds.Name,
+		"token":            token.TokenValue,
+		"target_db_path":   dataStore.StoragePath,
+		"force_backfill_check": forceBackfillCheck,
+	}
+	_, err = s.workflowExecutor.ExecuteBuiltInWorkflow(ctx, workflows.BuiltInWorkflowNameNewsRealtimeSync, params)
+	return err
 }
 
 // CancelExecution cancels a running sync execution.
@@ -2029,9 +2139,30 @@ func (s *SyncApplicationServiceImpl) ReconcileRunningExecutions(ctx context.Cont
 				continue
 			}
 
+			// 实时计划：重启后 goroutine 已消亡，引擎持久化状态可能仍为 running；
+			// 直接标记为 cancelled 并重置计划状态，允许后续 connect/schedule 重新启动。
+			if plan.Mode == sync.PlanModeRealtime {
+				logrus.Infof("[SyncExecution] reconcile: cancelling stale realtime execution %s (plan %s)", exec.ID, plan.ID)
+				exec.MarkCancelled()
+				if updateErr := s.syncPlanRepo.UpdatePlanExecution(exec); updateErr != nil {
+					logrus.Warnf("[SyncExecution] reconcile: failed to update execution %s: %v", exec.ID, updateErr)
+				}
+				continue
+			}
+
 			// 其余情况复用 GetExecutionProgress 的自动同步逻辑（含终态映射与 Plan.MarkCompleted）
 			if _, err := s.GetExecutionProgress(ctx, exec.ID); err != nil {
 				logrus.Warnf("[SyncExecution] reconcile: failed to sync execution %s progress: %v", exec.ID, err)
+			}
+		}
+
+		// 实时计划：若 plan 仍为 running 但所有 execution 已清理，重置为 enabled
+		if plan.Mode == sync.PlanModeRealtime && plan.Status == sync.PlanStatusRunning {
+			plan.Status = sync.PlanStatusEnabled
+			if updateErr := s.syncPlanRepo.Update(plan); updateErr != nil {
+				logrus.Warnf("[SyncExecution] reconcile: failed to reset realtime plan %s to enabled: %v", plan.ID, updateErr)
+			} else {
+				logrus.Infof("[SyncExecution] reconcile: reset realtime plan %s to enabled (ready for re-connect)", plan.ID)
 			}
 		}
 	}

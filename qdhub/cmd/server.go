@@ -246,17 +246,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if v := os.Getenv("TUSHARE_REALTIME_SOURCE"); v != "" {
 		config.TushareRealtimeSource = v // forward | direct，默认 forward
 	}
-	if v := viper.GetString("tushare.forward_ws_url"); v != "" {
-		config.TushareForwardWSURL = v
+	if v := viper.GetString("tushare.proxy_ws_url"); v != "" {
+		config.TushareProxyWSURL = v
+	} else if v := viper.GetString("tushare.forward_ws_url"); v != "" {
+		config.TushareProxyWSURL = v
 	}
-	if v := os.Getenv("TUSHARE_FORWARD_WS_URL"); v != "" {
-		config.TushareForwardWSURL = v
+	if v := os.Getenv("TUSHARE_PROXY_WS_URL"); v != "" {
+		config.TushareProxyWSURL = v
 	}
-	if v := viper.GetString("tushare.forward_rsa_public_key_path"); v != "" {
-		config.TushareForwardRSAPublicKeyPath = expandHomePath(v)
+	if v := viper.GetString("tushare.proxy_rsa_public_key_path"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
+	} else if v := viper.GetString("tushare.forward_rsa_public_key_path"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
 	}
-	if v := os.Getenv("TUSHARE_FORWARD_RSA_PUBLIC_KEY_PATH"); v != "" {
-		config.TushareForwardRSAPublicKeyPath = expandHomePath(v)
+	if v := os.Getenv("TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH"); v != "" {
+		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
 	}
 
 	// Create and initialize container

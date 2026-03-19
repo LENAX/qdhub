@@ -139,7 +139,7 @@ func (s *RealtimeSourceApplicationServiceImpl) TriggerHealthCheck(ctx context.Co
 
 func validateRealtimeSourceType(typ string) error {
 	switch typ {
-	case realtime.TypeTushareForward, realtime.TypeTushareWS, realtime.TypeSina, realtime.TypeEastmoney:
+	case realtime.TypeTushareProxy, realtime.TypeTushareWS, realtime.TypeSina, realtime.TypeEastmoney, realtime.TypeNews:
 		return nil
 	default:
 		return shared.NewDomainError(shared.ErrCodeValidation, fmt.Sprintf("invalid type: %s", typ), nil)
@@ -157,17 +157,20 @@ func validateRealtimeSourceConfig(typ, config string) error {
 		m = make(map[string]interface{})
 	}
 	switch typ {
-	case realtime.TypeTushareForward:
+	case realtime.TypeTushareProxy:
 		if v, _ := m["ws_url"].(string); strings.TrimSpace(v) == "" {
-			return shared.NewDomainError(shared.ErrCodeValidation, "tushare_forward requires config.ws_url", nil)
+			return shared.NewDomainError(shared.ErrCodeValidation, "tushare_proxy requires config.ws_url", nil)
 		}
 		if v, _ := m["rsa_public_key_path"].(string); strings.TrimSpace(v) == "" {
-			return shared.NewDomainError(shared.ErrCodeValidation, "tushare_forward requires config.rsa_public_key_path", nil)
+			return shared.NewDomainError(shared.ErrCodeValidation, "tushare_proxy requires config.rsa_public_key_path", nil)
 		}
 	case realtime.TypeTushareWS:
 		// endpoint optional, token can be from data_source
 		return nil
 	case realtime.TypeSina, realtime.TypeEastmoney:
+		return nil
+	case realtime.TypeNews:
+		// 新闻源：config 可为空或 {"freq":"5MIN"} 等，由 SyncPlan 调度控制拉取频率
 		return nil
 	default:
 		return nil

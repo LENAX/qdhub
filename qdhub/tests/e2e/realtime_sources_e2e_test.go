@@ -147,7 +147,7 @@ func (e *e2eCollectorConnector) Connect(id string) error {
 	if err != nil || src == nil {
 		return err
 	}
-	if src.Type != realtime.TypeTushareForward {
+	if src.Type != realtime.TypeTushareProxy {
 		return nil
 	}
 	m, err := src.ConfigMap()
@@ -157,9 +157,9 @@ func (e *e2eCollectorConnector) Connect(id string) error {
 	wsURL, _ := m["ws_url"].(string)
 	rsaPath, _ := m["rsa_public_key_path"].(string)
 	if wsURL == "" || rsaPath == "" {
-		return fmt.Errorf("tushare_forward requires ws_url and rsa_public_key_path")
+		return fmt.Errorf("tushare_proxy requires ws_url and rsa_public_key_path")
 	}
-	e.selector.SwitchTo(realtimestore.SourceTushareForward)
+	e.selector.SwitchTo(realtimestore.SourceTushareProxy)
 	collector := &realtimeinfra.ForwardTickCollector{
 		ForwardWSURL:            wsURL,
 		ForwardRSAPublicKeyPath: rsaPath,
@@ -188,6 +188,13 @@ func (e *e2eCollectorConnector) Disconnect(id string) error {
 		c()
 	}
 	return nil
+}
+
+func (e *e2eCollectorConnector) IsConnected(id string) bool {
+	e.mu.Lock()
+	_, ok := e.cancel[id]
+	e.mu.Unlock()
+	return ok
 }
 
 // setupRealtimeSourcesE2EServerWithConnector 与 setupRealtimeSourcesE2EServer 类似，但注入 e2eCollectorConnector 并注册 RealtimeWSHandler，用于 connect→收数→disconnect 测试。
@@ -306,7 +313,7 @@ func TestE2E_RealtimeSources_CRUD(t *testing.T) {
 	t.Run("Create", func(t *testing.T) {
 		body := map[string]interface{}{
 			"name":     "E2E Forward",
-			"type":     realtime.TypeTushareForward,
+			"type":     realtime.TypeTushareProxy,
 			"config":   `{"ws_url":"ws://localhost:8888/realtime","rsa_public_key_path":"/tmp/pub.pem"}`,
 			"priority": 10,
 			"enabled":  true,
@@ -373,10 +380,10 @@ func TestE2E_RealtimeSources_Health(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	var out struct {
 		Data struct {
-			Sources         []interface{}      `json:"sources"`
-			CurrentSource   string             `json:"current_source"`
-			SourcesHealth   map[string]string `json:"sources_health"`
-			SourcesError    map[string]string `json:"sources_error"`
+			Sources       []interface{}     `json:"sources"`
+			CurrentSource string            `json:"current_source"`
+			SourcesHealth map[string]string `json:"sources_health"`
+			SourcesError  map[string]string `json:"sources_error"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
@@ -451,7 +458,7 @@ func TestE2E_RealtimeSources_ConnectDisconnect(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp3.StatusCode)
 }
 
-// TestE2E_RealtimeSources_ConnectReceiveDisconnect 起 mock 流式服务 → 建 tushare_forward 源 → connect → WS 持续收 5 秒并打印到 console → disconnect。
+// TestE2E_RealtimeSources_ConnectReceiveDisconnect 起 mock 流式服务 → 建 tushare_proxy 源 → connect → WS 持续收 5 秒并打印到 console → disconnect。
 func TestE2E_RealtimeSources_ConnectReceiveDisconnect(t *testing.T) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -471,11 +478,11 @@ func TestE2E_RealtimeSources_ConnectReceiveDisconnect(t *testing.T) {
 	ts, token, cleanup := setupRealtimeSourcesE2EServerWithConnector(t, db)
 	defer cleanup()
 
-	// 创建 tushare_forward 源（mock 的 ws_url + rsa path）；API 的 config 为 JSON 字符串
+	// 创建 tushare_proxy 源（mock 的 ws_url + rsa path）；API 的 config 为 JSON 字符串
 	config := map[string]interface{}{"ws_url": wsURL, "rsa_public_key_path": pubPath}
 	configBytes, _ := json.Marshal(config)
 	payload := map[string]interface{}{
-		"name": "E2E Forward", "type": "tushare_forward", "config": string(configBytes),
+		"name": "E2E Forward", "type": "tushare_proxy", "config": string(configBytes),
 		"priority": 1, "is_primary": false, "enabled": true, "health_check_on_startup": false,
 	}
 	bodyBytes, _ := json.Marshal(payload)

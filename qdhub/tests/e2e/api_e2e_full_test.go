@@ -180,7 +180,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			Port: 0,
 			Mode: gin.TestMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = "" // Mock 模式不需要 BaseURL
@@ -204,7 +204,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			WriteTimeout: 30 * time.Second,
 			Mode:         gin.DebugMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)

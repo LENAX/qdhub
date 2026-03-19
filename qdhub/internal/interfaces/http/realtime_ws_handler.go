@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
@@ -146,12 +147,16 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 					"items":     h.store.GetAll(),
 				}
 			} else {
+				items := h.store.GetBatch(pushCodes)
 				payload = map[string]interface{}{
 					"type":      "snapshot",
 					"scope":     "subset",
 					"timestamp": time.Now().UnixMilli(),
 					"ts_codes":  pushCodes,
-					"items":     h.store.GetBatch(pushCodes),
+					"items":     items,
+				}
+				if len(items) == 0 && len(pushCodes) > 0 {
+					logrus.Debugf("[RealtimeWS] subset snapshot has no items for ts_codes=%v (store may not have received ticks yet)", pushCodes)
 				}
 			}
 			h.setSourceAwareness(payload)

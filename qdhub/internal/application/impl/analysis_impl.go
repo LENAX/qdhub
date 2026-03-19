@@ -9,12 +9,15 @@ import (
 
 // AnalysisApplicationServiceImpl 实现分析应用服务，委托领域服务
 type AnalysisApplicationServiceImpl struct {
-	svc analysis.AnalysisService
+	svc                 analysis.AnalysisService
+	realtimeNewsReader  analysis.NewsReader // 可选：供 ListNewsFromRealtime/stream 使用
+	realtimeTickReader  analysis.TickReader // 可选：从 realtime DuckDB 读分时 tick
 }
 
-// NewAnalysisApplicationService 创建分析应用服务
-func NewAnalysisApplicationService(svc analysis.AnalysisService) contracts.AnalysisApplicationService {
-	return &AnalysisApplicationServiceImpl{svc: svc}
+// NewAnalysisApplicationService 创建分析应用服务。
+// realtimeNewsReader/realtimeTickReader 可选，为 nil 时 fallback 到主库。
+func NewAnalysisApplicationService(svc analysis.AnalysisService, realtimeNewsReader analysis.NewsReader, realtimeTickReader analysis.TickReader) contracts.AnalysisApplicationService {
+	return &AnalysisApplicationServiceImpl{svc: svc, realtimeNewsReader: realtimeNewsReader, realtimeTickReader: realtimeTickReader}
 }
 
 func (a *AnalysisApplicationServiceImpl) GetKLine(ctx context.Context, req analysis.KLineRequest) ([]analysis.KLineData, error) {
@@ -72,6 +75,19 @@ func (a *AnalysisApplicationServiceImpl) GetPopularityRank(ctx context.Context, 
 	return a.svc.GetPopularityRank(ctx, req)
 }
 func (a *AnalysisApplicationServiceImpl) ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
+	if a.realtimeNewsReader != nil {
+		items, err := a.realtimeNewsReader.List(ctx, req)
+		if err == nil && len(items) > 0 {
+			return items, nil
+		}
+	}
+	return a.svc.ListNews(ctx, req)
+}
+
+func (a *AnalysisApplicationServiceImpl) ListNewsFromRealtime(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
+	if a.realtimeNewsReader != nil {
+		return a.realtimeNewsReader.List(ctx, req)
+	}
 	return a.svc.ListNews(ctx, req)
 }
 func (a *AnalysisApplicationServiceImpl) GetLimitUpLadder(ctx context.Context, tradeDate string) ([]analysis.LimitUpLadder, error) {
@@ -114,9 +130,21 @@ func (a *AnalysisApplicationServiceImpl) GetTechnicalIndicators(ctx context.Cont
 	return a.svc.GetTechnicalIndicators(ctx, req)
 }
 func (a *AnalysisApplicationServiceImpl) GetRealtimeTicks(ctx context.Context, tsCode string, limit int) ([]analysis.TickRow, error) {
+	if a.realtimeTickReader != nil {
+		items, err := a.realtimeTickReader.GetRealtimeTicks(ctx, tsCode, limit)
+		if err == nil && len(items) > 0 {
+			return items, nil
+		}
+	}
 	return a.svc.GetRealtimeTicks(ctx, tsCode, limit)
 }
 func (a *AnalysisApplicationServiceImpl) GetIntradayTicks(ctx context.Context, tsCode, tradeDate string) ([]analysis.TickRow, error) {
+	if a.realtimeTickReader != nil {
+		items, err := a.realtimeTickReader.GetIntradayTicks(ctx, tsCode, tradeDate)
+		if err == nil && len(items) > 0 {
+			return items, nil
+		}
+	}
 	return a.svc.GetIntradayTicks(ctx, tsCode, tradeDate)
 }
 func (a *AnalysisApplicationServiceImpl) GetIntradayKline(ctx context.Context, tsCode, tradeDate, period string) ([]analysis.IntradayKlineRow, error) {

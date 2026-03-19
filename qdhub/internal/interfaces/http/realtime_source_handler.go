@@ -3,9 +3,11 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 
 	"qdhub/internal/application/contracts"
 	"qdhub/internal/domain/shared"
@@ -25,6 +27,8 @@ type RealtimeSourceHealthItem struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
 	Type             string    `json:"type"`
+	Running          bool      `json:"running"`                     // 该源是否在运行（已连接/同步中），前端统一据此判断是否连接
+	Connected        bool      `json:"connected"`                   // 与 running 同义，保留兼容
 	LastHealthStatus string    `json:"last_health_status,omitempty"`
 	LastHealthAt     time.Time `json:"last_health_at,omitempty"`
 	LastHealthError  string    `json:"last_health_error,omitempty"`
@@ -34,6 +38,8 @@ type RealtimeSourceHealthItem struct {
 type RealtimeSourceConnector interface {
 	Connect(id string) error
 	Disconnect(id string) error
+	// IsConnected 返回该源是否已连接（同步运行中），供前端展示连接/断开按钮状态。
+	IsConnected(id string) bool
 }
 
 // RealtimeSourceHandler handles realtime data source management HTTP API.
@@ -197,6 +203,10 @@ func (h *RealtimeSourceHandler) SingleHealth(c *gin.Context) {
 	id := shared.ID(c.Param("id"))
 	status, errMsg, err := h.svc.TriggerHealthCheck(c.Request.Context(), id)
 	if err != nil {
+		if err.Error() == "health check not configured" {
+			Error(c, http.StatusServiceUnavailable, 503, "health check not configured")
+			return
+		}
 		HandleError(c, err)
 		return
 	}
@@ -204,6 +214,7 @@ func (h *RealtimeSourceHandler) SingleHealth(c *gin.Context) {
 }
 
 // Connect handles POST /api/v1/realtime-sources/:id/connect.
+// 同步执行，启动完成后返回 200；前端可再请求 GET /health 获取 connected 状态并切换为「断开」按钮。
 func (h *RealtimeSourceHandler) Connect(c *gin.Context) {
 	id := c.Param("id")
 	if h.connector == nil {
@@ -211,13 +222,15 @@ func (h *RealtimeSourceHandler) Connect(c *gin.Context) {
 		return
 	}
 	if err := h.connector.Connect(id); err != nil {
+		logrus.Warnf("[RealtimeSourceHandler] connect %s: %v", id, err)
 		HandleError(c, err)
 		return
 	}
-	Success(c, gin.H{"message": "connect request accepted"})
+	Success(c, gin.H{"message": "connect request accepted", "connected": h.connector.IsConnected(id)})
 }
 
 // Disconnect handles POST /api/v1/realtime-sources/:id/disconnect.
+// 同步执行，断开完成后返回 200；前端可再请求 GET /health 确认 connected 为 false。
 func (h *RealtimeSourceHandler) Disconnect(c *gin.Context) {
 	id := c.Param("id")
 	if h.connector == nil {
@@ -225,10 +238,11 @@ func (h *RealtimeSourceHandler) Disconnect(c *gin.Context) {
 		return
 	}
 	if err := h.connector.Disconnect(id); err != nil {
+		logrus.Warnf("[RealtimeSourceHandler] disconnect %s: %v", id, err)
 		HandleError(c, err)
 		return
 	}
-	Success(c, gin.H{"message": "disconnect request accepted"})
+	Success(c, gin.H{"message": "disconnect request accepted", "connected": false})
 }
 
 func (h *RealtimeSourceHandler) buildHealthSnapshot(ctx context.Context) (*RealtimeSourceHealthSnapshot, error) {
@@ -238,10 +252,16 @@ func (h *RealtimeSourceHandler) buildHealthSnapshot(ctx context.Context) (*Realt
 	}
 	items := make([]RealtimeSourceHealthItem, 0, len(list))
 	for _, s := range list {
+		running := false
+		if h.connector != nil {
+			running = h.connector.IsConnected(s.ID.String())
+		}
 		items = append(items, RealtimeSourceHealthItem{
 			ID:               s.ID.String(),
 			Name:             s.Name,
 			Type:             s.Type,
+			Running:          running,
+			Connected:        running,
 			LastHealthStatus: s.LastHealthStatus,
 			LastHealthAt:     s.LastHealthAt.ToTime(),
 			LastHealthError:  s.LastHealthError,

@@ -111,7 +111,7 @@ func TestE2E_ForwardRealtimeTick(t *testing.T) {
 	metadataRepo := repository.NewMetadataRepository(db)
 
 	selector := realtimestore.NewRealtimeSourceSelector()
-	selector.SwitchTo(realtimestore.SourceTushareForward)
+	selector.SwitchTo(realtimestore.SourceTushareProxy)
 
 	workflowExecutor := taskengine.NewWorkflowExecutor(
 		workflowRepo,

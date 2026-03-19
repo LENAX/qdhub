@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -15,7 +16,12 @@ import (
 	"qdhub/pkg/crypto"
 )
 
+const (
+	forwardFlushInterval = 3 * time.Second
+)
+
 // ForwardTickCollector 从 ts_proxy 转发端接收加密 tick 流（方案 B：RSA 交换 AES + AES 解密）。
+// Level-1 行情源每 3 秒刷新一次，因此按 3 秒批量 publish + GC。
 type ForwardTickCollector struct {
 	ForwardWSURL           string // 如 ws://host:8888/realtime
 	ForwardRSAPublicKeyPath string // 转发端 RSA 公钥路径，用于加密本端生成的 AES 密钥
@@ -92,46 +98,75 @@ func (c *ForwardTickCollector) runOnce(ctx context.Context, publish coreRealtime
 	}
 
 	store := realtimestore.DefaultLatestQuoteStore()
-	writeStore := c.Selector == nil || c.Selector.ShouldWriteToStore(realtimestore.SourceTushareForward)
+	batch := make([]map[string]interface{}, 0, 256)
+
+	flushBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+		event := coreRealtime.NewRealtimeEvent(coreRealtime.EventDataArrived, "", "", &coreRealtime.DataArrivedPayload{
+			Data:   batch,
+			Source: realtimestore.SourceTushareProxy,
+		})
+		if err := publish(event); err != nil {
+			logrus.Warnf("[ForwardTickCollector] publish batch(%d): %v", len(batch), err)
+		}
+		batch = make([]map[string]interface{}, 0, 256)
+		runtime.GC()
+	}
+
+	type readResult struct {
+		msg []byte
+		err error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		for {
+			_, msg, err := conn.ReadMessage()
+			readCh <- readResult{msg, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(forwardFlushInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			flushBatch()
 			return nil
-		default:
-		}
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("read: %w", err)
-		}
-		plain, err := sess.Decrypt(msg)
-		if err != nil {
-			logrus.Warnf("[ForwardTickCollector] decrypt: %v", err)
-			continue
-		}
-		var row map[string]interface{}
-		if err := json.Unmarshal(plain, &row); err != nil {
-			logrus.Warnf("[ForwardTickCollector] unmarshal: %v", err)
-			continue
-		}
-		if row == nil {
-			continue
-		}
-		if c.TargetDBPath != "" {
-			row["target_db_path"] = c.TargetDBPath
-		}
-		rows := []map[string]interface{}{row}
-		if tsCode, _ := row["ts_code"].(string); tsCode != "" {
-			if writeStore {
-				store.Update(tsCode, row)
+		case <-ticker.C:
+			flushBatch()
+		case r := <-readCh:
+			if r.err != nil {
+				flushBatch()
+				return fmt.Errorf("read: %w", r.err)
 			}
-		}
-		event := coreRealtime.NewRealtimeEvent(coreRealtime.EventDataArrived, "", "", &coreRealtime.DataArrivedPayload{
-			Data:   rows,
-			Source: realtimestore.SourceTushareForward,
-		})
-		if err := publish(event); err != nil {
-			logrus.Warnf("[ForwardTickCollector] publish: %v", err)
+			plain, err := sess.Decrypt(r.msg)
+			if err != nil {
+				logrus.Warnf("[ForwardTickCollector] decrypt: %v", err)
+				continue
+			}
+			var row map[string]interface{}
+			if err := json.Unmarshal(plain, &row); err != nil {
+				logrus.Warnf("[ForwardTickCollector] unmarshal: %v", err)
+				continue
+			}
+			if row == nil {
+				continue
+			}
+			if c.TargetDBPath != "" {
+				row["target_db_path"] = c.TargetDBPath
+			}
+			if tsCode, _ := row["ts_code"].(string); tsCode != "" {
+				if c.Selector == nil || c.Selector.ShouldWriteToStore(realtimestore.SourceTushareProxy) {
+					store.Update(tsCode, row)
+				}
+			}
+			batch = append(batch, row)
 		}
 	}
 }

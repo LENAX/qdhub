@@ -87,7 +87,7 @@ func setupQueueWithTable(t *testing.T, ctx context.Context, wqCfg config.WriteQu
 	require.NoError(t, db.CreateTable(ctx, dailySchema()))
 	db.Close()
 
-	q := writequeue.NewQueue(wqCfg, factory)
+	q := writequeue.NewQueue(wqCfg, factory, nil)
 	return q, path, factory
 }
 
@@ -235,7 +235,7 @@ func TestWriteQueue_MultiTableMultiBatch(t *testing.T) {
 	require.NoError(t, db.CreateTable(ctx, adjSchema()))
 	db.Close()
 
-	q := writequeue.NewQueue(cfg, factory)
+	q := writequeue.NewQueue(cfg, factory, nil)
 	defer q.Close()
 
 	// daily, batch A (2 rows)

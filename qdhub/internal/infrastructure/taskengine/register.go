@@ -93,6 +93,7 @@ func RegisterJobFunctions(ctx context.Context, eng *engine.Engine) error {
 		{"UpdateSyncCheckpoint", jobs.UpdateSyncCheckpointJob, "更新同步检查点"},
 		{"GetNewsSyncRange", jobs.GetNewsSyncRangeJob, "新闻实时同步：读 news_sync_checkpoint 输出 start/end_datetime"},
 		{"UpdateNewsCheckpoint", jobs.UpdateNewsCheckpointJob, "新闻同步完成后写 news_sync_checkpoint"},
+		{"FlushTargetDB", jobs.FlushTargetDBJob, "将目标 DuckDB 路径的 WriteQueue 缓冲立即刷盘"},
 
 		// ==================== 实时流式同步 Jobs ====================
 		{"RealtimeDataCollector", jobs.RealtimeDataCollectorJob, "实时数据采集（Pull 单次 Fetch，Push 到 buffer）"},
