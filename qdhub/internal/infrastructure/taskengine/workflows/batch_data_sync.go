@@ -683,12 +683,20 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	// 基础参数（含 common_data_apis 供 SyncAPIDataJob 走缓存）
 	// 自动补全 stock_basic/trade_cal 到 common_data_apis，与 Job 层 implicitCommonDataAPIs 双保险
+	// 预序列化为 JSON 字符串，避免 task-engine builder 将 []string 转为 Go fmt 格式 [val1 val2]
+	// 导致 Job 端 convertToStringSlice JSON 解析失败
 	effectiveCommonAPIs := ensureImplicitCommonAPIs(params.CommonDataAPIs)
+	var commonDataAPIsParam interface{} = effectiveCommonAPIs
+	if len(effectiveCommonAPIs) > 0 {
+		if b, err := json.Marshal(effectiveCommonAPIs); err == nil {
+			commonDataAPIsParam = string(b)
+		}
+	}
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
 		"token":            token,
 		"target_db_path":   targetDBPath,
-		"common_data_apis": effectiveCommonAPIs,
+		"common_data_apis": commonDataAPIsParam,
 	}
 
 	// 日期时间参数（支持可选时间）
@@ -1485,11 +1493,19 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 	var depNames []string
 
 	// 基础参数（含 common_data_apis，来自 builder，自动补全 stock_basic/trade_cal）
+	// 预序列化为 JSON，避免 task-engine builder 将 []string 转为 Go fmt 格式
+	graphCommonAPIs := ensureImplicitCommonAPIs(b.params.CommonDataAPIs)
+	var graphCommonParam interface{} = graphCommonAPIs
+	if len(graphCommonAPIs) > 0 {
+		if b, err := json.Marshal(graphCommonAPIs); err == nil {
+			graphCommonParam = string(b)
+		}
+	}
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
 		"token":            token,
 		"target_db_path":   targetDBPath,
-		"common_data_apis": ensureImplicitCommonAPIs(b.params.CommonDataAPIs),
+		"common_data_apis": graphCommonParam,
 	}
 
 	// 日期时间参数

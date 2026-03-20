@@ -2389,6 +2389,16 @@ func convertToStringSlice(raw interface{}) []string {
 			if err := json.Unmarshal([]byte(v), &arr); err == nil && len(arr) > 0 {
 				return arr
 			}
+			// Go fmt 格式回退：[stock_basic trade_cal] → ["stock_basic", "trade_cal"]
+			// task-engine builder 对非 string 类型参数执行 fmt.Sprintf("%v", ...)，
+			// 导致 []string 变成无引号的 [val1 val2 ...] 格式，JSON 解析失败。
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(v, "["), "]"))
+			if inner != "" {
+				parts := strings.Fields(inner)
+				if len(parts) > 0 {
+					return parts
+				}
+			}
 		}
 	}
 	return nil
