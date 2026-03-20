@@ -28,6 +28,15 @@ import (
 
 const maxParamLogLen = 200
 
+// implicitCommonDataAPIs 始终视为公共数据的 API：无论调用方是否配置 common_data_apis，
+// 这些基础参照表都优先从 DuckDB 读取（Cache → DuckDB → API），避免每次工作流都请求外部 API。
+// 典型场景：stock_basic/trade_cal 仅用于提供 ts_code/trade_date 列表给下游模板任务，
+// 数据极少变化，重复请求外部 API 既浪费配额又容易超时。
+var implicitCommonDataAPIs = map[string]bool{
+	"stock_basic": true,
+	"trade_cal":   true,
+}
+
 // ==================== 数据同步 Job Functions ====================
 
 // SyncAPIDataJob 同步单个 API 的数据
@@ -112,11 +121,13 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	commonDataAPIs := getCommonDataAPIsFromParams(tc)
-	isCommonData := false
-	for _, n := range commonDataAPIs {
-		if n == apiName {
-			isCommonData = true
-			break
+	isCommonData := implicitCommonDataAPIs[apiName]
+	if !isCommonData {
+		for _, n := range commonDataAPIs {
+			if n == apiName {
+				isCommonData = true
+				break
+			}
 		}
 	}
 
@@ -390,11 +401,13 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 
 	// 公共数据：Cache → DuckDB → API（与 SyncAPIDataJob 一致）
 	commonDataAPIs := getCommonDataAPIsFromParams(tc)
-	isCommonData := false
-	for _, n := range commonDataAPIs {
-		if n == apiName {
-			isCommonData = true
-			break
+	isCommonData := implicitCommonDataAPIs[apiName]
+	if !isCommonData {
+		for _, n := range commonDataAPIs {
+			if n == apiName {
+				isCommonData = true
+				break
+			}
 		}
 	}
 	if isCommonData {
@@ -615,7 +628,8 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		// 回退：当上游 Fetch* 被跳过时，尝试直接从本地 DuckDB 已有表读取参数列表
 		if vals, err := fallbackParamValuesFromTargetDB(tc, upstreamTask, upstreamParamKey, targetDBPath); err == nil && len(vals) > 0 {
 			paramValues = vals
-			logrus.Printf("📥 [GenerateDataSyncSubTasks] 回退读取本地数据成功: upstream=%s, key=%s, count=%d", upstreamTask, upstreamParamKey, len(paramValues))
+			logrus.Printf("📥 [GenerateDataSyncSubTasks] 参数来源=duckdb_fallback, upstream=%s, key=%s, source_table=%s, source_column=%s, count=%d",
+				upstreamTask, upstreamParamKey, fallbackSourceTable(upstreamTask, upstreamParamKey), fallbackSourceColumn(upstreamTask, upstreamParamKey), len(paramValues))
 		} else {
 			logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
 			return map[string]interface{}{
@@ -760,6 +774,28 @@ func fallbackParamValuesFromTargetDB(tc *task.TaskContext, upstreamTask, upstrea
 		return queryDistinctStringColumn(ctx, quantDB, "trade_cal", "cal_date")
 	default:
 		return nil, fmt.Errorf("unsupported fallback source: upstream=%s, key=%s", upstreamTask, upstreamParamKey)
+	}
+}
+
+func fallbackSourceTable(upstreamTask, upstreamParamKey string) string {
+	switch {
+	case upstreamTask == "FetchStockBasic" && upstreamParamKey == "ts_code":
+		return "stock_basic"
+	case upstreamTask == "FetchTradeCal" && upstreamParamKey == "trade_date":
+		return "trade_cal"
+	default:
+		return "unknown"
+	}
+}
+
+func fallbackSourceColumn(upstreamTask, upstreamParamKey string) string {
+	switch {
+	case upstreamTask == "FetchStockBasic" && upstreamParamKey == "ts_code":
+		return "ts_code"
+	case upstreamTask == "FetchTradeCal" && upstreamParamKey == "trade_date":
+		return "cal_date"
+	default:
+		return "unknown"
 	}
 }
 

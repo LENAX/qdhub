@@ -682,11 +682,13 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	// 基础参数（含 common_data_apis 供 SyncAPIDataJob 走缓存）
+	// 自动补全 stock_basic/trade_cal 到 common_data_apis，与 Job 层 implicitCommonDataAPIs 双保险
+	effectiveCommonAPIs := ensureImplicitCommonAPIs(params.CommonDataAPIs)
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
 		"token":            token,
 		"target_db_path":   targetDBPath,
-		"common_data_apis": params.CommonDataAPIs,
+		"common_data_apis": effectiveCommonAPIs,
 	}
 
 	// 日期时间参数（支持可选时间）
@@ -715,8 +717,10 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			}
 		}
 	}
-	shouldAddFetchTradeCal := !declaredBaseAPI["trade_cal"] || b.checkDependency(params, "FetchTradeCal")
-	shouldAddFetchStockBasic := !declaredBaseAPI["stock_basic"] || b.checkDependency(params, "FetchStockBasic")
+	// APIConfigs 显式声明基础 API（如 stock_basic/trade_cal）时，视为“由调用方控制，不再自动 Fetch”。
+	// 其余需要上游参数的任务由 GenerateDataSyncSubTasksJob 的本地 DuckDB 回退逻辑兜底。
+	shouldAddFetchTradeCal := !declaredBaseAPI["trade_cal"]
+	shouldAddFetchStockBasic := !declaredBaseAPI["stock_basic"]
 
 	// Task: 获取交易日历（全量数据，不限制日期范围）
 	if shouldAddFetchTradeCal {
@@ -1389,6 +1393,24 @@ func contains(list []string, key string) bool {
 	return false
 }
 
+// ensureImplicitCommonAPIs 确保 stock_basic/trade_cal 始终在 common_data_apis 中，
+// 使 SyncAPIDataJob 对这些基础参照表优先走 DuckDB 短路。
+func ensureImplicitCommonAPIs(existing []string) []string {
+	implicit := []string{"stock_basic", "trade_cal"}
+	set := make(map[string]bool, len(existing))
+	for _, v := range existing {
+		set[v] = true
+	}
+	result := make([]string, len(existing))
+	copy(result, existing)
+	for _, name := range implicit {
+		if !set[name] {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
 // filterMissingBaseDependencies 在未创建基础 Fetch 任务时，移除对应依赖，避免无效依赖阻塞任务编排。
 func filterMissingBaseDependencies(config APISyncConfig, addedTaskNames map[string]bool) APISyncConfig {
 	if len(config.Dependencies) == 0 {
@@ -1462,12 +1484,12 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 	var tasks []*task.Task
 	var depNames []string
 
-	// 基础参数（含 common_data_apis，来自 builder）
+	// 基础参数（含 common_data_apis，来自 builder，自动补全 stock_basic/trade_cal）
 	baseParams := map[string]interface{}{
 		"data_source_name": dataSourceName,
 		"token":            token,
 		"target_db_path":   targetDBPath,
-		"common_data_apis": b.params.CommonDataAPIs,
+		"common_data_apis": ensureImplicitCommonAPIs(b.params.CommonDataAPIs),
 	}
 
 	// 日期时间参数
