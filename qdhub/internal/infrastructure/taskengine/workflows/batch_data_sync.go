@@ -657,6 +657,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 	var tasks []*task.Task
 	var depNames []string // 所有同步任务名，用于 BatchSyncComplete 依赖
+	addedTaskNames := make(map[string]bool)
 
 	// 如果参数为空，使用占位符
 	dataSourceName := params.DataSourceName
@@ -706,40 +707,61 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		endDateOnly = "${end_date}"
 	}
 
-	// Task: 获取交易日历（全量数据，不限制日期范围）
-	fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
-		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-			"api_name": "trade_cal",
-			"params":   map[string]interface{}{},
-		})).
-		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-		WithCompensationFunction("CompensateSyncData").
-		Build()
-	if err != nil {
-		return nil, err
+	declaredBaseAPI := map[string]bool{}
+	if len(params.APIConfigs) > 0 {
+		for _, c := range params.APIConfigs {
+			if c.APIName == "trade_cal" || c.APIName == "stock_basic" {
+				declaredBaseAPI[c.APIName] = true
+			}
+		}
 	}
-	tasks = append(tasks, fetchTradeCalTask)
-	depNames = append(depNames, "FetchTradeCal")
+	shouldAddFetchTradeCal := !declaredBaseAPI["trade_cal"] || b.checkDependency(params, "FetchTradeCal")
+	shouldAddFetchStockBasic := !declaredBaseAPI["stock_basic"] || b.checkDependency(params, "FetchStockBasic")
+
+	// Task: 获取交易日历（全量数据，不限制日期范围）
+	if shouldAddFetchTradeCal {
+		fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
+			WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
+				"api_name": "trade_cal",
+				"params":   map[string]interface{}{},
+			})).
+			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+			WithCompensationFunction("CompensateSyncData").
+			Build()
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, fetchTradeCalTask)
+		depNames = append(depNames, "FetchTradeCal")
+		addedTaskNames["FetchTradeCal"] = true
+	} else {
+		log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过 FetchTradeCal（由本地数据/后续回退逻辑提供）")
+	}
 
 	// Task: 获取股票基础信息（含上市 L 与退市 D，便于数据质量按 delist_date 算有效区间）
-	fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
-		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-			"api_name": "stock_basic",
-			"params": map[string]interface{}{
-				"list_status": "L,D",
-				"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
-			},
-		})).
-		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-		WithCompensationFunction("CompensateSyncData").
-		Build()
-	if err != nil {
-		return nil, err
+	if shouldAddFetchStockBasic {
+		fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
+			WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
+				"api_name": "stock_basic",
+				"params": map[string]interface{}{
+					"list_status": "L,D",
+					"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
+				},
+			})).
+			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+			WithCompensationFunction("CompensateSyncData").
+			Build()
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, fetchStockBasicTask)
+		depNames = append(depNames, "FetchStockBasic")
+		addedTaskNames["FetchStockBasic"] = true
+	} else {
+		log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过 FetchStockBasic（由本地数据/后续回退逻辑提供）")
 	}
-	tasks = append(tasks, fetchStockBasicTask)
-	depNames = append(depNames, "FetchStockBasic")
 
 	// Task: 获取指数基础信息（多市场：SSE/SZSE/CSI/SW/OTH，条件添加）
 	// 仅当待同步 API 列表中存在依赖 FetchIndexBasic 的 API 时才添加
@@ -794,11 +816,13 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				continue
 			}
 
+			config = filterMissingBaseDependencies(config, addedTaskNames)
 			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
 			if err != nil {
 				return nil, err
 			}
 			tasks = append(tasks, syncTask)
+			addedTaskNames["Sync_"+config.APIName] = true
 			depNames = append(depNames, "Sync_"+config.APIName)
 		}
 	} else {
@@ -1096,6 +1120,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			}
 			log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s", apiName, taskName)
 			tasks = append(tasks, syncTask)
+			addedTaskNames[taskName] = true
 			depNames = append(depNames, taskName)
 		}
 	}
@@ -1362,6 +1387,25 @@ func contains(list []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// filterMissingBaseDependencies 在未创建基础 Fetch 任务时，移除对应依赖，避免无效依赖阻塞任务编排。
+func filterMissingBaseDependencies(config APISyncConfig, addedTaskNames map[string]bool) APISyncConfig {
+	if len(config.Dependencies) == 0 {
+		return config
+	}
+	deps := make([]string, 0, len(config.Dependencies))
+	for _, dep := range config.Dependencies {
+		if dep == "FetchTradeCal" || dep == "FetchStockBasic" {
+			if !addedTaskNames[dep] {
+				log.Printf("⏭️ [BuildWorkflow] 依赖移除: API=%s, dep=%s（对应 Fetch 任务未创建）", config.APIName, dep)
+				continue
+			}
+		}
+		deps = append(deps, dep)
+	}
+	config.Dependencies = deps
+	return config
 }
 
 // ==================== ExecutionGraph 支持 ====================

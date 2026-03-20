@@ -5,6 +5,7 @@
 services:
   backend:
     image: ${DOCKER_REGISTRY:-}qdhub-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
     build:
       context: ./qdhub
       dockerfile: Dockerfile
@@ -17,6 +18,8 @@ services:
       # Persist SQLite + DuckDB data and logs
       - ${QDHUB_DATA_DIR:-./qdhub/data}:/app/data
       - ${QDHUB_LOG_DIR:-./qdhub/logs}:/app/logs
+      # 可选：ts_proxy 公钥目录（内含 public.pem）→ 容器 /root/.key（与迁移默认 rsa_public_key_path 一致）
+      - ${QDHUB_KEY_DIR:-./qdhub/keys}:/root/.key:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s
@@ -26,6 +29,7 @@ services:
 
   frontend:
     image: ${DOCKER_REGISTRY:-}qdhub-frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
     build:
       context: ./qdhub-frontend
       dockerfile: Dockerfile

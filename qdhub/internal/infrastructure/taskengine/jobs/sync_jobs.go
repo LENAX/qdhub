@@ -612,12 +612,18 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	if len(paramValues) == 0 {
-		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
-		return map[string]interface{}{
-			"status":    "no_data",
-			"generated": 0,
-			"message":   fmt.Sprintf("未找到 %s 列表，跳过子任务生成", paramKey),
-		}, nil
+		// 回退：当上游 Fetch* 被跳过时，尝试直接从本地 DuckDB 已有表读取参数列表
+		if vals, err := fallbackParamValuesFromTargetDB(tc, upstreamTask, upstreamParamKey, targetDBPath); err == nil && len(vals) > 0 {
+			paramValues = vals
+			logrus.Printf("📥 [GenerateDataSyncSubTasks] 回退读取本地数据成功: upstream=%s, key=%s, count=%d", upstreamTask, upstreamParamKey, len(paramValues))
+		} else {
+			logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 未找到 %s 列表", paramKey)
+			return map[string]interface{}{
+				"status":    "no_data",
+				"generated": 0,
+				"message":   fmt.Sprintf("未找到 %s 列表，跳过子任务生成", paramKey),
+			}, nil
+		}
 	}
 
 	// 如果是 trade_date，根据日期范围过滤交易日
@@ -732,6 +738,50 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		"param_key": paramKey,
 		"sub_tasks": subTaskInfos,
 	}, nil
+}
+
+// fallbackParamValuesFromTargetDB 在上游任务不可用时，尝试从 target DuckDB 读取参数列表。
+// 目前支持：
+// - FetchStockBasic + ts_code  -> stock_basic.ts_code
+// - FetchTradeCal  + trade_date -> trade_cal.cal_date
+func fallbackParamValuesFromTargetDB(tc *task.TaskContext, upstreamTask, upstreamParamKey, targetDBPath string) ([]string, error) {
+	if targetDBPath == "" {
+		return nil, fmt.Errorf("target_db_path is empty")
+	}
+	ctx := context.Background()
+	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case upstreamTask == "FetchStockBasic" && upstreamParamKey == "ts_code":
+		return queryDistinctStringColumn(ctx, quantDB, "stock_basic", "ts_code")
+	case upstreamTask == "FetchTradeCal" && upstreamParamKey == "trade_date":
+		return queryDistinctStringColumn(ctx, quantDB, "trade_cal", "cal_date")
+	default:
+		return nil, fmt.Errorf("unsupported fallback source: upstream=%s, key=%s", upstreamTask, upstreamParamKey)
+	}
+}
+
+func queryDistinctStringColumn(ctx context.Context, quantDB datastore.QuantDB, tableName, columnName string) ([]string, error) {
+	if !safeSQLIdentifier(tableName) || !safeSQLIdentifier(columnName) {
+		return nil, fmt.Errorf("invalid table or column name")
+	}
+	sql := fmt.Sprintf("SELECT DISTINCT %s AS v FROM %s", syncQuoteIdentifier(columnName), syncQuoteIdentifier(tableName))
+	rows, err := quantDB.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if raw, ok := row["v"]; ok && raw != nil {
+			s := strings.TrimSpace(fmt.Sprintf("%v", raw))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out, nil
 }
 
 // GenerateDatetimeRangeJob 生成时间序列（类似 pandas.date_range），供模板任务按时间窗口拆分子任务使用。
