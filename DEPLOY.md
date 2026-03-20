@@ -38,11 +38,11 @@ CI 会自动构建并推送 `qdhub-backend:v0.1.0-beta.5`、`qdhub-frontend:v0.1
 
 ### 3. ECS 部署
 
-CI 仅负责构建推送，ECS 上需**手动**更新 `.env` 中的 `IMAGE_TAG` 后执行：
+CI 仅负责构建推送，ECS 上默认使用 `latest`（`IMAGE_TAG` 可不设）；若需固定版本，再手动设置 `.env` 中 `IMAGE_TAG` 后执行：
 
 ```bash
 cd ~/qdhub-deploy
-# 编辑 .env，将 IMAGE_TAG 改为新版本（如 v0.1.0-beta.5）
+# 默认可不设 IMAGE_TAG（即 latest）；需要固定版本时再设置 IMAGE_TAG（如 v0.1.0-beta.5）
 docker compose -f docker-compose.image.yml pull
 docker compose -f docker-compose.image.yml up -d
 ```
@@ -53,9 +53,9 @@ docker compose -f docker-compose.image.yml up -d
 
 ### 1. 镜像版本号规范
 
-- 与代码库 **Git tag** 保持一致，例如当前为 `v0.1.0-beta.2`。
-- 通过环境变量 **IMAGE_TAG** 传入，不设则默认为 `latest`。
-- 最终镜像名示例：`<DOCKER_REGISTRY>qdhub-backend:v0.1.0-beta.2`、`<DOCKER_REGISTRY>qdhub-frontend:v0.1.0-beta.2`。
+- 默认使用 `latest`（`IMAGE_TAG` 不设）。
+- 生产环境建议固定到与代码库 **Git tag** 一致的版本（如 `v0.1.0-beta.2`），通过环境变量 `IMAGE_TAG` 传入。
+- 示例镜像名：`<DOCKER_REGISTRY>qdhub-backend:latest`、`<DOCKER_REGISTRY>qdhub-frontend:latest`（或固定版本 tag）。
 
 ### 2. 登录镜像仓库（阿里云个人实例示例）
 
@@ -70,6 +70,7 @@ docker login crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com -u linxe
 在项目根目录（有 `docker-compose.yml` 的目录）：
 
 - **若在 Mac ARM（M1/M2）上构建、且要部署到阿里云 ECS（x86/amd64）**：必须先按**目标平台 amd64** 构建，否则 ECS 会报 `image's platform (linux/arm64) does not match the detected host platform (linux/amd64)`。见下方“仅 ECS 用”或“多架构”两种方式。
+- **为何 Docker 里 `go build` 比本机慢很多**：在 Mac ARM 上设 `DOCKER_DEFAULT_PLATFORM=linux/amd64` 时，构建在 **QEMU 模拟的 x86** 里跑；后端 **CGO（DuckDB）** 会调用 gcc，模拟下往往比本机原生慢一个数量级，属正常现象。**缓策**：发版优先用 **CI（linux/amd64）** 构建；本地重复构建依赖 Dockerfile 里的 BuildKit **Go / npm 缓存挂载**（`GOMODCACHE`、`GOCACHE`、`npm` 缓存），改代码后的增量构建会明显快于首次。
 
 **仅 ECS 用（单架构 amd64，推荐在 Mac 上为 ECS 构建时用）：**
 
@@ -139,16 +140,20 @@ cd ~/qdhub-deploy
 ```
 
 - **docker-compose.image.yml**：从本仓库复制一份（或只保留这一份 compose）。
-- **.env.aliyun**：环境变量，**IMAGE_TAG 需与构建时一致**（见下方示例）。部署时复制为 **.env**，便于兼容不支持 `--env-file` 的旧版 docker-compose。
+- **.env.aliyun**：环境变量。`IMAGE_TAG` 可留空以使用默认 `latest`，也可设置为固定版本（见下方示例）。部署时复制为 **.env**，便于兼容不支持 `--env-file` 的旧版 docker-compose。
 
 ```bash
-# 镜像仓库（与推送时一致，结尾带 /）及版本号
+# 镜像仓库（与推送时一致，结尾带 /）及版本号（可选）
 DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-IMAGE_TAG=v0.1.0-beta.4
+# IMAGE_TAG 不设时默认 latest；如需固定版本可取消注释
+# IMAGE_TAG=v0.1.0-beta.4
 
 # 数据与日志（阿里云数据盘）
 QDHUB_DATA_DIR=/mnt/vdb/qdhub/data
 QDHUB_LOG_DIR=/mnt/vdb/qdhub/logs
+
+# ts_proxy 公钥目录（其下放置 public.pem）；挂载为容器内 /root/.key，与默认 rsa_public_key_path 一致
+QDHUB_KEY_DIR=/mnt/vdb/qdhub/keys
 
 # 生产环境安全配置（强烈建议修改）
 # - QDHUB_SERVER_ENABLE_SWAGGER=false           关闭 /swagger、/docs
@@ -164,12 +169,16 @@ QDHUB_AUTH_ADMIN_PASSWORD=你的强密码
 QDHUB_AUTH_GUEST_PASSWORD=你的强密码（只读）
 ```
 
-### 2. 创建数据目录
+### 2. 创建数据目录与密钥目录
 
 ```bash
-sudo mkdir -p /mnt/vdb/qdhub/data /mnt/vdb/qdhub/logs
+sudo mkdir -p /mnt/vdb/qdhub/data /mnt/vdb/qdhub/logs /mnt/vdb/qdhub/keys
 sudo chown -R $USER:$USER /mnt/vdb/qdhub
 ```
+
+**ts_proxy（Tushare 转发）公钥**：将内地提供的 `public.pem` 放到 **`QDHUB_KEY_DIR`（默认 `/mnt/vdb/qdhub/keys`）** 下，命名为 **`public.pem`**。`docker-compose.image.yml` 已将该目录**只读**挂载到容器内 **`/root/.key`**，与库里默认的 `rsa_public_key_path` 一致。若公钥放在其他路径，可改 `.env` 中的 `QDHUB_KEY_DIR`，或改数据库 `realtime_sources` 里对应源的 `rsa_public_key_path` 与挂载目标一致。
+
+**注意**：`public.pem` 权限建议仅运维用户可读（如 `chmod 600`），勿提交到 Git。
 
 ### 3. 登录仓库并拉取、启动
 
@@ -191,16 +200,42 @@ docker compose -f docker-compose.image.yml up -d
 
 ### 5. ECS 上 Nginx 做 HTTPS（可选）
 
-前端容器只暴露 **3001**，80/443 由 ECS 宿主机 Nginx 监听，便于挂证书、做 HTTPS：
+前端容器只暴露 **3001**，后端 API 为 **8080**，80/443 由 ECS 宿主机 Nginx 监听，便于挂证书、做 HTTPS。
+
+**要点**：`/api/v1/ws/*`（如实时行情 WebSocket）必须在 Nginx 上按 **WebSocket 升级**转发：需要 `Upgrade` 与 `Connection: upgrade`，且 **不能**像普通 HTTP 反代那样把 `Connection` 置空。否则上游 Go（`gorilla/websocket`）收不到合法握手，会返回 **400 Bad Request**（响应体约 12 字节），Postman 里表现为 `Unexpected server response: 400`。
 
 ```nginx
-# /etc/nginx/sites-available/quantrade.team 示例
+# /etc/nginx/sites-available/quantrade.team 示例（含 API + WS）
 server {
     listen 443 ssl;
     server_name quantrade.team www.quantrade.team;
 
     ssl_certificate     /etc/letsencrypt/live/quantrade.team/fullchain.pem;
     ssl_certificate_key  /etc/letsencrypt/live/quantrade.team/privkey.pem;
+
+    # WebSocket：必须写在 location /api/ 之前（更长前缀优先匹配）
+    location /api/v1/ws/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    # 普通 REST API
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:3001;
@@ -217,6 +252,8 @@ server {
     return 301 https://$host$request_uri;
 }
 ```
+
+**替代写法（单块 `/api/`）**：若不想拆两个 `location`，可在 `http` 块用 `map` 根据 `$http_upgrade` 设置 `Connection`，再对 `/api/` 统一 `proxy_set_header Connection $connection_upgrade`（见 [Nginx WebSocket 代理文档](http://nginx.org/en/docs/http/websocket.html)）。拆 `location /api/v1/ws/` 通常更直观、不易配错。
 
 启用：`sudo ln -s /etc/nginx/sites-available/quantrade.team /etc/nginx/sites-enabled/`，`sudo nginx -t && sudo systemctl reload nginx`。
 
@@ -267,6 +304,8 @@ docker-compose -f docker-compose.yml push
 docker compose -f docker-compose.image.yml pull
 docker compose -f docker-compose.image.yml up -d
 ```
+
+说明：`docker-compose.yml` 与 `docker-compose.image.yml` 已配置 `pull_policy: always`，执行 `up` 时会优先尝试拉取远端最新镜像。
 
 无需拉取或上传任何源代码。
 

@@ -777,6 +777,11 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		}
 
 		for _, config := range params.APIConfigs {
+			// 与简单模式一致：Level 0 已 always 建 FetchTradeCal/FetchStockBasic，勿再生成 Sync_*，否则并行重复请求同一接口（易触发 30s 超时）。
+			if config.APIName == "trade_cal" || config.APIName == "stock_basic" {
+				log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过基础 API（已由 Fetch* 覆盖）: %s", config.APIName)
+				continue
+			}
 			// 优先处理时间窗口模板策略
 			strategy := b.getStrategy(config.APIName)
 			if strategy.TimeWindow != nil && strategy.TimeWindow.Enabled {

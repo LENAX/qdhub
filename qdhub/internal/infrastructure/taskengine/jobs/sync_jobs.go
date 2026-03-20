@@ -120,30 +120,33 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	// 公共数据：Cache → DuckDB → API
+	// 公共数据：Cache → DuckDB → API。
+	// DuckDB 短路不依赖 CommonDataCache（与 SyncMultiParamAPIDataJob 一致），避免 worker 未注册缓存时无法读本地表。
 	if isCommonData {
+		cacheKey := commonDataCacheKey(dataSourceName, apiName, params)
 		if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
 			if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
-				cacheKey := commonDataCacheKey(dataSourceName, apiName, params)
 				if cached, hit := cache.Get(ctx, cacheKey); hit {
 					logrus.Printf("📦 [SyncAPIData] 缓存命中: %s/%s", dataSourceName, apiName)
 					return buildSyncResultFromData(cached, apiName, syncBatchID), nil
 				}
-				// DuckDB 已有表则直接读并回填缓存
-				if targetDBPath != "" && isSafeTableName(apiName) {
-					quantDB, err := GetQuantDBForPath(tc, targetDBPath)
-					if err == nil {
-						exists, _ := quantDB.TableExists(ctx, apiName)
-						if exists {
-							// 使用已存在的表名安全拼接 SQL（apiName 已校验为安全）
-							sqlSelect := fmt.Sprintf(`SELECT * FROM "%s"`, strings.ReplaceAll(apiName, `"`, `""`))
-							rows, err := quantDB.Query(ctx, sqlSelect)
-							if err == nil && len(rows) > 0 {
+			}
+		}
+		if targetDBPath != "" && isSafeTableName(apiName) {
+			quantDB, err := GetQuantDBForPath(tc, targetDBPath)
+			if err == nil {
+				exists, _ := quantDB.TableExists(ctx, apiName)
+				if exists {
+					sqlSelect := fmt.Sprintf(`SELECT * FROM "%s"`, strings.ReplaceAll(apiName, `"`, `""`))
+					rows, err := quantDB.Query(ctx, sqlSelect)
+					if err == nil && len(rows) > 0 {
+						if cacheInterface, ok := tc.GetDependency("CommonDataCache"); ok && cacheInterface != nil {
+							if cache, ok := cacheInterface.(sync.CommonDataCache); ok {
 								_ = cache.Set(ctx, cacheKey, rows, 24*time.Hour)
-								logrus.Printf("📦 [SyncAPIData] DuckDB 命中并回填缓存: %s/%s, 记录数=%d", dataSourceName, apiName, len(rows))
-								return buildSyncResultFromData(rows, apiName, syncBatchID), nil
 							}
 						}
+						logrus.Printf("📦 [SyncAPIData] DuckDB 命中（公共数据）: %s/%s, 记录数=%d", dataSourceName, apiName, len(rows))
+						return buildSyncResultFromData(rows, apiName, syncBatchID), nil
 					}
 				}
 			}

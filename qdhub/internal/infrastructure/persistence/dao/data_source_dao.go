@@ -3,6 +3,7 @@ package dao
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -153,7 +154,9 @@ func (d *DataSourceDAO) toEntity(row *DataSourceRow) *metadata.DataSource {
 		UpdatedAt:   shared.Timestamp(row.UpdatedAt),
 	}
 	if row.CommonDataAPIs.Valid && row.CommonDataAPIs.String != "" {
-		_ = entity.UnmarshalCommonDataAPIsJSON(row.CommonDataAPIs.String)
+		if err := entity.UnmarshalCommonDataAPIsJSON(row.CommonDataAPIs.String); err != nil {
+			log.Printf("[DataSourceDAO] common_data_apis JSON 无效 id=%s raw=%q err=%v", row.ID, row.CommonDataAPIs.String, err)
+		}
 	}
 	return entity
 }

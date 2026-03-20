@@ -95,6 +95,14 @@ func TestDataSource_CommonDataAPIs(t *testing.T) {
 	if len(ds.CommonDataAPIs) != 2 || ds.CommonDataAPIs[0] != "a" || ds.CommonDataAPIs[1] != "b" {
 		t.Errorf("CommonDataAPIs after unmarshal = %v, expected [a b]", ds.CommonDataAPIs)
 	}
+
+	// Unmarshal Python/手动单引号风格（与部分 GUI 导出一致）
+	if err := ds.UnmarshalCommonDataAPIsJSON(`['stock_basic', 'trade_cal']`); err != nil {
+		t.Fatalf("UnmarshalCommonDataAPIsJSON single-quote: %v", err)
+	}
+	if len(ds.CommonDataAPIs) != 2 || ds.CommonDataAPIs[0] != "stock_basic" || ds.CommonDataAPIs[1] != "trade_cal" {
+		t.Errorf("CommonDataAPIs after single-quote unmarshal = %v, want [stock_basic trade_cal]", ds.CommonDataAPIs)
+	}
 }
 
 func TestNewAPICategory(t *testing.T) {

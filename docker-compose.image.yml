@@ -3,6 +3,7 @@
 services:
   backend:
     image: ${DOCKER_REGISTRY:?err}qdhub-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "8080:8080"
     environment:
@@ -14,6 +15,8 @@ services:
     volumes:
       - ${QDHUB_DATA_DIR:-/mnt/vdb/.qdhub/data}:/app/data
       - ${QDHUB_LOG_DIR:-/mnt/vdb/.qdhub/logs}:/app/logs
+      # 内地 ts_proxy 公钥：宿主机目录内需有 public.pem；容器内为 /root/.key/public.pem（与默认 realtime_sources 配置一致）
+      - ${QDHUB_KEY_DIR:-/mnt/vdb/.qdhub/keys}:/root/.key:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
       interval: 10s
@@ -24,6 +27,7 @@ services:
 
   frontend:
     image: ${DOCKER_REGISTRY:?err}qdhub-frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "3001:80"   # 宿主机 3001；ECS Nginx 监听 80/443 并反代到 127.0.0.1:3001
     depends_on:

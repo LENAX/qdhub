@@ -1,0 +1,27 @@
+# 构建上下文瘦身：Docker 不使用 .gitignore，必须显式排除本地大数据与缓存
+data/
+logs/
+tmp/
+*.db
+*.db-shm
+*.db-wal
+*.duckdb
+
+coverage*.out
+*.test
+e2e.test
+integration.test
+
+.git/
+.gitattributes
+
+# 预编译二进制（宿主机产物）
+ts_proxy/ts_proxy
+ts_proxy_diagnose/ts_proxy_diagnose
+**/bin/
+
+# 镜像内会 go mod download，无需本地缓存目录（若存在）
+vendor/
+
+# 生产镜像仅需编译主程序，测试源码不参与 go build .
+tests/

@@ -3,6 +3,7 @@ package metadata
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"qdhub/internal/domain/shared"
@@ -89,12 +90,19 @@ func (ds *DataSource) MarshalCommonDataAPIsJSON() (string, error) {
 }
 
 // UnmarshalCommonDataAPIsJSON unmarshals CommonDataAPIs from JSON string.
+// 兼容部分客户端/手工入库使用单引号（Python 风格）的数组串，例如 ['stock_basic','trade_cal']。
 func (ds *DataSource) UnmarshalCommonDataAPIsJSON(jsonStr string) error {
 	if jsonStr == "" {
 		ds.CommonDataAPIs = nil
 		return nil
 	}
-	return json.Unmarshal([]byte(jsonStr), &ds.CommonDataAPIs)
+	if err := json.Unmarshal([]byte(jsonStr), &ds.CommonDataAPIs); err != nil {
+		fallback := strings.ReplaceAll(strings.TrimSpace(jsonStr), "'", `"`)
+		if err2 := json.Unmarshal([]byte(fallback), &ds.CommonDataAPIs); err2 != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ==================== 聚合内实体 ====================
