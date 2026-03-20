@@ -717,63 +717,44 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		endDateOnly = "${end_date}"
 	}
 
-	declaredBaseAPI := map[string]bool{}
-	if len(params.APIConfigs) > 0 {
-		for _, c := range params.APIConfigs {
-			if c.APIName == "trade_cal" || c.APIName == "stock_basic" {
-				declaredBaseAPI[c.APIName] = true
-			}
-		}
-	}
-	// APIConfigs 显式声明基础 API（如 stock_basic/trade_cal）时，视为“由调用方控制，不再自动 Fetch”。
-	// 其余需要上游参数的任务由 GenerateDataSyncSubTasksJob 的本地 DuckDB 回退逻辑兜底。
-	shouldAddFetchTradeCal := !declaredBaseAPI["trade_cal"]
-	shouldAddFetchStockBasic := !declaredBaseAPI["stock_basic"]
-
 	// Task: 获取交易日历（全量数据，不限制日期范围）
-	if shouldAddFetchTradeCal {
-		fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
-			WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-				"api_name": "trade_cal",
-				"params":   map[string]interface{}{},
-			})).
-			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-			WithCompensationFunction("CompensateSyncData").
-			Build()
-		if err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, fetchTradeCalTask)
-		depNames = append(depNames, "FetchTradeCal")
-		addedTaskNames["FetchTradeCal"] = true
-	} else {
-		log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过 FetchTradeCal（由本地数据/后续回退逻辑提供）")
+	// 始终创建：implicitCommonDataAPIs 保证优先从 DuckDB 短路读取（毫秒级），不会超时
+	fetchTradeCalTask, err := builder.NewTaskBuilder("FetchTradeCal", "获取交易日历", b.registry).
+		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
+			"api_name": "trade_cal",
+			"params":   map[string]interface{}{},
+		})).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithCompensationFunction("CompensateSyncData").
+		Build()
+	if err != nil {
+		return nil, err
 	}
+	tasks = append(tasks, fetchTradeCalTask)
+	depNames = append(depNames, "FetchTradeCal")
+	addedTaskNames["FetchTradeCal"] = true
 
 	// Task: 获取股票基础信息（含上市 L 与退市 D，便于数据质量按 delist_date 算有效区间）
-	if shouldAddFetchStockBasic {
-		fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
-			WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
-				"api_name": "stock_basic",
-				"params": map[string]interface{}{
-					"list_status": "L,D",
-					"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
-				},
-			})).
-			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-			WithCompensationFunction("CompensateSyncData").
-			Build()
-		if err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, fetchStockBasicTask)
-		depNames = append(depNames, "FetchStockBasic")
-		addedTaskNames["FetchStockBasic"] = true
-	} else {
-		log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过 FetchStockBasic（由本地数据/后续回退逻辑提供）")
+	// 始终创建：implicitCommonDataAPIs 保证优先从 DuckDB 短路读取（毫秒级），不会超时
+	fetchStockBasicTask, err := builder.NewTaskBuilder("FetchStockBasic", "获取股票基础信息", b.registry).
+		WithJobFunction("SyncAPIData", mergeParams(baseParams, map[string]interface{}{
+			"api_name": "stock_basic",
+			"params": map[string]interface{}{
+				"list_status": "L,D",
+				"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
+			},
+		})).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithCompensationFunction("CompensateSyncData").
+		Build()
+	if err != nil {
+		return nil, err
 	}
+	tasks = append(tasks, fetchStockBasicTask)
+	depNames = append(depNames, "FetchStockBasic")
+	addedTaskNames["FetchStockBasic"] = true
 
 	// Task: 获取指数基础信息（多市场：SSE/SZSE/CSI/SW/OTH，条件添加）
 	// 仅当待同步 API 列表中存在依赖 FetchIndexBasic 的 API 时才添加
