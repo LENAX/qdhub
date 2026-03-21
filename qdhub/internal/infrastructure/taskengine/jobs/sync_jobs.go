@@ -96,7 +96,7 @@ func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 		case string:
 			if err := json.Unmarshal([]byte(p), &params); err != nil {
 				log.Printf("⚠️ [SyncAPIData] API=%s, params is string but not JSON: %s, trying to parse Go map format", apiName, p)
-				params = parseGoMapString(p)
+				params = ParseGoMapString(p)
 			}
 			log.Printf("🔍 [SyncAPIData] API=%s, parsed params (from string)=%v", apiName, params)
 		default:
@@ -570,8 +570,10 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - upstream_task: string - 上游任务名称（可选，用于明确指定从哪个任务获取参数列表）
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
-//   - max_sub_tasks: int - 最大子任务数量（0=不限制）
-//   - start_date: string - 日期范围开始（YYYYMMDD），用于过滤交易日
+//   - max_sub_tasks: int - 最大子任务数量（0=不限制）；stk_mins 窗口模式下约束生成的子任务总数（windows×codes）
+//   - datetime_range_upstream: string - 可选，上游 GenerateDatetimeRange 任务名；与 api_name=stk_mins 联用
+//   - window_field: string - 上游结果中的窗口列表字段，默认 "windows"
+//   - start_date: string - 日期范围开始（YYYYMMDD），用于过滤交易日；非窗口模式或非 trade_date 时注入 API
 //   - end_date: string - 日期范围结束（YYYYMMDD），用于过滤交易日
 //
 // Output:
@@ -592,6 +594,12 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	token := tc.GetParamString("token")
 	targetDBPath := tc.GetParamString("target_db_path")
 	maxSubTasks, _ := tc.GetParamInt("max_sub_tasks")
+	datetimeRangeUpstream := strings.TrimSpace(tc.GetParamString("datetime_range_upstream"))
+	windowField := tc.GetParamString("window_field")
+	if windowField == "" {
+		windowField = "windows"
+	}
+	windowMode := datetimeRangeUpstream != "" && apiName == "stk_mins"
 
 	// 获取 Engine（仅用于 taskRegistry）
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -653,79 +661,147 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 
-	// 应用数量限制
-	if maxSubTasks > 0 && len(paramValues) > maxSubTasks {
+	// 非 stk_mins 窗口模式：仍按参数列表长度截断；窗口模式下 max_sub_tasks 约束 windows×codes 总数
+	if !windowMode && maxSubTasks > 0 && len(paramValues) > maxSubTasks {
 		logrus.Printf("📡 [GenerateDataSyncSubTasks] 限制子任务数量从 %d 到 %d", len(paramValues), maxSubTasks)
 		paramValues = paramValues[:maxSubTasks]
 	}
 
-	logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
-
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
 
-	// 先收集所有子任务，再通过 AtomicAddSubTasks 一次性提交给 instance manager
-	subTasks := make([]types.Task, 0, len(paramValues))
+	var subTasks []types.Task
 	var subTaskInfos []map[string]interface{}
-	for _, paramValue := range paramValues {
-		subTaskName := fmt.Sprintf("Sync_%s_%s", apiName, paramValue)
 
-		// 构建子任务参数
-		subTaskParams := map[string]interface{}{
-			"data_source_name": dataSourceName,
-			"api_name":         apiName,
-			"token":            token,
-			"target_db_path":   targetDBPath,
-			"sync_batch_id":    workflowInstanceID, // 使用工作流实例 ID 作为批次 ID
-			"params": map[string]interface{}{
-				paramKey: paramValue,
-			},
+	if windowMode {
+		windows := ExtractTimeWindowsFromUpstream(tc, datetimeRangeUpstream, windowField)
+		if len(windows) == 0 {
+			logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 上游 %s 未提供时间窗口 (field=%s)", datetimeRangeUpstream, windowField)
+			return map[string]interface{}{
+				"status":    "no_data",
+				"generated": 0,
+				"message":   fmt.Sprintf("上游任务 %s 无 windows，跳过子任务生成", datetimeRangeUpstream),
+			}, nil
 		}
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] stk_mins 窗口模式: %d 个时间窗 × %d 个 %s (max_sub_tasks=%d)",
+			len(windows), len(paramValues), paramKey, maxSubTasks)
 
-		// 仅当按 ts_code 等非日期拆分子任务时，将 start_date/end_date 传给 API（用于日期范围查询）。
-		// 按 trade_date 拆分的 API（如 adj_factor、daily）每个子任务只查单日，传 start_date/end_date 会导致
-		// Tushare 同时收到 trade_date 与日期范围，可能返回 0 条或行为异常，故不传。
-		paramsMap := subTaskParams["params"].(map[string]interface{})
-		if apiName == "stk_mins" {
-			if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
-				paramsMap["freq"] = "1min"
+		subTasks = make([]types.Task, 0, len(windows)*len(paramValues))
+		generated := 0
+	windowLoop:
+		for wi, w := range windows {
+			apiStart, apiEnd := StkMinsAPIRangeFromHalfOpenWindow(w.Start, w.End)
+			if apiStart == "" || apiEnd == "" {
+				logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 跳过无效窗口 wi=%d start=%q end=%q", wi, w.Start, w.End)
+				continue
+			}
+			for _, paramValue := range paramValues {
+				if maxSubTasks > 0 && generated >= maxSubTasks {
+					logrus.Printf("📡 [GenerateDataSyncSubTasks] 达到 max_sub_tasks=%d，停止生成（顺序：按窗口再按 %s）", maxSubTasks, paramKey)
+					break windowLoop
+				}
+				subTaskName := fmt.Sprintf("Sync_%s_w%d_%s", apiName, wi, paramValue)
+				subTaskParams := map[string]interface{}{
+					"data_source_name": dataSourceName,
+					"api_name":         apiName,
+					"token":            token,
+					"target_db_path":   targetDBPath,
+					"sync_batch_id":    workflowInstanceID,
+					"params": map[string]interface{}{
+						paramKey:    paramValue,
+						"freq":      "1min",
+						"start_date": apiStart,
+						"end_date":   apiEnd,
+					},
+				}
+				paramsMap := subTaskParams["params"].(map[string]interface{})
+				if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
+					paramsMap["freq"] = "1min"
+				}
+
+				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s 窗%d %s~%s", apiName, paramKey, paramValue, wi, apiStart, apiEnd), taskRegistry).
+					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+					WithCompensationFunction("CompensateSyncData").
+					Build()
+				if err != nil {
+					logrus.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+					continue
+				}
+				subTasks = append(subTasks, subTask)
+				subTaskInfos = append(subTaskInfos, map[string]interface{}{
+					"name":       subTaskName,
+					"api_name":   apiName,
+					"param_key":  paramKey,
+					paramKey:     paramValue,
+					"window_idx": wi,
+					"start_date": apiStart,
+					"end_date":   apiEnd,
+				})
+				generated++
 			}
 		}
-		if paramKey != "trade_date" {
-			if sd := tc.GetParamString("start_date"); sd != "" {
-				if apiName == "stk_mins" {
-					paramsMap["start_date"] = normalizeDateTimeToStkMinsFormat(sd, "09:30:00")
-				} else {
-					paramsMap["start_date"] = sd
+
+	} else {
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
+		subTasks = make([]types.Task, 0, len(paramValues))
+		for _, paramValue := range paramValues {
+			subTaskName := fmt.Sprintf("Sync_%s_%s", apiName, paramValue)
+
+			subTaskParams := map[string]interface{}{
+				"data_source_name": dataSourceName,
+				"api_name":         apiName,
+				"token":            token,
+				"target_db_path":   targetDBPath,
+				"sync_batch_id":    workflowInstanceID,
+				"params": map[string]interface{}{
+					paramKey: paramValue,
+				},
+			}
+
+			paramsMap := subTaskParams["params"].(map[string]interface{})
+			if apiName == "stk_mins" {
+				if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
+					paramsMap["freq"] = "1min"
 				}
-				if ed := tc.GetParamString("end_date"); ed != "" {
+			}
+			if paramKey != "trade_date" {
+				if sd := tc.GetParamString("start_date"); sd != "" {
 					if apiName == "stk_mins" {
-						paramsMap["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
+						paramsMap["start_date"] = normalizeDateTimeToStkMinsFormat(sd, "09:30:00")
 					} else {
-						paramsMap["end_date"] = ed
+						paramsMap["start_date"] = sd
+					}
+					if ed := tc.GetParamString("end_date"); ed != "" {
+						if apiName == "stk_mins" {
+							paramsMap["end_date"] = normalizeDateTimeToStkMinsFormat(ed, "15:00:00")
+						} else {
+							paramsMap["end_date"] = ed
+						}
 					}
 				}
 			}
-		}
 
-		subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s", apiName, paramKey, paramValue), taskRegistry).
-			WithJobFunction("SyncAPIData", subTaskParams).
-			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
-			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
-			WithCompensationFunction("CompensateSyncData"). // SAGA 补偿
-			Build()
-		if err != nil {
-			logrus.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
-			continue
-		}
+			subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s", apiName, paramKey, paramValue), taskRegistry).
+				WithJobFunction("SyncAPIData", subTaskParams).
+				WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+				WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+				WithCompensationFunction("CompensateSyncData").
+				Build()
+			if err != nil {
+				logrus.Printf("❌ [GenerateDataSyncSubTasks] 创建子任务失败: %s, error=%v", subTaskName, err)
+				continue
+			}
 
-		subTasks = append(subTasks, subTask)
-		subTaskInfos = append(subTaskInfos, map[string]interface{}{
-			"name":      subTaskName,
-			"api_name":  apiName,
-			"param_key": paramKey,
-			paramKey:    paramValue,
-		})
+			subTasks = append(subTasks, subTask)
+			subTaskInfos = append(subTaskInfos, map[string]interface{}{
+				"name":      subTaskName,
+				"api_name":  apiName,
+				"param_key": paramKey,
+				paramKey:    paramValue,
+			})
+		}
 	}
 
 	if len(subTasks) == 0 {
@@ -2404,30 +2480,35 @@ func convertToStringSlice(raw interface{}) []string {
 	return nil
 }
 
-// parseGoMapString 解析 Go fmt.Sprintf 格式的 map 字符串
+// goMapPrintedKeyColon 匹配 Go map 打印形态中的「键:」（键为常见标识符），用于切分键值对。
+// 不能用空白分割：值里常含空格（如 "2006-01-02 15:04:05"），否则会拆出 "15:00:00" 并被误解析为键 "15"。
+var goMapPrintedKeyColon = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*:`)
+
+// ParseGoMapString 解析 Go fmt.Sprintf 格式的 map 字符串（如 task 参数被序列化为 %v 时）。
 // 例如: "map[trade_date:20260121]" -> map[string]interface{}{"trade_date": "20260121"}
-// 例如: "map[end_date:20260121 start_date:20260114]" -> map[string]interface{}{"end_date": "20260121", "start_date": "20260114"}
-func parseGoMapString(s string) map[string]interface{} {
+// 例如: "map[end_date:2025-11-30 15:00:00 ts_code:1]" -> end_date 值为整段含空格字符串
+func ParseGoMapString(s string) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	// 移除 "map[" 前缀和 "]" 后缀
 	s = strings.TrimPrefix(s, "map[")
 	s = strings.TrimSuffix(s, "]")
-
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return result
 	}
 
-	// 按空格分割键值对
-	pairs := strings.Fields(s)
-	for _, pair := range pairs {
-		// 按第一个 ":" 分割键和值
-		idx := strings.Index(pair, ":")
-		if idx > 0 {
-			key := pair[:idx]
-			value := pair[idx+1:]
-			result[key] = value
+	locs := goMapPrintedKeyColon.FindAllStringIndex(s, -1)
+	for i, loc := range locs {
+		token := s[loc[0]:loc[1]]
+		key := strings.TrimSuffix(token, ":")
+		valStart := loc[1]
+		var valEnd int
+		if i+1 < len(locs) {
+			valEnd = locs[i+1][0]
+		} else {
+			valEnd = len(s)
 		}
+		result[key] = strings.TrimSpace(s[valStart:valEnd])
 	}
 
 	return result
@@ -2486,6 +2567,96 @@ func normalizeDateTimeToStkMinsFormat(s, defaultTime string) string {
 		}
 	}
 	return ""
+}
+
+// StkMinsGenerateDatetimeRangeBounds 将工作流传入的 start_date/end_date 转为 GenerateDatetimeRange 的起止时刻：
+// 纯日期（字符串中无空格，如 20190101）时按常用会话边界补全为当日 09:30 与当日 15:00。
+func StkMinsGenerateDatetimeRangeBounds(startRaw, endRaw string) (start string, end string, err error) {
+	startRaw = strings.TrimSpace(startRaw)
+	endRaw = strings.TrimSpace(endRaw)
+	if startRaw == "" || endRaw == "" {
+		return "", "", fmt.Errorf("start and end are required for stk_mins datetime range")
+	}
+	s, err := parseFlexibleDateTime(startRaw)
+	if err != nil {
+		return "", "", fmt.Errorf("parse start: %w", err)
+	}
+	e, err := parseFlexibleDateTime(endRaw)
+	if err != nil {
+		return "", "", fmt.Errorf("parse end: %w", err)
+	}
+	if !strings.Contains(startRaw, " ") {
+		s = time.Date(s.Year(), s.Month(), s.Day(), 9, 30, 0, 0, s.Location())
+	}
+	if !strings.Contains(endRaw, " ") {
+		e = time.Date(e.Year(), e.Month(), e.Day(), 15, 0, 0, 0, e.Location())
+	}
+	return s.Format("2006-01-02 15:04:05"), e.Format("2006-01-02 15:04:05"), nil
+}
+
+// StkMinsGenerateDatetimeRangeStepSpan 返回用于 30D 切窗的半开时间轴 [start, end)：
+// start 为首个日历日 00:00:00，end 为结束日历日的次日 00:00:00，与 StkMinsGenerateDatetimeRangeBounds 的会话边界日期一致。
+func StkMinsGenerateDatetimeRangeStepSpan(startRaw, endRaw string) (startStr, endStr string, err error) {
+	sH, eH, err := StkMinsGenerateDatetimeRangeBounds(startRaw, endRaw)
+	if err != nil {
+		return "", "", err
+	}
+	tS, err := parseFlexibleDateTime(sH)
+	if err != nil {
+		return "", "", fmt.Errorf("parse bounded start: %w", err)
+	}
+	tE, err := parseFlexibleDateTime(eH)
+	if err != nil {
+		return "", "", fmt.Errorf("parse bounded end: %w", err)
+	}
+	rs := time.Date(tS.Year(), tS.Month(), tS.Day(), 0, 0, 0, 0, tS.Location())
+	re := time.Date(tE.Year(), tE.Month(), tE.Day(), 0, 0, 0, 0, tE.Location()).AddDate(0, 0, 1)
+	return rs.Format("2006-01-02 15:04:05"), re.Format("2006-01-02 15:04:05"), nil
+}
+
+// StkMinsAPIRangeFromHalfOpenWindow 将 GenerateDatetimeRange 产出的半开区间 [start,end) 转为 stk_mins API 的闭区间起止（按自然日会话 09:30~15:00）。
+func StkMinsAPIRangeFromHalfOpenWindow(windowStart, windowEnd string) (startOut, endOut string) {
+	ws, err := parseFlexibleDateTime(strings.TrimSpace(windowStart))
+	if err != nil {
+		return normalizeDateTimeToStkMinsFormat(windowStart, "09:30:00"), normalizeDateTimeToStkMinsFormat(windowEnd, "15:00:00")
+	}
+	we, err := parseFlexibleDateTime(strings.TrimSpace(windowEnd))
+	if err != nil {
+		return normalizeDateTimeToStkMinsFormat(windowStart, "09:30:00"), normalizeDateTimeToStkMinsFormat(windowEnd, "15:00:00")
+	}
+	startOut = time.Date(ws.Year(), ws.Month(), ws.Day(), 9, 30, 0, 0, ws.Location()).Format("2006-01-02 15:04:05")
+	if !we.After(ws) {
+		return startOut, startOut
+	}
+	last := we.Add(-time.Nanosecond)
+	endOut = time.Date(last.Year(), last.Month(), last.Day(), 15, 0, 0, 0, last.Location()).Format("2006-01-02 15:04:05")
+	if endOut < startOut {
+		endOut = startOut
+	}
+	return startOut, endOut
+}
+
+// ExtractTimeWindowsFromUpstream 从上游任务结果中解析时间窗口列表（extracted_data 或根字段）。
+func ExtractTimeWindowsFromUpstream(tc *task.TaskContext, upstreamTask, windowField string) []struct{ Start, End string } {
+	if windowField == "" {
+		windowField = "windows"
+	}
+	upstreamResult := tc.GetUpstreamResult(upstreamTask)
+	if upstreamResult == nil {
+		return nil
+	}
+	var windowItems interface{}
+	if extracted, ok := upstreamResult["extracted_data"].(map[string]interface{}); ok {
+		if v, ok := extracted[windowField]; ok {
+			windowItems = v
+		}
+	}
+	if windowItems == nil {
+		if v, ok := upstreamResult[windowField]; ok {
+			windowItems = v
+		}
+	}
+	return convertToTimeWindowSlice(windowItems)
 }
 
 // convertToTimeWindowSlice 将接口类型转换为时间窗口切片，元素为 map[string]string{"start": ..., "end": ...}

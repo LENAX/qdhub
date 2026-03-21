@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"qdhub/internal/domain/metadata"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
+	"qdhub/internal/infrastructure/taskengine/jobs"
 
 	"github.com/LENAX/task-engine/pkg/core/builder"
 	"github.com/LENAX/task-engine/pkg/core/task"
@@ -810,6 +812,24 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			}
 
 			config = filterMissingBaseDependencies(config, addedTaskNames)
+			if config.APIName == "stk_mins" && isStkMinsTemplateAPIConfig(config) {
+				upstreamTask := config.UpstreamTask
+				if upstreamTask == "" {
+					upstreamTask = "FetchStockBasic"
+				}
+				paramKey := config.ParamKey
+				if paramKey == "" {
+					paramKey = "ts_code"
+				}
+				stkTasks, depName, errStk := b.buildStkMinsChunkedSyncTasks(baseParams, dateTimeParams, config.ExtraParams, upstreamTask, paramKey, params.MaxStocks)
+				if errStk != nil {
+					return nil, errStk
+				}
+				tasks = append(tasks, stkTasks...)
+				addedTaskNames["Sync_"+config.APIName] = true
+				depNames = append(depNames, depName)
+				continue
+			}
 			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
 			if err != nil {
 				return nil, err
@@ -1082,6 +1102,19 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					taskParams["upstream_param_key"] = "ts_code"
 				}
 
+				if apiName == "stk_mins" {
+					stkTasks, depName, errStk := b.buildStkMinsChunkedSyncTasks(baseParams, dateTimeParams, nil, upstreamTask, apiParamKey, params.MaxStocks)
+					if errStk != nil {
+						log.Printf("❌ [BuildWorkflow] 构建 stk_mins 分片任务失败: %v", errStk)
+						return nil, errStk
+					}
+					tasks = append(tasks, stkTasks...)
+					addedTaskNames[taskName] = true
+					depNames = append(depNames, depName)
+					log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s（30D 时间窗）", apiName, taskName)
+					continue
+				}
+
 				taskDesc := "同步" + apiName + "数据（按代码）"
 				syncTask, err = builder.NewTaskBuilder(taskName, taskDesc, b.registry).
 					WithJobFunction("GenerateDataSyncSubTasks", taskParams).
@@ -1213,6 +1246,105 @@ func (b *BatchDataSyncWorkflowBuilder) buildTimeWindowTasks(
 	}
 
 	log.Printf("✅ [BuildWorkflow] 任务构建成功（时间窗口 + 模板）: API=%s, TaskName=%s, Freq=%s", apiName, taskName, strategy.TimeWindow.Freq)
+	return []*task.Task{rangeTask, templateTask}, taskName, nil
+}
+
+func isStkMinsTemplateAPIConfig(config APISyncConfig) bool {
+	if strings.EqualFold(strings.TrimSpace(config.SyncMode), "template") {
+		return true
+	}
+	return strings.TrimSpace(config.ParamKey) != ""
+}
+
+func stkMinsDateRangeFromMap(dateTimeParams map[string]interface{}) (startRaw, endRaw string, err error) {
+	if dateTimeParams == nil {
+		return "", "", fmt.Errorf("dateTimeParams is nil")
+	}
+	s, ok := stringParamFromMap(dateTimeParams, "start_date")
+	if !ok {
+		return "", "", fmt.Errorf("start_date is required for stk_mins chunked sync")
+	}
+	e, ok := stringParamFromMap(dateTimeParams, "end_date")
+	if !ok {
+		return "", "", fmt.Errorf("end_date is required for stk_mins chunked sync")
+	}
+	return s, e, nil
+}
+
+func stringParamFromMap(m map[string]interface{}, key string) (string, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return "", false
+	}
+	switch s := v.(type) {
+	case string:
+		s = strings.TrimSpace(s)
+		return s, s != ""
+	default:
+		out := strings.TrimSpace(fmt.Sprintf("%v", v))
+		return out, out != ""
+	}
+}
+
+// buildStkMinsChunkedSyncTasks 构建 GenerateDatetimeRange(30D 窗口) + GenerateDataSyncSubTasks（窗口×ts_code）任务链。
+func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
+	baseParams, dateTimeParams map[string]interface{},
+	extraParams map[string]interface{},
+	upstreamTask, paramKey string,
+	maxStocks int,
+) ([]*task.Task, string, error) {
+	startRaw, endRaw, err := stkMinsDateRangeFromMap(dateTimeParams)
+	if err != nil {
+		return nil, "", err
+	}
+	rangeStart, rangeEnd, err := jobs.StkMinsGenerateDatetimeRangeStepSpan(startRaw, endRaw)
+	if err != nil {
+		return nil, "", fmt.Errorf("stk_mins datetime span: %w", err)
+	}
+	const rangeTaskName = "Generate_stk_mins_TimeWindow"
+	taskName := "Sync_stk_mins"
+	rangeParams := map[string]interface{}{
+		"start":      rangeStart,
+		"end":        rangeEnd,
+		"freq":       "30D",
+		"inclusive":  "both",
+		"as_windows": true,
+	}
+	rangeTask, err := builder.NewTaskBuilder(rangeTaskName, "生成 stk_mins 30 天时间窗", b.registry).
+		WithJobFunction("GenerateDatetimeRange", rangeParams).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build stk_mins range task: %w", err)
+	}
+	templateParams := mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
+		"api_name":                "stk_mins",
+		"param_key":               paramKey,
+		"upstream_task":           upstreamTask,
+		"max_sub_tasks":           maxStocks,
+		"datetime_range_upstream": rangeTaskName,
+		"window_field":            "windows",
+	})
+	if paramKey != "ts_code" {
+		templateParams["upstream_param_key"] = "ts_code"
+	}
+	if len(extraParams) > 0 {
+		templateParams = mergeParams(templateParams, extraParams)
+	}
+	templateTask, err := builder.NewTaskBuilder(taskName, "同步 stk_mins 数据（按代码与时间窗）", b.registry).
+		WithJobFunction("GenerateDataSyncSubTasks", templateParams).
+		WithDependency(rangeTaskName).
+		WithDependency(upstreamTask).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithTemplate(true).
+		WithCompensationFunction("CompensateSyncData").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build stk_mins template: %w", err)
+	}
+	log.Printf("✅ [BuildWorkflow] stk_mins: 已构建 30D 时间窗 + 按代码模板")
 	return []*task.Task{rangeTask, templateTask}, taskName, nil
 }
 
@@ -1525,6 +1657,30 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 				}
 				tasks = append(tasks, twTasks...)
 				depNames = append(depNames, twDepName)
+				continue
+			}
+
+			if apiName == "stk_mins" && config.SyncMode == sync.TaskSyncModeTemplate {
+				var paramKey, upstreamTask string
+				for _, pm := range config.ParamMappings {
+					if pm.IsList {
+						paramKey = pm.ParamName
+						upstreamTask = pm.SourceTask
+						break
+					}
+				}
+				if paramKey == "" {
+					paramKey = "ts_code"
+				}
+				if upstreamTask == "" {
+					upstreamTask = "FetchStockBasic"
+				}
+				stkTasks, depName, errStk := b.buildStkMinsChunkedSyncTasks(baseParams, dateTimeParams, nil, upstreamTask, paramKey, maxStocks)
+				if errStk != nil {
+					return nil, fmt.Errorf("build stk_mins for %s: %w", apiName, errStk)
+				}
+				tasks = append(tasks, stkTasks...)
+				depNames = append(depNames, depName)
 				continue
 			}
 
