@@ -412,6 +412,13 @@ type BatchDataSyncParams struct {
 	APIConfigs     []APISyncConfig // API 同步配置（高级模式，优先使用）
 	MaxStocks      int             // 最大股票数量（用于限制子任务，0=不限制）
 	CommonDataAPIs []string        // 公共数据 API 名列表（SyncAPIDataJob 走 Cache→DuckDB→API）
+	// SubtaskBatchSize：GenerateDataSyncSubTasks / GenerateTimeWindowSubTasks 每批 AtomicAdd 子任务数（0=使用 Job 默认 200）
+	SubtaskBatchSize int
+	// SyncMemHighMB / SyncMemCriticalMB：堆占用阈值（MB），超过则缩小批次并批间暂停（0=使用 Job 内默认或与 WriteQueue 对齐）
+	SyncMemHighMB     int
+	SyncMemCriticalMB int
+	// StkMinsWindowFreq：stk_mins 分片时 GenerateDatetimeRange 的步长，如 "30D"、"14D"、"7D"；空则默认 30D
+	StkMinsWindowFreq string
 }
 
 // Validate 验证参数
@@ -530,6 +537,22 @@ func (b *BatchDataSyncWorkflowBuilder) checkDependency(params BatchDataSyncParam
 func (b *BatchDataSyncWorkflowBuilder) WithParams(params BatchDataSyncParams) *BatchDataSyncWorkflowBuilder {
 	b.params = params
 	return b
+}
+
+// mergeSubtaskMemoryParams 将内存治理相关参数注入模板任务（与 jobs 包约定键名一致）。
+func (b *BatchDataSyncWorkflowBuilder) mergeSubtaskMemoryParams(dst map[string]interface{}) {
+	if dst == nil {
+		return
+	}
+	if b.params.SubtaskBatchSize > 0 {
+		dst["subtask_batch_size"] = b.params.SubtaskBatchSize
+	}
+	if b.params.SyncMemHighMB > 0 {
+		dst["sync_mem_high_mb"] = b.params.SyncMemHighMB
+	}
+	if b.params.SyncMemCriticalMB > 0 {
+		dst["sync_mem_critical_mb"] = b.params.SyncMemCriticalMB
+	}
 }
 
 // WithDataSource 设置数据源和 Token
@@ -928,6 +951,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 							"date_param_key": "date",
 							"max_sub_tasks":  params.MaxStocks,
 						})
+						b.mergeSubtaskMemoryParams(templateParams)
 
 						templateTask, errTpl := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按自然日逐日）", b.registry).
 							WithJobFunction("GenerateTimeWindowSubTasks", templateParams).
@@ -966,8 +990,10 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					}
 					log.Printf("🔧 [BuildWorkflow] API=%s, SupportDateRange=false, 使用模板任务遍历交易日, param_key=%s", apiName, paramKey)
 
+					mergedTradeTpl := mergeParams(baseParams, taskParams)
+					b.mergeSubtaskMemoryParams(mergedTradeTpl)
 					syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按交易日）", b.registry).
-						WithJobFunction("GenerateDataSyncSubTasks", mergeParams(baseParams, taskParams)).
+						WithJobFunction("GenerateDataSyncSubTasks", mergedTradeTpl).
 						WithDependency("FetchTradeCal"). // 依赖交易日历
 						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 						WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -1101,6 +1127,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				if apiParamKey != "ts_code" {
 					taskParams["upstream_param_key"] = "ts_code"
 				}
+				b.mergeSubtaskMemoryParams(taskParams)
 
 				if apiName == "stk_mins" {
 					stkTasks, depName, errStk := b.buildStkMinsChunkedSyncTasks(baseParams, dateTimeParams, nil, upstreamTask, apiParamKey, params.MaxStocks)
@@ -1111,7 +1138,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					tasks = append(tasks, stkTasks...)
 					addedTaskNames[taskName] = true
 					depNames = append(depNames, depName)
-					log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s（30D 时间窗）", apiName, taskName)
+					log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s（stk_mins 分片时间窗）", apiName, taskName)
 					continue
 				}
 
@@ -1126,13 +1153,15 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 			default:
 				// 其他未知策略：使用 template 模式，按股票代码生成子任务
+				defTpl := mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
+					"api_name":      apiName,
+					"param_key":     "ts_code",
+					"upstream_task": "FetchStockBasic",
+					"max_sub_tasks": params.MaxStocks,
+				})
+				b.mergeSubtaskMemoryParams(defTpl)
 				syncTask, err = builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（按股票）", b.registry).
-					WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
-						"api_name":      apiName,
-						"param_key":     "ts_code",
-						"upstream_task": "FetchStockBasic",
-						"max_sub_tasks": params.MaxStocks,
-					})).
+					WithJobFunction("GenerateDataSyncSubTasks", defTpl).
 					WithDependency("FetchStockBasic"). // 依赖股票基础信息以获取 ts_codes
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -1232,6 +1261,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildTimeWindowTasks(
 	if strategy.TimeWindow.DateParamKey != "" {
 		templateParams["date_param_key"] = strategy.TimeWindow.DateParamKey
 	}
+	b.mergeSubtaskMemoryParams(templateParams)
 
 	templateTask, err := builder.NewTaskBuilder(taskName, "同步"+apiName+"数据（时间窗口模板）", b.registry).
 		WithJobFunction("GenerateTimeWindowSubTasks", templateParams).
@@ -1286,7 +1316,7 @@ func stringParamFromMap(m map[string]interface{}, key string) (string, bool) {
 	}
 }
 
-// buildStkMinsChunkedSyncTasks 构建 GenerateDatetimeRange(30D 窗口) + GenerateDataSyncSubTasks（窗口×ts_code）任务链。
+// buildStkMinsChunkedSyncTasks 构建 GenerateDatetimeRange（默认 30D 窗口，可由 StkMinsWindowFreq 改为 14D/7D 等）+ GenerateDataSyncSubTasks（窗口×ts_code）任务链。
 func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
 	baseParams, dateTimeParams map[string]interface{},
 	extraParams map[string]interface{},
@@ -1303,14 +1333,18 @@ func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
 	}
 	const rangeTaskName = "Generate_stk_mins_TimeWindow"
 	taskName := "Sync_stk_mins"
+	winFreq := strings.TrimSpace(b.params.StkMinsWindowFreq)
+	if winFreq == "" {
+		winFreq = "30D"
+	}
 	rangeParams := map[string]interface{}{
 		"start":      rangeStart,
 		"end":        rangeEnd,
-		"freq":       "30D",
+		"freq":       winFreq,
 		"inclusive":  "both",
 		"as_windows": true,
 	}
-	rangeTask, err := builder.NewTaskBuilder(rangeTaskName, "生成 stk_mins 30 天时间窗", b.registry).
+	rangeTask, err := builder.NewTaskBuilder(rangeTaskName, "生成 stk_mins "+winFreq+" 时间窗", b.registry).
 		WithJobFunction("GenerateDatetimeRange", rangeParams).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -1332,6 +1366,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
 	if len(extraParams) > 0 {
 		templateParams = mergeParams(templateParams, extraParams)
 	}
+	b.mergeSubtaskMemoryParams(templateParams)
 	templateTask, err := builder.NewTaskBuilder(taskName, "同步 stk_mins 数据（按代码与时间窗）", b.registry).
 		WithJobFunction("GenerateDataSyncSubTasks", templateParams).
 		WithDependency(rangeTaskName).
@@ -1344,7 +1379,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
 	if err != nil {
 		return nil, "", fmt.Errorf("build stk_mins template: %w", err)
 	}
-	log.Printf("✅ [BuildWorkflow] stk_mins: 已构建 30D 时间窗 + 按代码模板")
+	log.Printf("✅ [BuildWorkflow] stk_mins: 已构建 %s 时间窗 + 按代码模板", winFreq)
 	return []*task.Task{rangeTask, templateTask}, taskName, nil
 }
 
@@ -1392,6 +1427,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 		if config.ExtraParams != nil {
 			templateParams = mergeParams(templateParams, config.ExtraParams)
 		}
+		b.mergeSubtaskMemoryParams(templateParams)
 
 		taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
 			WithJobFunction("GenerateDataSyncSubTasks", templateParams).
@@ -1766,13 +1802,16 @@ func (b *BatchDataSyncWorkflowBuilder) buildTemplateTask(
 		upstreamTask = "FetchStockBasic"
 	}
 
+	cfgTpl := mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
+		"api_name":      config.APIName,
+		"param_key":     paramKey,
+		"upstream_task": upstreamTask,
+		"max_sub_tasks": maxStocks,
+	})
+	b.mergeSubtaskMemoryParams(cfgTpl)
+
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).
-		WithJobFunction("GenerateDataSyncSubTasks", mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
-			"api_name":      config.APIName,
-			"param_key":     paramKey,
-			"upstream_task": upstreamTask,
-			"max_sub_tasks": maxStocks,
-		})).
+		WithJobFunction("GenerateDataSyncSubTasks", cfgTpl).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		WithTemplate(true)

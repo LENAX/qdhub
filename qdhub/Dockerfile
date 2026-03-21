@@ -21,6 +21,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=qdhub-runtime-apt
     apt-get update && apt-get install -y --no-install-recommends ca-certificates wget tzdata && rm -rf /var/lib/apt/lists/*
 ENV TZ=Asia/Shanghai
 ENV QDHUB_ENV=production
+# 8GB 级生产机基线：heap 水位早于默认(4096/6144)触发子任务降档；GOMEMLIMIT 约束 Go 堆，DuckDB/cgo 仍可能额外占 RSS，需配合 compose mem_limit
+ENV GOMEMLIMIT=5GiB
+ENV QDHUB_SYNC_MEM_HIGH_MB=2048
+ENV QDHUB_SYNC_MEM_CRITICAL_MB=4096
+ENV QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS=100
+ENV QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS=400
 WORKDIR /app
 COPY --from=builder /qdhub .
 # Default config can be overridden by volume or env

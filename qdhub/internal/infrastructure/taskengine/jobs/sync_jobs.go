@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +29,147 @@ import (
 )
 
 const maxParamLogLen = 200
+
+const (
+	defaultSubtaskBatchSize = 200
+	minSubtaskBatchSize     = 10
+	// 与 quantdb WriteQueue 默认门槛大致对齐，用于子任务生成阶段的内存背压。
+	defaultSyncMemHighMB     = 4096
+	defaultSyncMemCriticalMB = 6144
+)
+
+type syncMemPressure int
+
+const (
+	syncMemNormal syncMemPressure = iota
+	syncMemHigh
+	syncMemCritical
+)
+
+type subtaskBatchSettings struct {
+	baseBatch            int
+	highMB, criticalMB   int
+	pauseHigh, pauseCrit time.Duration
+}
+
+func detectSyncMemPressure(highMB, criticalMB int) (syncMemPressure, int) {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	used := int(ms.Alloc / 1024 / 1024)
+	if criticalMB > 0 && used >= criticalMB {
+		return syncMemCritical, used
+	}
+	if highMB > 0 && used >= highMB {
+		return syncMemHigh, used
+	}
+	return syncMemNormal, used
+}
+
+func effectiveSubtaskBatchSize(base int, lvl syncMemPressure) int {
+	if base < minSubtaskBatchSize {
+		base = minSubtaskBatchSize
+	}
+	switch lvl {
+	case syncMemCritical:
+		n := base / 4
+		return max(minSubtaskBatchSize, n)
+	case syncMemHigh:
+		n := base / 2
+		return max(20, n)
+	default:
+		return base
+	}
+}
+
+func parseIntParamOrEnv(tc *task.TaskContext, paramKey, envKey string, def int) int {
+	if v, err := tc.GetParamInt(paramKey); err == nil && v > 0 {
+		return v
+	}
+	if s := strings.TrimSpace(os.Getenv(envKey)); s != "" {
+		var n int
+		if _, err := fmt.Sscanf(s, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func parseDurationMSParamOrEnv(tc *task.TaskContext, paramKey, envKey string, defMS int) time.Duration {
+	if v, err := tc.GetParamInt(paramKey); err == nil && v >= 0 {
+		return time.Duration(v) * time.Millisecond
+	}
+	if s := strings.TrimSpace(os.Getenv(envKey)); s != "" {
+		var n int
+		if _, err := fmt.Sscanf(s, "%d", &n); err == nil && n >= 0 {
+			return time.Duration(n) * time.Millisecond
+		}
+	}
+	return time.Duration(defMS) * time.Millisecond
+}
+
+func newSubtaskBatchSettings(tc *task.TaskContext) subtaskBatchSettings {
+	base := defaultSubtaskBatchSize
+	if v, err := tc.GetParamInt("subtask_batch_size"); err == nil && v >= minSubtaskBatchSize {
+		base = v
+	}
+	return subtaskBatchSettings{
+		baseBatch:  base,
+		highMB:     parseIntParamOrEnv(tc, "sync_mem_high_mb", "QDHUB_SYNC_MEM_HIGH_MB", defaultSyncMemHighMB),
+		criticalMB: parseIntParamOrEnv(tc, "sync_mem_critical_mb", "QDHUB_SYNC_MEM_CRITICAL_MB", defaultSyncMemCriticalMB),
+		pauseHigh:  parseDurationMSParamOrEnv(tc, "subtask_batch_pause_high_ms", "QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS", 50),
+		pauseCrit:  parseDurationMSParamOrEnv(tc, "subtask_batch_pause_critical_ms", "QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS", 250),
+	}
+}
+
+func (s subtaskBatchSettings) sleepAfterBatch(lvl syncMemPressure) {
+	switch lvl {
+	case syncMemCritical:
+		if s.pauseCrit > 0 {
+			time.Sleep(s.pauseCrit)
+		}
+	case syncMemHigh:
+		if s.pauseHigh > 0 {
+			time.Sleep(s.pauseHigh)
+		}
+	}
+}
+
+type subtaskBatchManager interface {
+	AtomicAddSubTasks(subTasks []types.Task, parentTaskID string) error
+}
+
+// flushSubtaskBatch 提交一批子任务并按内存档位暂停；返回可复用的空 batch 切片。
+func flushSubtaskBatch(ctx context.Context, mgr subtaskBatchManager, parentID string, batch []types.Task, settings subtaskBatchSettings, batchSeq *int, totalSubmitted *int, logJob string) ([]types.Task, error) {
+	if len(batch) == 0 {
+		return batch[:0], nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	lvl, usedMB := detectSyncMemPressure(settings.highMB, settings.criticalMB)
+	if err := mgr.AtomicAddSubTasks(batch, parentID); err != nil {
+		return nil, err
+	}
+	*batchSeq++
+	*totalSubmitted += len(batch)
+	logrus.Printf("✅ [%s] 提交子任务批次 seq=%d size=%d total_submitted=%d heap_alloc_mb~%d mem_level=%d",
+		logJob, *batchSeq, len(batch), *totalSubmitted, usedMB, int(lvl))
+	settings.sleepAfterBatch(lvl)
+	return batch[:0], nil
+}
+
+func maybeFlushSubtaskBatch(ctx context.Context, mgr subtaskBatchManager, parentID string, batch *[]types.Task, settings subtaskBatchSettings, batchSeq, totalSubmitted *int, logJob string) error {
+	lvl, _ := detectSyncMemPressure(settings.highMB, settings.criticalMB)
+	limit := effectiveSubtaskBatchSize(settings.baseBatch, lvl)
+	if len(*batch) < limit {
+		return nil
+	}
+	var err error
+	*batch, err = flushSubtaskBatch(ctx, mgr, parentID, *batch, settings, batchSeq, totalSubmitted, logJob)
+	return err
+}
 
 // implicitCommonDataAPIs 始终视为公共数据的 API：无论调用方是否配置 common_data_apis，
 // 这些基础参照表都优先从 DuckDB 读取（Cache → DuckDB → API），避免每次工作流都请求外部 API。
@@ -62,7 +205,10 @@ var implicitCommonDataAPIs = map[string]bool{
 //   - fields: []string - 返回的字段列表
 //   - sync_batch_id: string - 同步批次 ID
 func SyncAPIDataJob(tc *task.TaskContext) (interface{}, error) {
-	ctx := context.Background()
+	ctx := tc.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// 获取参数
 	dataSourceName := tc.GetParamString("data_source_name")
@@ -384,7 +530,10 @@ func buildSyncResultFromData(data []map[string]any, apiName, syncBatchID string)
 // 对每个迭代值调用一次 API，将所有结果合并后写入 DuckDB 同一张表，
 // 返回结构与 SyncAPIDataJob 一致（含 extracted_data）。
 func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
-	ctx := context.Background()
+	ctx := tc.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	dataSourceName := tc.GetParamString("data_source_name")
 	apiName := tc.GetParamString("api_name")
 	token := tc.GetParamString("token")
@@ -575,6 +724,9 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - window_field: string - 上游结果中的窗口列表字段，默认 "windows"
 //   - start_date: string - 日期范围开始（YYYYMMDD），用于过滤交易日；非窗口模式或非 trade_date 时注入 API
 //   - end_date: string - 日期范围结束（YYYYMMDD），用于过滤交易日
+//   - subtask_batch_size: int - 每批 AtomicAddSubTasks 的子任务数（默认 200，最小 10）
+//   - sync_mem_high_mb / sync_mem_critical_mb: int - 堆占用阈值（MB），超过则缩小批次并在批间暂停（可用环境变量 QDHUB_SYNC_MEM_HIGH_MB / QDHUB_SYNC_MEM_CRITICAL_MB）
+//   - subtask_batch_pause_high_ms / subtask_batch_pause_critical_ms: int - 批间暂停毫秒（环境变量 QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS / QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS）
 //
 // Output:
 //   - status: string - 操作状态
@@ -609,7 +761,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	eng := engineInterface.(*engine.Engine)
 	taskRegistry := eng.GetRegistry()
 
-	// 获取 InstanceManager（用于一次性 AtomicAddSubTasks）
+	// 获取 InstanceManager（用于分批 AtomicAddSubTasks，降低模板任务峰值内存）
 	type instanceManagerWithAtomic interface {
 		AtomicAddSubTasks(subTasks []types.Task, parentTaskID string) error
 	}
@@ -621,6 +773,14 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	if !ok {
 		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
 	}
+
+	ctx := tc.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	settings := newSubtaskBatchSettings(tc)
+	batchSeq := 0
+	totalSubmitted := 0
 
 	// 从上游任务提取参数值列表（使用 upstreamParamKey 作为提取键）
 	var paramValues []string
@@ -634,7 +794,11 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 	if len(paramValues) == 0 {
 		// 回退：当上游 Fetch* 被跳过时，尝试直接从本地 DuckDB 已有表读取参数列表
-		if vals, err := fallbackParamValuesFromTargetDB(tc, upstreamTask, upstreamParamKey, targetDBPath); err == nil && len(vals) > 0 {
+		fbCtx := tc.Context()
+		if fbCtx == nil {
+			fbCtx = context.Background()
+		}
+		if vals, err := fallbackParamValuesFromTargetDB(fbCtx, tc, upstreamTask, upstreamParamKey, targetDBPath); err == nil && len(vals) > 0 {
 			paramValues = vals
 			logrus.Printf("📥 [GenerateDataSyncSubTasks] 参数来源=duckdb_fallback, upstream=%s, key=%s, source_table=%s, source_column=%s, count=%d",
 				upstreamTask, upstreamParamKey, fallbackSourceTable(upstreamTask, upstreamParamKey), fallbackSourceColumn(upstreamTask, upstreamParamKey), len(paramValues))
@@ -670,7 +834,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
 
-	var subTasks []types.Task
+	subTasks := make([]types.Task, 0, settings.baseBatch)
 	var subTaskInfos []map[string]interface{}
 
 	if windowMode {
@@ -683,10 +847,9 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 				"message":   fmt.Sprintf("上游任务 %s 无 windows，跳过子任务生成", datetimeRangeUpstream),
 			}, nil
 		}
-		logrus.Printf("📡 [GenerateDataSyncSubTasks] stk_mins 窗口模式: %d 个时间窗 × %d 个 %s (max_sub_tasks=%d)",
-			len(windows), len(paramValues), paramKey, maxSubTasks)
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] stk_mins 窗口模式: %d 个时间窗 × %d 个 %s (max_sub_tasks=%d, base_batch=%d)",
+			len(windows), len(paramValues), paramKey, maxSubTasks, settings.baseBatch)
 
-		subTasks = make([]types.Task, 0, len(windows)*len(paramValues))
 		generated := 0
 	windowLoop:
 		for wi, w := range windows {
@@ -708,8 +871,8 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 					"target_db_path":   targetDBPath,
 					"sync_batch_id":    workflowInstanceID,
 					"params": map[string]interface{}{
-						paramKey:    paramValue,
-						"freq":      "1min",
+						paramKey:     paramValue,
+						"freq":       "1min",
 						"start_date": apiStart,
 						"end_date":   apiEnd,
 					},
@@ -740,12 +903,14 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 					"end_date":   apiEnd,
 				})
 				generated++
+				if err := maybeFlushSubtaskBatch(ctx, manager, parentTaskID, &subTasks, settings, &batchSeq, &totalSubmitted, "GenerateDataSyncSubTasks"); err != nil {
+					return nil, err
+				}
 			}
 		}
 
 	} else {
-		logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务", len(paramValues), paramKey)
-		subTasks = make([]types.Task, 0, len(paramValues))
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] 为 %d 个 %s 生成子任务 (base_batch=%d)", len(paramValues), paramKey, settings.baseBatch)
 		for _, paramValue := range paramValues {
 			subTaskName := fmt.Sprintf("Sync_%s_%s", apiName, paramValue)
 
@@ -801,10 +966,13 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 				"param_key": paramKey,
 				paramKey:    paramValue,
 			})
+			if err := maybeFlushSubtaskBatch(ctx, manager, parentTaskID, &subTasks, settings, &batchSeq, &totalSubmitted, "GenerateDataSyncSubTasks"); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	if len(subTasks) == 0 {
+	if totalSubmitted == 0 && len(subTaskInfos) == 0 {
 		logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 无有效子任务可提交")
 		return map[string]interface{}{
 			"status":    "success",
@@ -815,15 +983,19 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}, nil
 	}
 
-	if err := manager.AtomicAddSubTasks(subTasks, parentTaskID); err != nil {
-		return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+	if len(subTasks) > 0 {
+		var err error
+		subTasks, err = flushSubtaskBatch(ctx, manager, parentTaskID, subTasks, settings, &batchSeq, &totalSubmitted, "GenerateDataSyncSubTasks")
+		if err != nil {
+			return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+		}
 	}
-	generatedCount := len(subTasks)
-	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成并一次性提交 %d 个子任务", generatedCount)
+
+	logrus.Printf("✅ [GenerateDataSyncSubTasks] 共生成并分批提交 %d 个子任务 (batches=%d)", totalSubmitted, batchSeq)
 
 	return map[string]interface{}{
 		"status":    "success",
-		"generated": generatedCount,
+		"generated": totalSubmitted,
 		"api_name":  apiName,
 		"param_key": paramKey,
 		"sub_tasks": subTaskInfos,
@@ -834,11 +1006,13 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 // 目前支持：
 // - FetchStockBasic + ts_code  -> stock_basic.ts_code
 // - FetchTradeCal  + trade_date -> trade_cal.cal_date
-func fallbackParamValuesFromTargetDB(tc *task.TaskContext, upstreamTask, upstreamParamKey, targetDBPath string) ([]string, error) {
+func fallbackParamValuesFromTargetDB(ctx context.Context, tc *task.TaskContext, upstreamTask, upstreamParamKey, targetDBPath string) ([]string, error) {
 	if targetDBPath == "" {
 		return nil, fmt.Errorf("target_db_path is empty")
 	}
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
 	if err != nil {
 		return nil, err
@@ -1876,6 +2050,7 @@ func FlushTargetDBJob(tc *task.TaskContext) (interface{}, error) {
 //   - fixed_params: map[string]any - 额外固定参数（例如 fields），优先级高于运行时参数
 //   - date_param_key: string       - 若非空，则以日期参数模式运行：仅向该参数注入 YYYYMMDD，不注入 start_date/end_date
 //   - max_sub_tasks: int           - 最大子任务数量（0=不限制）
+//   - subtask_batch_size / sync_mem_* / subtask_batch_pause_*_ms：同 GenerateDataSyncSubTasksJob
 //
 // Output:
 //   - status: string
@@ -1937,6 +2112,14 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		return nil, fmt.Errorf("InstanceManager does not support AtomicAddSubTasks")
 	}
 
+	ctx := tc.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	settings := newSubtaskBatchSettings(tc)
+	batchSeq := 0
+	totalSubmitted := 0
+
 	// 从上游任务获取时间窗口列表
 	upstreamResult := tc.GetUpstreamResult(upstreamTask)
 	if upstreamResult == nil {
@@ -1984,12 +2167,14 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}
 	}
 	// time_window 是工作流调度配置，不应作为 API 请求参数
-	delete(fixedParams, "time_window")
+	if fixedParams != nil {
+		delete(fixedParams, "time_window")
+	}
 
 	parentTaskID := tc.TaskID
 	workflowInstanceID := tc.WorkflowInstanceID
 
-	subTasks := make([]types.Task, 0)
+	subTasks := make([]types.Task, 0, settings.baseBatch)
 	var subTaskInfos []map[string]interface{}
 	generated := 0
 
@@ -2050,6 +2235,9 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 					"date_yyyymmdd": dateStr,
 				})
 				generated++
+				if err := maybeFlushSubtaskBatch(ctx, manager, parentTaskID, &subTasks, settings, &batchSeq, &totalSubmitted, "GenerateTimeWindowSubTasks"); err != nil {
+					return nil, err
+				}
 				continue
 			}
 
@@ -2102,6 +2290,9 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 					"date_yyyymmdd": dateStr,
 				})
 				generated++
+				if err := maybeFlushSubtaskBatch(ctx, manager, parentTaskID, &subTasks, settings, &batchSeq, &totalSubmitted, "GenerateTimeWindowSubTasks"); err != nil {
+					return nil, err
+				}
 			}
 			if maxSubTasks > 0 && generated >= maxSubTasks {
 				break
@@ -2156,13 +2347,16 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 				"end_date":   w.End,
 			})
 			generated++
+			if err := maybeFlushSubtaskBatch(ctx, manager, parentTaskID, &subTasks, settings, &batchSeq, &totalSubmitted, "GenerateTimeWindowSubTasks"); err != nil {
+				return nil, err
+			}
 		}
 		if maxSubTasks > 0 && generated >= maxSubTasks {
 			break
 		}
 	}
 
-	if len(subTasks) == 0 {
+	if totalSubmitted == 0 && len(subTaskInfos) == 0 {
 		logrus.Printf("⚠️ [GenerateTimeWindowSubTasks] 无有效子任务可提交")
 		return map[string]interface{}{
 			"status":    "success",
@@ -2172,14 +2366,18 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 		}, nil
 	}
 
-	if err := manager.AtomicAddSubTasks(subTasks, parentTaskID); err != nil {
-		return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+	if len(subTasks) > 0 {
+		var err error
+		subTasks, err = flushSubtaskBatch(ctx, manager, parentTaskID, subTasks, settings, &batchSeq, &totalSubmitted, "GenerateTimeWindowSubTasks")
+		if err != nil {
+			return nil, fmt.Errorf("AtomicAddSubTasks 失败: %w", err)
+		}
 	}
-	logrus.Printf("✅ [GenerateTimeWindowSubTasks] 共生成并一次性提交 %d 个子任务", generated)
+	logrus.Printf("✅ [GenerateTimeWindowSubTasks] 共生成并分批提交 %d 个子任务 (batches=%d)", totalSubmitted, batchSeq)
 
 	return map[string]interface{}{
 		"status":    "success",
-		"generated": generated,
+		"generated": totalSubmitted,
 		"api_name":  apiName,
 		"sub_tasks": subTaskInfos,
 	}, nil
