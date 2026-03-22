@@ -8,6 +8,9 @@ USER root
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 RUN chmod +x /usr/local/bin/uv
 
+# 密码：before-notebook.d 注入 NOTEBOOK_ARGS（CLI 优先生效），见该脚本注释
+COPY before-notebook.d/99-qdhub-auth-from-env.sh /usr/local/bin/before-notebook.d/99-qdhub-auth-from-env.sh
+
 USER ${NB_UID}
 
 # 容器内可访问 /mnt/data、/mnt/vdb/qdhub（由 compose 挂载）

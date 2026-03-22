@@ -196,7 +196,7 @@ docker compose -f docker-compose.image.yml up -d
 
 - **当前服务器**：已迁移至香港，公网 IP `43.99.17.169`（原服务器已停用）。
 - **未配 ECS Nginx 时**：前端 `http://43.99.17.169:3001`，后端 API `http://43.99.17.169:8080`。
-- **配好 ECS Nginx（推荐）**：前端 `https://你的域名`（或 `http://` 跳转），由宿主机 Nginx 监听 80/443，反代到 `127.0.0.1:3001`。
+- **配好 ECS Nginx（推荐）**：前端 `https://你的域名`（或 `http://` 跳转），由宿主机 Nginx 监听 80/443，反代到 `127.0.0.1:3001`。生产可参考仓库 **`deploy/qdhub.conf`**（含 SSE、`/api/v1/ws/`、Let’s Encrypt 路径等）；下方「5. ECS 上 Nginx」为原理示例，以仓库 `deploy/` 为准合并。
 
 ### 5. ECS 上 Nginx 做 HTTPS（可选）
 
@@ -313,7 +313,16 @@ docker compose -f docker-compose.image.yml up -d
 
 ## 五、Jupyter Lab 研究环境镜像（可选）
 
-若需要在服务器上通过 Nginx 以 `https://<域名>/jupyter/` 方式访问 Jupyter Lab，**必须在本地先构建并推送 Jupyter 镜像**，ECS 只从镜像仓库拉取。
+若需要在服务器上使用 Jupyter Lab，**须先在本地/CI 构建并推送 `qdhub-jupyter-lab` 镜像**，ECS 只 `pull` + `up`，不在服务器上 `build`。
+
+访问方式二选一（**同一容器实例不要混用**两种 URL 形态，见 `JUPYTER_BASE_URL`）：
+
+| 方式 | Nginx | 环境变量 |
+|------|--------|----------|
+| 路径前缀 | 主站配置里 `location /jupyter/`（见 **`deploy/qdhub.conf`** 若保留该段） | `JUPYTER_BASE_URL` 默认 `/jupyter/`（compose 默认即可） |
+| 独立子域 | 单独 **`deploy/jupyter.conf`**，`server_name` 如 `jupyter.quantrade.team`，Let’s Encrypt 单独签发该主机名 | `export JUPYTER_BASE_URL=/` |
+
+容器内挂载 **`deploy/jupyter_server_config.py`**（compose 已配置）；**密码**用 `JUPYTER_PASSWORD` 或 `JUPYTER_PASSWORD_HASH`（与 **非空** `JUPYTER_TOKEN` 互斥）。修改密码或 `JUPYTER_BASE_URL` 后须 **`docker compose -f docker-compose.jupyter.yml up -d --force-recreate`**。
 
 ### 1. 本地构建并推送（linux/amd64）
 
@@ -337,19 +346,28 @@ docker buildx build \
 
 ### 2. ECS 上使用 Jupyter 镜像
 
-在 ECS 上，按照 `research-env/README.md` 中示例设置：
+在 ECS 的**含 `docker-compose.jupyter.yml` 与 `deploy/` 的目录**（例如从仓库同步 `deploy/` 与 compose 文件）执行：
 
 ```bash
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-jupyter.1   # 必须与本地构建时一致
+export IMAGE_TAG=v0.1.0-jupyter.1   # 必须与构建时一致
 
-export JUPYTER_MOUNT_DATA=/mnt/data/jupyter
-export JUPYTER_MOUNT_QDHUB=/mnt/data/qdhub
+export JUPYTER_MOUNT_DATA=/mnt/data
+export JUPYTER_MOUNT_QDHUB=/mnt/vdb/qdhub
 export JUPYTER_PORT=8888
-export JUPYTER_TOKEN=your-secret
+
+# 子域名 HTTPS 反代时必设根路径：
+export JUPYTER_BASE_URL=/
+
+# 推荐：密码登录（勿再设置非空的 JUPYTER_TOKEN）
+export JUPYTER_PASSWORD='你的强密码'
+
+# 若不用密码、仅用 token，可：export JUPYTER_TOKEN=your-secret（且不要设 JUPYTER_PASSWORD）
 
 docker compose -f docker-compose.jupyter.yml pull jupyter-lab
-docker compose -f docker-compose.jupyter.yml up -d
+docker compose -f docker-compose.jupyter.yml up -d --force-recreate
 ```
 
-ECS 只需拉取 `qdhub-jupyter-lab` 镜像并启动，不在服务器上 `build`，这样可避免访问 Docker Hub / GHCR 以及多架构问题。详细说明可参考 `research-env/README.md`。
+**Nginx**：子域方式将 **`deploy/jupyter.conf`** 拷至 `/etc/nginx/conf.d/`，证书目录为 `/etc/letsencrypt/live/<jupyter 主机名>/`；首次无证书时可先只启用 80 段再 `certbot certonly --nginx -d <主机名>`（见 `jupyter.conf` 文件头注释）。仅用路径方式时保证 **`deploy/jupyter_server_config.py` 与 `JUPYTER_BASE_URL`、主站 `location /jupyter/` 一致**。
+
+更细的构建与变量说明见 **`research-env/README.md`**。

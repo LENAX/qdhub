@@ -34,7 +34,12 @@ docker compose -f docker-compose.jupyter.yml logs -f jupyter-lab
 export JUPYTER_MOUNT_DATA=/your/data/path
 export JUPYTER_MOUNT_QDHUB=/your/qdhub/path
 export JUPYTER_PORT=8888
-export JUPYTER_TOKEN=your-secret   # 可选，不设则启动时在日志里生成
+# Nginx 子域名根路径反代（如 jupyter.quantrade.team）时必设：
+# export JUPYTER_BASE_URL=/
+# 密码登录（与 token 互斥；勿设非空 JUPYTER_TOKEN）：
+# export JUPYTER_PASSWORD='强密码'   # 或 export JUPYTER_PASSWORD_HASH='argon2:...'
+# 改密码或 BASE_URL 后须：docker compose -f docker-compose.jupyter.yml up -d --force-recreate
+export JUPYTER_TOKEN=your-secret   # 仅未设密码时可选；不设则日志里生成 token
 docker compose -f docker-compose.jupyter.yml up -d
 ```
 

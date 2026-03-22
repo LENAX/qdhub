@@ -124,6 +124,18 @@ func (a *Adapter) Ping(ctx context.Context) error {
 	return db.PingContext(ctx)
 }
 
+// snapshotDB returns the current pool handle. It does not pin the connection for the whole call chain;
+// callers doing long work should hold a.mu.RLock() for the duration instead (see BulkInsert).
+func (a *Adapter) snapshotDB() (*sql.DB, error) {
+	a.mu.RLock()
+	db := a.db
+	a.mu.RUnlock()
+	if db == nil {
+		return nil, fmt.Errorf("duckdb: connection closed")
+	}
+	return db, nil
+}
+
 // ==================== Table Operations ====================
 
 // CreateTable creates a table based on the schema definition.
@@ -136,9 +148,16 @@ func (a *Adapter) CreateTable(ctx context.Context, schema *datastore.TableSchema
 		return err
 	}
 
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.db == nil {
+		return fmt.Errorf("duckdb: connection closed")
+	}
+	db := a.db
+
 	ddl := a.generateDDL(schema)
 
-	_, err := a.db.ExecContext(ctx, ddl)
+	_, err := db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("failed to create table %s: %w", schema.TableName, err)
 	}
@@ -146,7 +165,7 @@ func (a *Adapter) CreateTable(ctx context.Context, schema *datastore.TableSchema
 	// Create indexes
 	for _, idx := range schema.Indexes {
 		indexDDL := a.generateIndexDDL(schema.TableName, idx)
-		if _, err := a.db.ExecContext(ctx, indexDDL); err != nil {
+		if _, err := db.ExecContext(ctx, indexDDL); err != nil {
 			return fmt.Errorf("failed to create index %s: %w", idx.Name, err)
 		}
 	}
@@ -160,8 +179,15 @@ func (a *Adapter) DropTable(ctx context.Context, tableName string) error {
 		return err
 	}
 
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.db == nil {
+		return fmt.Errorf("duckdb: connection closed")
+	}
+	db := a.db
+
 	ddl := fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdentifier(tableName))
-	_, err := a.db.ExecContext(ctx, ddl)
+	_, err := db.ExecContext(ctx, ddl)
 	if err != nil {
 		return fmt.Errorf("failed to drop table %s: %w", tableName, err)
 	}
@@ -174,9 +200,14 @@ func (a *Adapter) TableExists(ctx context.Context, tableName string) (bool, erro
 		return false, err
 	}
 
+	db, err := a.snapshotDB()
+	if err != nil {
+		return false, err
+	}
+
 	query := `SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?`
 	var count int
-	err := a.db.QueryRowContext(ctx, query, tableName).Scan(&count)
+	err = db.QueryRowContext(ctx, query, tableName).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check table existence: %w", err)
 	}
@@ -189,8 +220,13 @@ func (a *Adapter) ListTables(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
+	db, err := a.snapshotDB()
+	if err != nil {
+		return nil, err
+	}
+
 	query := `SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name`
-	rows, err := a.db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
@@ -216,10 +252,15 @@ func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datasto
 		return nil, err
 	}
 
+	db, err := a.snapshotDB()
+	if err != nil {
+		return nil, err
+	}
+
 	// Get row count
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdentifier(tableName))
 	var rowCount int64
-	if err := a.db.QueryRowContext(ctx, countQuery).Scan(&rowCount); err != nil {
+	if err := db.QueryRowContext(ctx, countQuery).Scan(&rowCount); err != nil {
 		return nil, fmt.Errorf("failed to get row count: %w", err)
 	}
 
@@ -232,31 +273,25 @@ func (a *Adapter) GetTableStats(ctx context.Context, tableName string) (*datasto
 	return stats, nil
 }
 
-// tableHasPrimaryKeyOrUnique checks if a table has a primary key or unique constraint.
-// This is needed to determine whether to use INSERT OR REPLACE (upsert) or regular INSERT.
-func (a *Adapter) tableHasPrimaryKeyOrUnique(ctx context.Context, tableName string) (bool, error) {
-	// Query DuckDB's table constraints
-	// DuckDB stores constraint info in duckdb_constraints() function
+// tableHasPrimaryKeyOrUniqueDB checks if a table has a primary key or unique constraint.
+// db must be the live pool used under a.mu RLock (see BulkInsert).
+func tableHasPrimaryKeyOrUniqueDB(ctx context.Context, db *sql.DB, tableName string) (bool, error) {
 	query := `
 		SELECT COUNT(*) > 0 as has_pk
 		FROM duckdb_constraints()
 		WHERE table_name = ? AND constraint_type IN ('PRIMARY KEY', 'UNIQUE')
 	`
 	var hasPK bool
-	err := a.db.QueryRowContext(ctx, query, tableName).Scan(&hasPK)
+	err := db.QueryRowContext(ctx, query, tableName).Scan(&hasPK)
 	if err != nil {
-		// If query fails, try alternative method using table info
-		return a.tableHasPrimaryKeyFallback(ctx, tableName)
+		return tableHasPrimaryKeyFallbackDB(ctx, db, tableName)
 	}
 	return hasPK, nil
 }
 
-// tableHasPrimaryKeyFallback is a fallback method to check for primary key.
-func (a *Adapter) tableHasPrimaryKeyFallback(ctx context.Context, tableName string) (bool, error) {
-	// Try using PRAGMA table_info
-	// Note: DuckDB returns BOOLEAN for notnull and pk columns, not INT
+func tableHasPrimaryKeyFallbackDB(ctx context.Context, db *sql.DB, tableName string) (bool, error) {
 	query := fmt.Sprintf("PRAGMA table_info('%s')", tableName)
-	rows, err := a.db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return false, err
 	}
@@ -279,26 +314,11 @@ func (a *Adapter) tableHasPrimaryKeyFallback(ctx context.Context, tableName stri
 	return false, nil
 }
 
-// ==================== Data Operations ====================
-
-// isConflictError 判断是否为唯一约束冲突/更新冲突（可重试为 update 或跳过）
-func isConflictError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "Conflict") ||
-		strings.Contains(s, "UNIQUE constraint") ||
-		strings.Contains(s, "duplicate key") ||
-		strings.Contains(s, "Duplicate")
-}
-
-// getTableColumns returns the column names of a table.
-// This is used to filter out unknown columns when inserting data.
-func (a *Adapter) getTableColumns(ctx context.Context, tableName string) (map[string]bool, error) {
-	// Note: DuckDB returns BOOLEAN for notnull and pk columns, not INT
+// getTableColumnsDB returns the column names of a table. db must be used under a.mu RLock when
+// concurrent Close is possible.
+func getTableColumnsDB(ctx context.Context, db *sql.DB, tableName string) (map[string]bool, error) {
 	query := fmt.Sprintf("PRAGMA table_info('%s')", tableName)
-	rows, err := a.db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table info: %w", err)
 	}
@@ -320,6 +340,20 @@ func (a *Adapter) getTableColumns(ctx context.Context, tableName string) (map[st
 	return columns, nil
 }
 
+// ==================== Data Operations ====================
+
+// isConflictError 判断是否为唯一约束冲突/更新冲突（可重试为 update 或跳过）
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "Conflict") ||
+		strings.Contains(s, "UNIQUE constraint") ||
+		strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "Duplicate")
+}
+
 // BulkInsert inserts multiple rows into a table within a transaction.
 // If the table has a primary key or unique index, uses INSERT OR REPLACE for upsert.
 // Otherwise, uses regular INSERT INTO to avoid DuckDB's "ON CONFLICT is a no-op" error.
@@ -335,8 +369,16 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 		return 0, err
 	}
 
+	// Hold RLock for the whole insert so Close() cannot nil a.db mid-flight (shared Factory cache).
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.db == nil {
+		return 0, fmt.Errorf("duckdb: connection closed")
+	}
+	db := a.db
+
 	// Get actual table columns to filter out unknown columns from data
-	tableColumns, err := a.getTableColumns(ctx, tableName)
+	tableColumns, err := getTableColumnsDB(ctx, db, tableName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get table columns: %w", err)
 	}
@@ -363,7 +405,7 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 	}
 
 	// Check if table has primary key or unique index
-	hasPK, err := a.tableHasPrimaryKeyOrUnique(ctx, tableName)
+	hasPK, err := tableHasPrimaryKeyOrUniqueDB(ctx, db, tableName)
 	if err != nil {
 		// If check fails, fall back to regular INSERT
 		hasPK = false
@@ -390,7 +432,7 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 	}
 
 	// Begin transaction for batch insert (improves performance and ensures atomicity)
-	tx, err := a.db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -419,7 +461,7 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 			if isConflictError(execErr) {
 				_ = tx.Rollback()
 				// 冲突时改为逐行 INSERT OR REPLACE / INSERT，失败则跳过
-				n, fallbackErr := a.bulkInsertRowByRow(ctx, tableName, data, columns, hasPK)
+				n, fallbackErr := bulkInsertRowByRow(ctx, db, tableName, data, columns, hasPK)
 				if fallbackErr != nil {
 					return n, fallbackErr
 				}
@@ -442,7 +484,7 @@ func (a *Adapter) BulkInsert(ctx context.Context, tableName string, data []map[s
 }
 
 // bulkInsertRowByRow 无事务逐行插入，冲突时用 INSERT OR REPLACE 尝试更新，仍失败则跳过该行。
-func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data []map[string]any, columns []string, useReplace bool) (int64, error) {
+func bulkInsertRowByRow(ctx context.Context, db *sql.DB, tableName string, data []map[string]any, columns []string, useReplace bool) (int64, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
@@ -466,7 +508,7 @@ func (a *Adapter) bulkInsertRowByRow(ctx context.Context, tableName string, data
 		for i, col := range columns {
 			args[i] = row[col]
 		}
-		result, execErr := a.db.ExecContext(ctx, insertSQL, args...)
+		result, execErr := db.ExecContext(ctx, insertSQL, args...)
 		if execErr != nil {
 			if isConflictError(execErr) {
 				// 已用 OR REPLACE 仍冲突则跳过
@@ -508,8 +550,15 @@ func (a *Adapter) DeleteBySyncBatchID(ctx context.Context, tableName string, syn
 		return 0, err
 	}
 
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.db == nil {
+		return 0, fmt.Errorf("duckdb: connection closed")
+	}
+	db := a.db
+
 	deleteSQL := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", quoteIdentifier(tableName), quoteIdentifier("sync_batch_id"))
-	result, err := a.db.ExecContext(ctx, deleteSQL, syncBatchID)
+	result, err := db.ExecContext(ctx, deleteSQL, syncBatchID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete by sync batch ID: %w", err)
 	}
@@ -522,7 +571,12 @@ func (a *Adapter) Query(ctx context.Context, sqlQuery string, args ...any) ([]ma
 		return nil, err
 	}
 
-	rows, err := a.db.QueryContext(ctx, sqlQuery, args...)
+	db, err := a.snapshotDB()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
@@ -567,7 +621,14 @@ func (a *Adapter) Execute(ctx context.Context, sqlStmt string, args ...any) (int
 		return 0, err
 	}
 
-	result, err := a.db.ExecContext(ctx, sqlStmt, args...)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.db == nil {
+		return 0, fmt.Errorf("duckdb: connection closed")
+	}
+	db := a.db
+
+	result, err := db.ExecContext(ctx, sqlStmt, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute statement: %w", err)
 	}
@@ -584,7 +645,13 @@ func (a *Adapter) BeginTx(ctx context.Context) (datastore.QuantDBTx, error) {
 		return nil, err
 	}
 
-	tx, err := a.db.BeginTx(ctx, nil)
+	db, err := a.snapshotDB()
+	if err != nil {
+		a.writeMu.Unlock()
+		return nil, err
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		a.writeMu.Unlock()
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)

@@ -1,6 +1,7 @@
 # Jupyter Lab 研究环境（与主站 docker-compose 独立）
 # 挂载服务器上的 /mnt/data、/mnt/vdb/qdhub，便于做题材/情绪/龙头等课题
 # 启动：docker compose -f docker-compose.jupyter.yml up -d
+# 修改 JUPYTER_PASSWORD / JUPYTER_BASE_URL 等后：up -d --force-recreate
 # 查看 token：docker compose -f docker-compose.jupyter.yml logs jupyter-lab
 
 services:
@@ -14,7 +15,12 @@ services:
       - "${JUPYTER_PORT:-8888}:8888"
     environment:
       - JUPYTER_ENABLE_LAB=yes
-      # 无 token 时用 ?token=xxx 访问；生产建议设 JUPYTER_TOKEN 或挂载 jupyter_server_config
+      # 密码模式：设 JUPYTER_PASSWORD 或 JUPYTER_PASSWORD_HASH（二选一）；勿再设非空的 JUPYTER_TOKEN
+      - JUPYTER_PASSWORD=${JUPYTER_PASSWORD:-}
+      - JUPYTER_PASSWORD_HASH=${JUPYTER_PASSWORD_HASH:-}
+      # 子域名根路径反代时 export JUPYTER_BASE_URL=/；默认 /jupyter/ 与 qdhub.conf 路径一致
+      - JUPYTER_BASE_URL=${JUPYTER_BASE_URL:-/jupyter/}
+      # 仅无密码时使用；与密码互斥。改 JUPYTER_PASSWORD 后须 --force-recreate 才生效
       - JUPYTER_TOKEN=${JUPYTER_TOKEN:-}
     volumes:
       - "${JUPYTER_MOUNT_DATA:-/mnt/data}:/mnt/data:ro"
