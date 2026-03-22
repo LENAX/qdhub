@@ -884,6 +884,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s 窗%d %s~%s", apiName, paramKey, paramValue, wi, apiStart, apiEnd), taskRegistry).
 					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 					WithCompensationFunction("CompensateSyncData").
@@ -950,6 +951,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 			subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s", apiName, paramKey, paramValue), taskRegistry).
 				WithJobFunction("SyncAPIData", subTaskParams).
+				WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 				WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 				WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 				WithCompensationFunction("CompensateSyncData").
@@ -1668,6 +1670,7 @@ func GenerateIncrementalSyncSubTasksJob(tc *task.TaskContext) (interface{}, erro
 
 		subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("增量同步 %s: %s=%s", apiName, paramKey, paramValue), taskRegistry).
 			WithJobFunction("SyncAPIData", subTaskParams).
+			WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 			WithCompensationFunction("CompensateSyncData").
@@ -2215,6 +2218,7 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s", apiName, dateParamKey, dateStr), taskRegistry).
 					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 					WithCompensationFunction("CompensateSyncData").
@@ -2269,6 +2273,7 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: src=%s, %s=%s", apiName, src, dateParamKey, dateStr), taskRegistry).
 					WithJobFunction("SyncAPIData", subTaskParams).
+					WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 					WithCompensationFunction("CompensateSyncData").
@@ -2329,6 +2334,7 @@ func GenerateTimeWindowSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 
 			subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: src=%s, window=%s~%s", apiName, src, w.Start, w.End), taskRegistry).
 				WithJobFunction("SyncAPIData", subTaskParams).
+				WithTimeout(SyncAPIDataJobTimeoutSecondsFromContext(tc)).
 				WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 				WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 				WithCompensationFunction("CompensateSyncData").

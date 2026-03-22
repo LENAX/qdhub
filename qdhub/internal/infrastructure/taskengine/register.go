@@ -46,6 +46,9 @@ type Dependencies struct {
 	RealtimeBufferRegistry realtimebuffer.Registry
 	// RealtimeSourceSelector 多源时仅当前选中源写 Store；RealtimeQuoteStreamHandlerJob 与 TushareWSTickCollector 使用。
 	RealtimeSourceSelector *realtimestore.RealtimeSourceSelector
+
+	// SyncAPIDataJobTimeoutSeconds 与 container task_engine 单任务超时一致（秒）；动态子任务 WithTimeout 与 Job 依赖共用经 Effective 后的值。
+	SyncAPIDataJobTimeoutSeconds int
 }
 
 // RegisterJobFunctions registers all job functions with the engine.
@@ -234,6 +237,11 @@ func SetupDependencies(eng *engine.Engine, deps *Dependencies) {
 
 	// Register engine itself as dependency (for template tasks)
 	registry.RegisterDependencyWithKey("Engine", eng)
+
+	registry.RegisterDependencyWithKey(
+		"SyncAPIDataJobTimeoutSeconds",
+		jobs.EffectiveSyncAPIDataJobTimeoutSeconds(deps.SyncAPIDataJobTimeoutSeconds),
+	)
 }
 
 // RegisterSyncCallbackInvoker 在 SyncSvc 创建后注册 execution 回调注入（DataSyncCompleteHandler 使用）。
@@ -267,6 +275,11 @@ func Initialize(ctx context.Context, eng *engine.Engine, deps *Dependencies) err
 // Must be called after Initialize() to ensure all job functions are registered.
 func GetWorkflowFactory(eng *engine.Engine) *workflows.WorkflowFactory {
 	return workflows.NewWorkflowFactory(eng.GetRegistry())
+}
+
+// NewWorkflowFactoryWithTaskTimeout 创建工厂时注入 SyncAPIData 单任务超时（秒），与 task_engine.task_timeout 对齐。
+func NewWorkflowFactoryWithTaskTimeout(eng *engine.Engine, syncAPIDataJobTimeoutSec int) *workflows.WorkflowFactory {
+	return workflows.NewWorkflowFactoryWithSyncAPIDataTimeout(eng.GetRegistry(), syncAPIDataJobTimeoutSec)
 }
 
 // ==================== 内建工作流创建便捷方法 ====================

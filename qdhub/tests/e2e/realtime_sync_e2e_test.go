@@ -291,7 +291,7 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 	err = builtInInitializer.Initialize(ctx)
 	require.NoError(t, err)
 
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "", 0)
 
 	cronCalculator := sync.NewCronScheduleCalculator()
 	dependencyResolver := sync.NewDependencyResolver()
@@ -552,7 +552,7 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -774,7 +774,7 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1006,7 +1006,7 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1202,7 +1202,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, adapterReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1402,7 +1402,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1612,7 +1612,7 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
@@ -1804,7 +1804,7 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 	taskEngineAdapter := taskengine.NewTaskEngineAdapter(eng, 0)
 	workflowFactory := taskengine.GetWorkflowFactory(eng)
 	_ = impl.NewBuiltInWorkflowInitializer(workflowRepo, workflowFactory, taskEngineAdapter).Initialize(ctx)
-	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "")
+	workflowExecutor := taskengine.NewWorkflowExecutor(workflowRepo, taskEngineAdapter, metadataRepo, eastReg, "", nil, nil, "", "", "", 0)
 
 	syncAppService := impl.NewSyncApplicationService(
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,

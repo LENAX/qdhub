@@ -40,6 +40,7 @@ type WorkflowExecutorImpl struct {
 	tushareProxyWSURL            string
 	tushareProxyRSAPublicKeyPath string
 	realtimeSourceResolver         RealtimeSourceResolver // optional: when set, use GetOrderedByPurpose for collector config
+	syncAPIDataJobTimeoutSec       int                    // 与 task_engine.task_timeout 一致，动态构建 BatchDataSync 时注入 Builder
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
@@ -55,6 +56,7 @@ func NewWorkflowExecutor(
 	tushareRealtimeSource string,
 	tushareProxyWSURL string,
 	tushareProxyRSAPublicKeyPath string,
+	syncAPIDataJobTimeoutSec int,
 ) workflow.WorkflowExecutor {
 	if realtimeEnv == "" {
 		realtimeEnv = "development"
@@ -73,6 +75,7 @@ func NewWorkflowExecutor(
 		tushareRealtimeSource:         tushareRealtimeSource,
 		tushareProxyWSURL:            tushareProxyWSURL,
 		tushareProxyRSAPublicKeyPath: tushareProxyRSAPublicKeyPath,
+		syncAPIDataJobTimeoutSec:       syncAPIDataJobTimeoutSec,
 	}
 }
 
@@ -178,6 +181,7 @@ func (e *WorkflowExecutorImpl) ExecuteBatchDataSync(ctx context.Context, req wor
 	}
 
 	wfBuilder := workflows.NewBatchDataSyncWorkflowBuilder(registry).
+		WithSyncAPIDataJobTimeout(e.syncAPIDataJobTimeoutSec).
 		WithDataSource(req.DataSourceName, req.Token).
 		WithTargetDB(req.TargetDBPath).
 		WithDateRange(req.StartDate, req.EndDate).

@@ -78,7 +78,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dbDSN := ""
 	duckDBPath := ""
 	configPath := ""
-	taskEngineWorkerCount := 0 // 0 表示使用 container 默认值
+	taskEngineWorkerCount := 0  // 0 表示使用 container 默认值
+	taskEngineTaskTimeout := 0  // 0 表示使用 container.DefaultConfig().TaskEngineTimeout
 	if len(args) > 0 && args[0] != "" {
 		configPath = args[0]
 	}
@@ -108,6 +109,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 				} `yaml:"quantdb"`
 				TaskEngine struct {
 					WorkerCount int `yaml:"worker_count"`
+					TaskTimeout int `yaml:"task_timeout"`
 				} `yaml:"task_engine"`
 			}
 			if err := yaml.Unmarshal(data, &cfg); err == nil {
@@ -119,6 +121,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 				}
 				if cfg.TaskEngine.WorkerCount > 0 {
 					taskEngineWorkerCount = cfg.TaskEngine.WorkerCount
+				}
+				if cfg.TaskEngine.TaskTimeout > 0 {
+					taskEngineTaskTimeout = cfg.TaskEngine.TaskTimeout
 				}
 			}
 		}
@@ -179,6 +184,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if taskEngineWorkerCount > 0 {
 		log.Printf("  Task Engine worker_count (from config): %d", taskEngineWorkerCount)
 	}
+	if taskEngineTaskTimeout > 0 {
+		log.Printf("  Task Engine task_timeout (from config file, seconds): %d", taskEngineTaskTimeout)
+	}
 
 	// Create container configuration
 	config := container.DefaultConfig()
@@ -190,6 +198,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	config.DefaultDuckDBPath = duckDBPath
 	if taskEngineWorkerCount > 0 {
 		config.TaskEngineMaxConcurrency = taskEngineWorkerCount
+	}
+	if taskEngineTaskTimeout > 0 {
+		config.TaskEngineTimeout = taskEngineTaskTimeout
 	}
 
 	// Apply write queue config if it was parsed
@@ -261,6 +272,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	if v := os.Getenv("TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH"); v != "" {
 		config.TushareProxyRSAPublicKeyPath = expandHomePath(v)
+	}
+	if viper.IsSet("task_engine.task_timeout") {
+		if v := viper.GetInt("task_engine.task_timeout"); v > 0 {
+			config.TaskEngineTimeout = v
+		}
 	}
 
 	// Create and initialize container

@@ -17,8 +17,8 @@ quantdb:
   duckdb_path: "./data/qdhub.duckdb"
 
 task_engine:
-  worker_count: 10  # 降低并发数以控制内存（新闻216任务+实时tick同时运行时32并发导致OOM）
-  task_timeout: 60  # seconds
+  worker_count: 20  # 降低并发数以控制内存（新闻216任务+实时tick同时运行时32并发导致OOM）
+  task_timeout: 180  # seconds
 
 # 本地开发使用内地 ts_proxy 接收实时行情（不触发 Tushare IP 限制）时，填写下面顶层 tushare 的地址与公钥路径
 # 公钥路径支持 ~ 或 ~/ 开头，会展开为当前用户 HOME。环境变量可覆盖：tushare_proxy_WS_URL、tushare_proxy_RSA_PUBLIC_KEY_PATH

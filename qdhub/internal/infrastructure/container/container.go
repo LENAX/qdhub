@@ -969,13 +969,15 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		}
 	}
 
+	taskEngineDeps.SyncAPIDataJobTimeoutSeconds = c.config.TaskEngineTimeout
+
 	if err := taskengine.Initialize(ctx, eng, taskEngineDeps); err != nil {
 		return fmt.Errorf("failed to initialize task engine: %w", err)
 	}
 
 	// Create Task Engine adapter and workflow factory
 	c.TaskEngineAdapter = taskengine.NewTaskEngineAdapter(eng, c.config.TaskEngineMaxConcurrency)
-	c.WorkflowFactory = taskengine.GetWorkflowFactory(eng)
+	c.WorkflowFactory = taskengine.NewWorkflowFactoryWithTaskTimeout(eng, c.config.TaskEngineTimeout)
 
 	// Create WorkflowExecutor (domain service for executing built-in workflows)
 	// This avoids direct dependency between application services
@@ -990,6 +992,7 @@ func (c *Container) initTaskEngine(ctx context.Context) error {
 		c.config.TushareRealtimeSource,
 		c.config.TushareProxyWSURL,
 		c.config.TushareProxyRSAPublicKeyPath,
+		c.config.TaskEngineTimeout,
 	)
 
 	logrus.Info("Task Engine initialized")

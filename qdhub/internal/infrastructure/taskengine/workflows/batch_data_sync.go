@@ -462,11 +462,12 @@ func (p *BatchDataSyncParams) GetEndDateTime() string {
 
 // BatchDataSyncWorkflowBuilder 批量数据同步工作流构建器
 type BatchDataSyncWorkflowBuilder struct {
-	registry         task.FunctionRegistry
-	params           BatchDataSyncParams
-	strategyCache    map[string]*APISyncStrategy // 策略缓存（从数据库加载）
-	strategyProvider APISyncStrategyProvider     // 策略提供者（可选）
-	dataSourceID     shared.ID                   // 数据源 ID（用于从提供者获取策略）
+	registry                  task.FunctionRegistry
+	params                    BatchDataSyncParams
+	strategyCache             map[string]*APISyncStrategy // 策略缓存（从数据库加载）
+	strategyProvider          APISyncStrategyProvider     // 策略提供者（可选）
+	dataSourceID              shared.ID                   // 数据源 ID（用于从提供者获取策略）
+	syncAPIDataJobTimeoutSec int // 秒；0 则 jobs.Effective 使用默认与下限
 }
 
 // NewBatchDataSyncWorkflowBuilder 创建批量数据同步工作流构建器
@@ -474,6 +475,16 @@ func NewBatchDataSyncWorkflowBuilder(registry task.FunctionRegistry) *BatchDataS
 	return &BatchDataSyncWorkflowBuilder{
 		registry: registry,
 	}
+}
+
+// WithSyncAPIDataJobTimeout 设置 SyncAPIData / SyncMultiParamAPIData 单任务超时（秒），与 task_engine.task_timeout 对齐。
+func (b *BatchDataSyncWorkflowBuilder) WithSyncAPIDataJobTimeout(sec int) *BatchDataSyncWorkflowBuilder {
+	b.syncAPIDataJobTimeoutSec = sec
+	return b
+}
+
+func (b *BatchDataSyncWorkflowBuilder) syncAPIDataJobTimeoutSeconds() int {
+	return jobs.EffectiveSyncAPIDataJobTimeoutSeconds(b.syncAPIDataJobTimeoutSec)
 }
 
 // WithStrategyProvider 设置策略提供者和数据源 ID
@@ -749,6 +760,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 			"api_name": "trade_cal",
 			"params":   map[string]interface{}{},
 		})).
+		WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		WithCompensationFunction("CompensateSyncData").
@@ -770,6 +782,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				"fields":      "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type",
 			},
 		})).
+		WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		WithCompensationFunction("CompensateSyncData").
@@ -791,6 +804,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				"iterate_param":  "market",
 				"iterate_values": []string{"SSE", "SZSE", "CSI", "SW", "OTH"},
 			})).
+			WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 			WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 			WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 			WithCompensationFunction("CompensateSyncData").
@@ -817,7 +831,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 		}
 
 		for _, config := range params.APIConfigs {
-			// 与简单模式一致：Level 0 已 always 建 FetchTradeCal/FetchStockBasic，勿再生成 Sync_*，否则并行重复请求同一接口（易触发 30s 超时）。
+			// 与简单模式一致：Level 0 已 always 建 FetchTradeCal/FetchStockBasic，勿再生成 Sync_*，否则并行重复请求同一接口（易触发任务引擎短超时）。
 			if config.APIName == "trade_cal" || config.APIName == "stock_basic" {
 				log.Printf("⏭️ [BuildWorkflow] APIConfigs 跳过基础 API（已由 Fetch* 覆盖）: %s", config.APIName)
 				continue
@@ -916,6 +930,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 							"api_name": apiName,
 							"params":   apiParams,
 						})).
+						WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 						WithDependency("FetchTradeCal"). // 依赖交易日历
 						WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 						WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
@@ -1028,6 +1043,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 								"iterate_values": iterateValues,
 								"params":         fixedParams,
 							})).
+							WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 							WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 							WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 							WithCompensationFunction("CompensateSyncData").
@@ -1072,6 +1088,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 						"api_name": apiName,
 						"params":   apiParams,
 					})).
+					WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 					WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 					WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 					WithCompensationFunction("CompensateSyncData").
@@ -1489,6 +1506,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
 		WithJobFunction("SyncAPIData", jobParams).
+		WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		WithCompensationFunction("CompensateSyncData")
@@ -1870,6 +1888,7 @@ func (b *BatchDataSyncWorkflowBuilder) buildDirectTask(
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据", b.registry).
 		WithJobFunction("SyncAPIData", jobParams).
+		WithTimeout(b.syncAPIDataJobTimeoutSeconds()).
 		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
 		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
 		WithCompensationFunction("CompensateSyncData")

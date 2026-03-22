@@ -124,6 +124,7 @@ func TestE2E_ForwardRealtimeTick(t *testing.T) {
 		"forward",
 		wsURL,
 		pubPath,
+		0,
 	)
 
 	req := workflow.RealtimeDataSyncRequest{

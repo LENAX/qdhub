@@ -17,13 +17,20 @@ import (
 // WorkflowFactory 工作流工厂
 // 提供创建内建工作流的便捷方法
 type WorkflowFactory struct {
-	registry task.FunctionRegistry
+	registry                  task.FunctionRegistry
+	syncAPIDataJobTimeoutSec int // 秒；0 表示构建时用 jobs.Effective 默认
 }
 
 // NewWorkflowFactory 创建工作流工厂
 func NewWorkflowFactory(registry task.FunctionRegistry) *WorkflowFactory {
+	return NewWorkflowFactoryWithSyncAPIDataTimeout(registry, 0)
+}
+
+// NewWorkflowFactoryWithSyncAPIDataTimeout 创建工作流工厂并指定 SyncAPIData 单任务超时（秒）。
+func NewWorkflowFactoryWithSyncAPIDataTimeout(registry task.FunctionRegistry, syncAPIDataJobTimeoutSec int) *WorkflowFactory {
 	return &WorkflowFactory{
-		registry: registry,
+		registry:                  registry,
+		syncAPIDataJobTimeoutSec: syncAPIDataJobTimeoutSec,
 	}
 }
 
@@ -49,6 +56,7 @@ func (f *WorkflowFactory) CreateTablesWorkflow(params CreateTablesParams) (*work
 // 参见 BatchDataSyncWorkflowBuilder 了解详细的工作流结构
 func (f *WorkflowFactory) CreateBatchDataSyncWorkflow(params BatchDataSyncParams) (*workflow.Workflow, error) {
 	return NewBatchDataSyncWorkflowBuilder(f.registry).
+		WithSyncAPIDataJobTimeout(f.syncAPIDataJobTimeoutSec).
 		WithParams(params).
 		Build()
 }
@@ -75,7 +83,7 @@ func (f *WorkflowFactory) CreateTables() *CreateTablesWorkflowBuilder {
 
 // BatchDataSync 返回批量数据同步工作流构建器
 func (f *WorkflowFactory) BatchDataSync() *BatchDataSyncWorkflowBuilder {
-	return NewBatchDataSyncWorkflowBuilder(f.registry)
+	return NewBatchDataSyncWorkflowBuilder(f.registry).WithSyncAPIDataJobTimeout(f.syncAPIDataJobTimeoutSec)
 }
 
 // RealtimeDataSync 返回增量实时同步工作流构建器
