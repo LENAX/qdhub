@@ -518,29 +518,21 @@ LEFT JOIN stock_basic s ON s.ts_code = ths.ts_code
 WHERE ths.trade_date = ?
   AND (
     (? = 'U' AND (
-      (l."limit" = 'U')
-      OR (l."limit" IS NULL AND (
-        COALESCE(ths.limit_type, '') LIKE '%涨停池%'
-        OR COALESCE(ths.limit_type, '') LIKE '%连板池%'
-        OR COALESCE(ths.limit_type, '') LIKE '%冲刺涨停%'
-        OR COALESCE(ths.pct_chg, 0) >= 9.8
-      ))
+      (COALESCE(ths.limit_type, '') LIKE '%涨停池%' OR COALESCE(ths.limit_type, '') LIKE '%连板池%' OR COALESCE(ths.limit_type, '') LIKE '%冲刺涨停%')
+      OR (l."limit" = 'U')
+      OR (COALESCE(ths.pct_chg, 0) >= 9.8)
     ))
     OR
     (? = 'D' AND (
-      (l."limit" = 'D')
-      OR (l."limit" IS NULL AND (
-        COALESCE(ths.limit_type, '') LIKE '%跌停池%'
-        OR COALESCE(ths.pct_chg, 0) <= -9.8
-      ))
+      (COALESCE(ths.limit_type, '') LIKE '%跌停池%')
+      OR (l."limit" = 'D')
+      OR (COALESCE(ths.pct_chg, 0) <= -9.8)
     ))
     OR
     (? = 'Z' AND (
-      (l."limit" = 'Z')
-      OR (l."limit" IS NULL AND (
-        COALESCE(ths.limit_type, '') LIKE '%炸板池%'
-        OR (COALESCE(ths.open_num, 0) > 0 AND COALESCE(ths.pct_chg, 0) < 9.8)
-      ))
+      (COALESCE(ths.limit_type, '') LIKE '%炸板池%')
+      OR (l."limit" = 'Z')
+      OR (COALESCE(ths.open_num, 0) > 0 AND COALESCE(ths.pct_chg, 0) < 9.8)
     ))
   )
 ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
