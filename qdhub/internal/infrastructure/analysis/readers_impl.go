@@ -249,30 +249,31 @@ func (r *Readers) GetLimitStats(ctx context.Context, startDate, endDate string) 
 	ldSQL := `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN "limit" = 'U'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_sealed,
        COUNT(DISTINCT CASE WHEN "limit" = 'Z'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_opened,
        COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z')
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_pct,
        COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) = 0
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_sealed,
        COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) > 0
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_opened,
        COUNT(DISTINCT CASE WHEN "limit" = 'D'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg <= -9.8
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_from_pct
 FROM limit_list_d
+LEFT JOIN stock_basic sb ON sb.ts_code = limit_list_d.ts_code
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
 	ldRows, ldErr := r.db.Query(ctx, ldSQL, startDate, endDate)
@@ -329,12 +330,13 @@ GROUP BY trade_date ORDER BY trade_date`
 			thsSQL := `
 SELECT trade_date,
        SUM(CASE WHEN COALESCE(open_num, 0) = 0
-                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                  AND NOT (TRIM(COALESCE(s.name, ths.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, ths.name, '')) LIKE '*ST%')
                 THEN 1 ELSE 0 END) AS limit_up_sealed,
        SUM(CASE WHEN COALESCE(open_num, 0) > 0
-                  AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                  AND NOT (TRIM(COALESCE(s.name, ths.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, ths.name, '')) LIKE '*ST%')
                 THEN 1 ELSE 0 END) AS limit_up_opened
-FROM limit_list_ths
+FROM limit_list_ths ths
+LEFT JOIN stock_basic s ON s.ts_code = ths.ts_code
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date`
 			thsRows, thsErr := r.db.Query(ctx, thsSQL, startDate, endDate)
@@ -365,28 +367,29 @@ func (r *Readers) queryLimitStatsFromLimitListD(ctx context.Context, startDate, 
 	sql := `
 SELECT trade_date,
        COUNT(DISTINCT CASE WHEN "limit" = 'U'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_sealed,
        COUNT(DISTINCT CASE WHEN "limit" = 'Z'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_opened,
        COUNT(DISTINCT CASE WHEN "limit" IN ('U','Z')
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_pct,
        COUNT(DISTINCT CASE WHEN "limit" = 'D'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_sealed,
        0 AS limit_down_opened,
        COUNT(DISTINCT CASE WHEN "limit" = 'D'
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_from_limit,
        COUNT(DISTINCT CASE WHEN pct_chg <= -9.8
-                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                             AND NOT (TRIM(COALESCE(sb.name, name, '')) LIKE 'ST%' OR TRIM(COALESCE(sb.name, name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_down_from_pct
 FROM limit_list_d
+LEFT JOIN stock_basic sb ON sb.ts_code = limit_list_d.ts_code
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
 	return r.db.Query(ctx, sql, startDate, endDate)
