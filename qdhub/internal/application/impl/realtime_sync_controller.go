@@ -70,6 +70,12 @@ func (c *RealtimeSyncControllerImpl) StartRealtimeSync(ctx context.Context, sour
 	if !src.Enabled {
 		return shared.NewDomainError(shared.ErrCodeValidation, "realtime source is disabled", nil)
 	}
+	if realtimestore.SinaRealtimeDisabled && src.Type == realtime.TypeSina {
+		return shared.NewDomainError(shared.ErrCodeValidation, "新浪实时行情已禁用，请仅使用 tushare_proxy（内地 ts_proxy）", nil)
+	}
+	if realtimestore.TushareWSRealtimeDisabled && src.Type == realtime.TypeTushareWS {
+		return shared.NewDomainError(shared.ErrCodeValidation, "直连 Tushare WebSocket 已禁用，请仅使用 tushare_proxy（内地 ts_proxy）", nil)
+	}
 
 	if src.Type == realtime.TypeNews {
 		c.mu.Lock()

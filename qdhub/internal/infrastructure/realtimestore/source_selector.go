@@ -2,8 +2,16 @@ package realtimestore
 
 import "sync"
 
+// SinaRealtimeDisabled 为 true 时不使用新浪作为实时行情 Pull 源、不并行启动新浪 workflow、禁止从控制台 connect 新浪源。
+// 与「仅 ts_proxy 主源」策略一致；若需恢复新浪，改为 false 并重新部署。
+const SinaRealtimeDisabled = true
+
+// TushareWSRealtimeDisabled 为 true 时不使用直连 Tushare 官方 WebSocket（ts_realtime_mkt_tick）、禁止从控制台 connect 该源。
+// 仅保留内地 ts_proxy 转发；若需恢复直连，改为 false 并重新部署。
+const TushareWSRealtimeDisabled = true
+
 const (
-	SourceTushareWS      = "tushare_ws"
+	SourceTushareWS    = "tushare_ws"
 	SourceTushareProxy = "tushare_proxy" // 从 ts_proxy 转发端接收
 	SourceSina           = "sina"
 	SourceEastmoney      = "eastmoney" // 东财
@@ -24,10 +32,14 @@ type RealtimeSourceSelector struct {
 	sourceErrors map[string]string
 }
 
-// NewRealtimeSourceSelector 创建 Selector，默认选中 tushare_ws。
+// NewRealtimeSourceSelector 创建 Selector。禁用直连 WS 时默认 tushare_proxy，否则默认 tushare_ws。
 func NewRealtimeSourceSelector() *RealtimeSourceSelector {
+	active := SourceTushareWS
+	if TushareWSRealtimeDisabled {
+		active = SourceTushareProxy
+	}
 	return &RealtimeSourceSelector{
-		active:       SourceTushareWS,
+		active:       active,
 		sourceErrors: make(map[string]string),
 	}
 }
@@ -92,6 +104,20 @@ func (s *RealtimeSourceSelector) SourcesError() map[string]string {
 	for _, src := range []string{SourceTushareWS, SourceTushareProxy, SourceSina, SourceEastmoney, SourceNews} {
 		if _, ok := out[src]; !ok {
 			out[src] = ""
+		}
+	}
+	return out
+}
+
+// FilterOutSinaSources 从 Pull 源列表中移除新浪（当 SinaRealtimeDisabled 时）。
+func FilterOutSinaSources(src []string) []string {
+	if !SinaRealtimeDisabled || len(src) == 0 {
+		return src
+	}
+	out := make([]string, 0, len(src))
+	for _, s := range src {
+		if s != SourceSina {
+			out = append(out, s)
 		}
 	}
 	return out

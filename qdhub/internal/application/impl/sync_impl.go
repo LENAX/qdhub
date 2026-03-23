@@ -130,6 +130,30 @@ func (s *SyncApplicationServiceImpl) execCorrespondsToCurrentActive(plan *sync.S
 
 // otherRealtimeSource 返回另一实时源（用于故障切换）。
 func otherRealtimeSource(source string) string {
+	if realtimestore.SinaRealtimeDisabled && realtimestore.TushareWSRealtimeDisabled {
+		return ""
+	}
+	if realtimestore.SinaRealtimeDisabled {
+		if source == realtimestore.SourceTushareProxy && !realtimestore.TushareWSRealtimeDisabled {
+			return realtimestore.SourceTushareWS
+		}
+		if source == realtimestore.SourceTushareWS {
+			return realtimestore.SourceTushareProxy
+		}
+		return ""
+	}
+	if realtimestore.TushareWSRealtimeDisabled {
+		if source == realtimestore.SourceTushareWS {
+			return ""
+		}
+		if source == realtimestore.SourceSina {
+			return realtimestore.SourceTushareProxy
+		}
+		if source == realtimestore.SourceTushareProxy {
+			return realtimestore.SourceSina
+		}
+		return ""
+	}
 	if source == realtimestore.SourceTushareWS {
 		return realtimestore.SourceSina
 	}
@@ -744,7 +768,7 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			PullIntervalSecs: pullSecs,
 			FixedParamsByAPI: fixedParamsByAPI,
 		}
-		// 生产环境且计划含 ts_realtime_mkt_tick：同时启动 WS 与 Sina 双 workflow，创建两个 execution。
+		// 生产环境且计划含 ts_realtime_mkt_tick：仅启动 ts_proxy/WS tick；新浪并行 workflow 由 SinaRealtimeDisabled 关闭。
 		if s.realtimeEnv == "production" && containsString(apiNames, "ts_realtime_mkt_tick") {
 			reqWS := baseReq
 			reqWS.APINames = []string{"ts_realtime_mkt_tick"}
@@ -752,14 +776,16 @@ func (s *SyncApplicationServiceImpl) ExecuteSyncPlan(ctx context.Context, planID
 			if err1 != nil {
 				return "", fmt.Errorf("failed to execute realtime WS workflow: %w", err1)
 			}
-			reqSina := baseReq
-			reqSina.APINames = []string{"realtime_quote"}
-			id2, err2 := s.workflowExecutor.ExecuteRealtimeDataSync(ctx, reqSina)
-			if err2 != nil {
-				return "", fmt.Errorf("failed to execute realtime Sina workflow: %w", err2)
-			}
 			instanceID = id1
-			dualRealtimeSecondInstanceID = id2
+			if !realtimestore.SinaRealtimeDisabled {
+				reqSina := baseReq
+				reqSina.APINames = []string{"realtime_quote"}
+				id2, err2 := s.workflowExecutor.ExecuteRealtimeDataSync(ctx, reqSina)
+				if err2 != nil {
+					return "", fmt.Errorf("failed to execute realtime Sina workflow: %w", err2)
+				}
+				dualRealtimeSecondInstanceID = id2
+			}
 		} else {
 			var err error
 			instanceID, err = s.workflowExecutor.ExecuteRealtimeDataSync(ctx, baseReq)

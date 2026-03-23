@@ -268,39 +268,45 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		if e.realtimeSourceResolver != nil {
 			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeTsRealtimeMktTick)
 			if err == nil && len(sources) > 0 {
-				first := sources[0]
-				cfg, _ := first.ConfigMap()
-				if first.Type == domainrealtime.TypeTushareProxy {
-					dbWS, _ := cfg["ws_url"].(string)
-					dbRSA, _ := cfg["rsa_public_key_path"].(string)
-					wsURL, rsaPath := MergeTushareProxyConfig(dbWS, dbRSA, e.tushareProxyWSURL, e.tushareProxyRSAPublicKeyPath)
-					if wsURL != "" && rsaPath != "" {
-						collector = &realtime.ForwardTickCollector{
-							ForwardWSURL:            wsURL,
-							ForwardRSAPublicKeyPath: rsaPath,
-							TargetDBPath:            req.TargetDBPath,
-							Selector:                e.realtimeSourceSelector,
+				for _, src := range sources {
+					cfg, _ := src.ConfigMap()
+					if src.Type == domainrealtime.TypeTushareProxy {
+						dbWS, _ := cfg["ws_url"].(string)
+						dbRSA, _ := cfg["rsa_public_key_path"].(string)
+						wsURL, rsaPath := MergeTushareProxyConfig(dbWS, dbRSA, e.tushareProxyWSURL, e.tushareProxyRSAPublicKeyPath)
+						if wsURL != "" && rsaPath != "" {
+							collector = &realtime.ForwardTickCollector{
+								ForwardWSURL:            wsURL,
+								ForwardRSAPublicKeyPath: rsaPath,
+								TargetDBPath:            req.TargetDBPath,
+								Selector:                e.realtimeSourceSelector,
+							}
+							collectorName = "tushare_proxy_tick"
+							break
 						}
-						collectorName = "tushare_proxy_tick"
 					}
-				}
-				if collector == nil && first.Type == domainrealtime.TypeTushareWS {
-					if e.tushareRealtimeSource == "forward" {
-						return "", fmt.Errorf("ts_realtime_mkt_tick: TUSHARE_REALTIME_SOURCE=forward does not use direct Tushare WS; disable or lower priority of tushare_ws source, or configure tushare_proxy")
+					if src.Type == domainrealtime.TypeTushareWS {
+						if realtimestore.TushareWSRealtimeDisabled {
+							continue
+						}
+						if e.tushareRealtimeSource == "forward" {
+							return "", fmt.Errorf("ts_realtime_mkt_tick: TUSHARE_REALTIME_SOURCE=forward does not use direct Tushare WS; disable or lower priority of tushare_ws source, or configure tushare_proxy")
+						}
+						topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
+						token := req.Token
+						if t, _ := cfg["token"].(string); strings.TrimSpace(t) != "" {
+							token = t
+						}
+						collector = &realtime.TushareWSTickCollector{
+							Token:        token,
+							TargetDBPath: req.TargetDBPath,
+							Topic:        topic,
+							Codes:        codes,
+							Selector:     e.realtimeSourceSelector,
+						}
+						collectorName = "tushare_ws_tick"
+						break
 					}
-					topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
-					token := req.Token
-					if t, _ := cfg["token"].(string); strings.TrimSpace(t) != "" {
-						token = t
-					}
-					collector = &realtime.TushareWSTickCollector{
-						Token:        token,
-						TargetDBPath: req.TargetDBPath,
-						Topic:        topic,
-						Codes:        codes,
-						Selector:     e.realtimeSourceSelector,
-					}
-					collectorName = "tushare_ws_tick"
 				}
 			}
 		}
@@ -318,6 +324,8 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 				collectorName = "tushare_proxy_tick"
 			} else if e.tushareRealtimeSource == "forward" {
 				return "", fmt.Errorf("ts_realtime_mkt_tick: TUSHARE_REALTIME_SOURCE=forward but tushare proxy is not configured (set TUSHARE_PROXY_WS_URL and TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH and/or realtime_sources tushare_proxy ws_url, rsa_public_key_path)")
+			} else if realtimestore.TushareWSRealtimeDisabled {
+				return "", fmt.Errorf("ts_realtime_mkt_tick: 直连 Tushare WebSocket 已禁用，请配置 TUSHARE_REALTIME_SOURCE=forward 与 ts_proxy（TUSHARE_PROXY_WS_URL、TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH）")
 			} else {
 				topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
 				collector = &realtime.TushareWSTickCollector{
@@ -371,9 +379,15 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		collectorName string
 	)
 
-	// 开发环境仅 Sina 时，将 Selector 设为 sina，使 Sina 数据写入 LatestQuoteStore，前端可无感读取（设计 doc 3.2）。
+	// 开发环境：未禁用新浪时默认 Selector=sina；禁用新浪且已配 forward 时主源为 tushare_proxy（与生产一致）。
 	if e.realtimeEnv == "development" && e.realtimeSourceSelector != nil {
-		e.realtimeSourceSelector.SwitchTo(realtimestore.SourceSina)
+		if realtimestore.SinaRealtimeDisabled {
+			if useForwardInDev {
+				e.realtimeSourceSelector.SwitchTo(realtimestore.SourceTushareProxy)
+			}
+		} else {
+			e.realtimeSourceSelector.SwitchTo(realtimestore.SourceSina)
+		}
 	}
 
 	// realtime_tick 使用 SSE Push 模式，通过 TickPushCollector + eastmoney 适配器消费分笔数据。
@@ -393,19 +407,26 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 		}
 		collectorName = "tushare_tick_push"
 	} else {
-		sourcesOrder := []string{"sina"}
+		var sourcesOrder []string
+		if !realtimestore.SinaRealtimeDisabled {
+			sourcesOrder = []string{"sina"}
+		}
 		if e.realtimeSourceResolver != nil {
 			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeRealtimeQuote)
 			if err == nil && len(sources) > 0 {
 				sourcesOrder = make([]string, 0, len(sources))
 				for _, s := range sources {
+					if realtimestore.SinaRealtimeDisabled && s.Type == domainrealtime.TypeSina {
+						continue
+					}
 					sourcesOrder = append(sourcesOrder, s.Type)
 				}
-				if e.realtimeSourceSelector != nil {
-					e.realtimeSourceSelector.SwitchTo(sources[0].Type)
+				if len(sourcesOrder) > 0 && e.realtimeSourceSelector != nil {
+					e.realtimeSourceSelector.SwitchTo(sourcesOrder[0])
 				}
 			}
 		}
+		sourcesOrder = realtimestore.FilterOutSinaSources(sourcesOrder)
 		collector = &realtime.QuotePullCollector{
 			DataSourceName:   req.DataSourceName,
 			Token:            req.Token,

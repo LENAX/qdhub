@@ -135,8 +135,15 @@ func TestRealtimeSyncController_StartAndStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, running0)
 
-	// StartRealtimeSync：应创建执行并 SwitchTo(sina)
+	// StartRealtimeSync：全局禁用新浪时不应启动 sina 计划
 	err = controller.StartRealtimeSync(ctx, sinaSourceID)
+	if realtimestore.SinaRealtimeDisabled {
+		require.Error(t, err)
+		runningAfterFail, err2 := syncPlanRepo.GetRunningExecutionByPlanID(shared.ID("realtime-sina-quote"))
+		require.NoError(t, err2)
+		assert.Nil(t, runningAfterFail)
+		return
+	}
 	require.NoError(t, err)
 	assert.Equal(t, realtimestore.SourceSina, selector.CurrentSource())
 
@@ -145,7 +152,6 @@ func TestRealtimeSyncController_StartAndStop(t *testing.T) {
 	require.NotNil(t, running1)
 	assert.Equal(t, sync.ExecStatusRunning, running1.Status)
 
-	// StopRealtimeSync：应取消执行
 	err = controller.StopRealtimeSync(ctx, sinaSourceID)
 	require.NoError(t, err)
 

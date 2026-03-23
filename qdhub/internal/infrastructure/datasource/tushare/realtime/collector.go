@@ -10,6 +10,8 @@ import (
 
 	coreRealtime "github.com/LENAX/task-engine/pkg/core/realtime"
 	"github.com/sirupsen/logrus"
+
+	"qdhub/internal/infrastructure/realtimestore"
 )
 
 // QuotePullCollector 实现 core realtime.DataCollector，用于按固定间隔从 RealtimeAdapterRegistry
@@ -125,11 +127,14 @@ func (c *QuotePullCollector) effectiveInterval(cfg *coreRealtime.ContinuousTaskC
 }
 
 func (c *QuotePullCollector) effectiveSources() []string {
+	var base []string
 	if len(c.Sources) > 0 {
-		return c.Sources
+		base = c.Sources
+	} else if !realtimestore.SinaRealtimeDisabled {
+		// 默认仅使用 sina，后续可结合策略/配置扩展 eastmoney 等
+		base = []string{"sina"}
 	}
-	// 默认仅使用 sina，后续可结合策略/配置扩展 eastmoney 等
-	return []string{"sina"}
+	return realtimestore.FilterOutSinaSources(base)
 }
 
 // pullRealtimeQuoteOnce 针对单次循环执行 realtime_quote 的拉取与 publish。
