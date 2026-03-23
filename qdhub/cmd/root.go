@@ -15,7 +15,7 @@ var (
 	verbose bool
 
 	// Version information (set at build time)
-	Version   = "0.1.1-beta.7"
+	Version   = "0.1.1-beta.8"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )

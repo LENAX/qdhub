@@ -260,10 +260,18 @@ SELECT trade_date,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
                              AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_pct,
-       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) = 0 THEN ts_code END) AS limit_down_sealed,
-       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) > 0 THEN ts_code END) AS limit_down_opened,
-       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_from_limit,
-       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) = 0
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D' AND COALESCE(open_times, 0) > 0
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_opened,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_from_pct
 FROM limit_list_d
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
@@ -368,10 +376,16 @@ SELECT trade_date,
        COUNT(DISTINCT CASE WHEN pct_chg >= 9.8
                              AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
                            THEN ts_code END) AS limit_up_from_pct,
-       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_sealed,
+       COUNT(DISTINCT CASE WHEN "limit" = 'D'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_sealed,
        0 AS limit_down_opened,
-       COUNT(DISTINCT CASE WHEN "limit" = 'D' THEN ts_code END) AS limit_down_from_limit,
-       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8 THEN ts_code END) AS limit_down_from_pct
+       COUNT(DISTINCT CASE WHEN "limit" = 'D'
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_from_limit,
+       COUNT(DISTINCT CASE WHEN pct_chg <= -9.8
+                             AND NOT (TRIM(COALESCE(name, '')) LIKE 'ST%' OR TRIM(COALESCE(name, '')) LIKE '*ST%')
+                           THEN ts_code END) AS limit_down_from_pct
 FROM limit_list_d
 WHERE trade_date BETWEEN ? AND ?
 GROUP BY trade_date ORDER BY trade_date`
@@ -388,7 +402,9 @@ SELECT d.trade_date,
        COUNT(DISTINCT CASE WHEN d.pct_chg >= 9.8
                              AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%')
                            THEN d.ts_code END) AS limit_up_count,
-       COUNT(DISTINCT CASE WHEN d.pct_chg <= -9.8 THEN d.ts_code END) AS limit_down_count,
+       COUNT(DISTINCT CASE WHEN d.pct_chg <= -9.8
+                             AND NOT (TRIM(COALESCE(s.name, '')) LIKE 'ST%' OR TRIM(COALESCE(s.name, '')) LIKE '*ST%')
+                           THEN d.ts_code END) AS limit_down_count,
        COUNT(DISTINCT CASE WHEN d.pct_chg > 0 THEN d.ts_code END) AS up_count,
        COUNT(DISTINCT CASE WHEN d.pct_chg < 0 THEN d.ts_code END) AS down_count,
        COUNT(DISTINCT CASE WHEN d.pct_chg = 0 THEN d.ts_code END) AS flat_count
@@ -484,6 +500,7 @@ ORDER BY l.first_time`
 SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name,
        COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
        COALESCE(ths.last_lu_time, l.last_time, '') AS last_limit_time,
+       COALESCE(ths.limit_type, '') AS limit_type,
        COALESCE(NULLIF(TRIM(ths.lu_desc), ''), '') AS limit_reason,
        COALESCE(ths.price, l.close, 0) AS close,
        COALESCE(ths.pct_chg, l.pct_chg, 0) AS pct_chg,
@@ -545,10 +562,13 @@ ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
 			continue
 		}
 		pct := float(m, "pct_chg")
-		if limitVal == "U" && pct < 9.8 {
+		poolType := str(m, "limit_type")
+		isUpPool := strings.Contains(poolType, "涨停池") || strings.Contains(poolType, "连板池") || strings.Contains(poolType, "冲刺涨停")
+		isDownPool := strings.Contains(poolType, "跌停池")
+		if limitVal == "U" && pct < 9.8 && !isUpPool {
 			continue
 		}
-		if limitVal == "D" && pct > -9.8 {
+		if limitVal == "D" && pct > -9.8 && !isDownPool {
 			continue
 		}
 		out = append(out, analysis.LimitStock{
