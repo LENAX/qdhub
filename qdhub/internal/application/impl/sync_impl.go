@@ -19,6 +19,7 @@ import (
 	"qdhub/internal/domain/sync"
 	"qdhub/internal/domain/workflow"
 	"qdhub/internal/infrastructure/realtimestore"
+	"qdhub/internal/infrastructure/taskengine/jobs"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 )
 
@@ -57,6 +58,9 @@ type SyncApplicationServiceImpl struct {
 	// 可选：用于增量模式下从目标 DuckDB 查询 MAX(列) 得到数据最新日期
 	quantDBFactory datastore.QuantDBFactory
 
+	// 可选：取消实时执行时刷满批 tick 写队列尾批
+	quantDBWriteQueue datastore.QuantDBWriteQueue
+
 	// 多实时数据源：production 时双 workflow，仅当前选中源写 Store；失败时切换
 	realtimeEnv             string
 	realtimeSourceSelector  *realtimestore.RealtimeSourceSelector
@@ -75,6 +79,7 @@ func NewSyncApplicationService(
 	uow contracts.UnitOfWork,
 	metadataRepo metadata.Repository,
 	quantDBFactory datastore.QuantDBFactory,
+	quantDBWriteQueue datastore.QuantDBWriteQueue,
 	realtimeEnv string,
 	realtimeSourceSelector *realtimestore.RealtimeSourceSelector,
 ) contracts.SyncApplicationService {
@@ -93,8 +98,9 @@ func NewSyncApplicationService(
 		uow:                     uow,
 		metadataRepo:            metadataRepo,
 		quantDBFactory:          quantDBFactory,
-		realtimeEnv:              realtimeEnv,
-		realtimeSourceSelector:   realtimeSourceSelector,
+		quantDBWriteQueue:       quantDBWriteQueue,
+		realtimeEnv:             realtimeEnv,
+		realtimeSourceSelector:  realtimeSourceSelector,
 	}
 }
 
@@ -1475,6 +1481,15 @@ func (s *SyncApplicationServiceImpl) CancelExecution(ctx context.Context, execut
 		if err := s.taskEngineAdapter.CancelInstance(ctx, exec.WorkflowInstID.String()); err != nil {
 			return fmt.Errorf("failed to cancel workflow: %w", err)
 		}
+	}
+
+	// ts_realtime_mkt_tick 在 Job 内按 1000 条/30s 聚合；停流后若无新事件则尾批不会自动落库
+	if s.quantDBFactory != nil {
+		flushCtx, cancelFlush := context.WithTimeout(ctx, 90*time.Second)
+		if _, err := jobs.FlushPendingTushareTickBatches(flushCtx, s.quantDBFactory, s.quantDBWriteQueue); err != nil {
+			logrus.Warnf("[CancelExecution] FlushPendingTushareTickBatches: %v", err)
+		}
+		cancelFlush()
 	}
 
 	// Get plan for status check

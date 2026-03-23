@@ -59,6 +59,7 @@ func TestScheduledPlanExecutor_Integration_TriggerSync(t *testing.T) {
 		uowImpl,
 		nil, // metadataRepo
 		nil, // quantDBFactory
+		nil, // quantDBWriteQueue
 		"",
 		nil,
 	)

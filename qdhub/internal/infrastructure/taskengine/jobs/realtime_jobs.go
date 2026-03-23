@@ -277,11 +277,11 @@ func RealtimeCloseBufferJob(tc *task.TaskContext) (interface{}, error) {
 	return nil, nil
 }
 
-// writeRealtimeBatchToDuckDB 将一批实时数据写入 DuckDB 中对应的表。
-// 复用于旧的 buffer 模式与新的 Streaming DataHandler。
-func writeRealtimeBatchToDuckDB(
+// writeRealtimeRowsWithFactory 使用工厂与可选写队列将一批行写入 DuckDB（不依赖 TaskContext）。
+func writeRealtimeRowsWithFactory(
 	ctx context.Context,
-	tc *task.TaskContext,
+	factory datastore.QuantDBFactory,
+	wq datastore.QuantDBWriteQueue,
 	targetDBPath string,
 	apiName string,
 	source string,
@@ -290,35 +290,37 @@ func writeRealtimeBatchToDuckDB(
 	if len(rows) == 0 {
 		return 0, nil
 	}
+	if factory == nil {
+		return 0, fmt.Errorf("QuantDBFactory required")
+	}
 	tableName := safeTableName(apiName)
 	if tableName == "" {
 		logrus.Warnf("[writeRealtimeBatch] skip batch: empty api_name")
 		return 0, fmt.Errorf("empty api_name")
 	}
 
-	// Fail fast check if table exists if QuantDBFactory is available
-	quantDB, err := GetQuantDBForPath(tc, targetDBPath)
-	if err == nil {
-		exists, err := quantDB.TableExists(ctx, tableName)
-		if err != nil {
-			logrus.Warnf("[writeRealtimeBatch] TableExists %s: %v, skip batch", tableName, err)
-			return 0, err
-		}
-		if !exists {
-			logrus.Warnf("[writeRealtimeBatch] table %s does not exist, skip batch (run create_tables first)", tableName)
-			return 0, fmt.Errorf("table %s does not exist", tableName)
-		}
+	quantDB, err := factory.Create(datastore.QuantDBConfig{
+		Type:        datastore.DataStoreTypeDuckDB,
+		StoragePath: targetDBPath,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("open quantdb: %w", err)
 	}
 
-	wqIntf, ok := tc.GetDependency("QuantDBWriteQueue")
+	exists, err := quantDB.TableExists(ctx, tableName)
+	if err != nil {
+		logrus.Warnf("[writeRealtimeBatch] TableExists %s: %v, skip batch", tableName, err)
+		return 0, err
+	}
+	if !exists {
+		logrus.Warnf("[writeRealtimeBatch] table %s does not exist, skip batch (run create_tables first)", tableName)
+		return 0, fmt.Errorf("table %s does not exist", tableName)
+	}
+
 	var n int64
-	if !ok || wqIntf == nil {
-		if quantDB == nil {
-			return 0, fmt.Errorf("no QuantDB nor WriteQueue available")
-		}
+	if wq == nil {
 		n, err = quantDB.BulkInsert(ctx, tableName, rows)
 	} else {
-		wq := wqIntf.(datastore.QuantDBWriteQueue)
 		n, err = wq.EnqueueAndWait(ctx, datastore.QuantDBBatchWriteRequest{
 			Path:      targetDBPath,
 			TableName: tableName,
@@ -332,6 +334,31 @@ func writeRealtimeBatchToDuckDB(
 	}
 	logrus.Printf("[writeRealtimeBatch] wrote api=%s source=%s rows=%d", apiName, source, n)
 	return n, nil
+}
+
+// writeRealtimeBatchToDuckDB 将一批实时数据写入 DuckDB 中对应的表。
+// 复用于旧的 buffer 模式与新的 Streaming DataHandler。
+func writeRealtimeBatchToDuckDB(
+	ctx context.Context,
+	tc *task.TaskContext,
+	targetDBPath string,
+	apiName string,
+	source string,
+	rows []map[string]any,
+) (int64, error) {
+	factoryInterface, ok := tc.GetDependency("QuantDBFactory")
+	if !ok || factoryInterface == nil {
+		return 0, fmt.Errorf("QuantDBFactory dependency not found")
+	}
+	factory, ok := factoryInterface.(datastore.QuantDBFactory)
+	if !ok {
+		return 0, fmt.Errorf("QuantDBFactory has wrong type")
+	}
+	var wq datastore.QuantDBWriteQueue
+	if wqIntf, ok := tc.GetDependency("QuantDBWriteQueue"); ok && wqIntf != nil {
+		wq, _ = wqIntf.(datastore.QuantDBWriteQueue)
+	}
+	return writeRealtimeRowsWithFactory(ctx, factory, wq, targetDBPath, apiName, source, rows)
 }
 
 // RealtimeQuoteStreamHandlerJob 为 Streaming Workflow 提供 DataHandler：从 ctx.Params["data"] 读取实时行情数据，
@@ -401,15 +428,73 @@ func RealtimeQuoteStreamHandlerJob(tc *task.TaskContext) (interface{}, error) {
 
 type tushareBatchState struct {
 	firstArrival time.Time
+	apiName      string
+	targetDBPath string
 	rows         []map[string]any
 }
 
 var (
 	tushareBatchMu     sync.Mutex
-	tushareBatchByAPI  = make(map[string]*tushareBatchState)
+	tushareBatchByKey  = make(map[string]*tushareBatchState) // key = apiName + "\x00" + targetDBPath
 	tushareBatchSize   = 1000
 	tushareBatchMaxAge = 30 * time.Second
 )
+
+func tushareTickBatchKey(apiName, targetDBPath string) string {
+	return apiName + "\x00" + targetDBPath
+}
+
+// FlushPendingTushareTickBatches 将 TushareTickDBBatchWriteJob 内存中未满批（<1000 且未满 30s）的 tick 写入 DuckDB。
+// 须在取消实时工作流或进程退出前调用，否则午休/收盘停流会导致尾批永久滞留内存。
+func FlushPendingTushareTickBatches(ctx context.Context, factory datastore.QuantDBFactory, wq datastore.QuantDBWriteQueue) (int64, error) {
+	if factory == nil {
+		return 0, nil
+	}
+	type pending struct {
+		apiName      string
+		targetDBPath string
+		rows         []map[string]any
+	}
+	tushareBatchMu.Lock()
+	var list []pending
+	for _, st := range tushareBatchByKey {
+		if st == nil || len(st.rows) == 0 {
+			continue
+		}
+		cp := make([]map[string]any, len(st.rows))
+		copy(cp, st.rows)
+		list = append(list, pending{apiName: st.apiName, targetDBPath: st.targetDBPath, rows: cp})
+		st.rows = st.rows[:0]
+		st.firstArrival = time.Now()
+	}
+	tushareBatchMu.Unlock()
+
+	var total int64
+	for _, p := range list {
+		quantDB, err := factory.Create(datastore.QuantDBConfig{
+			Type:        datastore.DataStoreTypeDuckDB,
+			StoragePath: p.targetDBPath,
+		})
+		if err != nil {
+			logrus.Errorf("[TushareTickFlush] open db path=%s: %v", p.targetDBPath, err)
+			continue
+		}
+		if err := ensureTushareTickTable(ctx, quantDB, p.apiName); err != nil {
+			logrus.Errorf("[TushareTickFlush] ensure table api=%s: %v", p.apiName, err)
+			continue
+		}
+		n, err := writeRealtimeRowsWithFactory(ctx, factory, wq, p.targetDBPath, p.apiName, "tushare_ws", p.rows)
+		if err != nil {
+			logrus.Errorf("[TushareTickFlush] path=%s api=%s rows=%d: %v", p.targetDBPath, p.apiName, len(p.rows), err)
+			continue
+		}
+		total += n
+	}
+	if total > 0 {
+		logrus.Infof("[TushareTickFlush] flushed %d pending tick rows", total)
+	}
+	return total, nil
+}
 
 // TushareTickDBBatchWriteJob 作为 db_sink 的 DataHandler：
 // 按 api_name 聚合批次，满足 1000 条或等待超时 30s 时批量写入 DuckDB。
@@ -433,11 +518,17 @@ func TushareTickDBBatchWriteJob(tc *task.TaskContext) (interface{}, error) {
 	}
 
 	now := time.Now()
+	batchKey := tushareTickBatchKey(apiName, targetDBPath)
 	tushareBatchMu.Lock()
-	state := tushareBatchByAPI[apiName]
+	state := tushareBatchByKey[batchKey]
 	if state == nil {
-		state = &tushareBatchState{firstArrival: now, rows: make([]map[string]any, 0, tushareBatchSize)}
-		tushareBatchByAPI[apiName] = state
+		state = &tushareBatchState{
+			firstArrival: now,
+			apiName:      apiName,
+			targetDBPath: targetDBPath,
+			rows:         make([]map[string]any, 0, tushareBatchSize),
+		}
+		tushareBatchByKey[batchKey] = state
 	}
 	for _, r := range rows {
 		delete(r, "target_db_path")

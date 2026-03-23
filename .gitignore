@@ -64,4 +64,4 @@ qdhub/data/qdhub.db-wal
 roadmap.md
 bak
 qdhub/data
-.gitignore
+.backup-data-*/

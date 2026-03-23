@@ -123,6 +123,7 @@ func TestRealtimeSyncController_StartAndStop(t *testing.T) {
 		uowImpl,
 		metadataRepo,
 		nil,
+		nil,
 		"",
 		nil,
 	)

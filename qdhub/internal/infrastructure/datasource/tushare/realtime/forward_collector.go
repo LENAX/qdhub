@@ -110,6 +110,7 @@ func (c *ForwardTickCollector) runOnce(ctx context.Context, publish coreRealtime
 		})
 		if err := publish(event); err != nil {
 			logrus.Warnf("[ForwardTickCollector] publish batch(%d): %v", len(batch), err)
+			return // 保留 batch，下次 ticker 或 ctx.Done 再试，避免静默丢数
 		}
 		batch = make([]map[string]interface{}, 0, 256)
 		runtime.GC()

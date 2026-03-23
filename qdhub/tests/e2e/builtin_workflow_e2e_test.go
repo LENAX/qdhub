@@ -718,6 +718,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		uowImpl,
 		metadataRepo,
 		quantDBFactory,
+		quantDBWriteQueue,
 		"",
 		nil,
 	)

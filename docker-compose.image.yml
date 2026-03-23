@@ -1,5 +1,5 @@
 # 仅用镜像部署，不包含 build，无需源码
-# 用法：在阿里云上放本文件 + .env.aliyun，执行 pull + up；IMAGE_TAG 与构建时一致（如 v0.1.0-beta.2）
+# 用法：在阿里云上放本文件 + .env.aliyun，执行 pull + up；IMAGE_TAG 与构建时一致（如 v0.1.1-beta.5）
 services:
   backend:
     image: ${DOCKER_REGISTRY:?err}qdhub-backend:${IMAGE_TAG:-latest}

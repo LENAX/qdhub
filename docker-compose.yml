@@ -1,7 +1,7 @@
 # QDHub - base compose (production or default)
 # Dev with hot reload: use docker-compose.override.yml (auto-merged when present)
 # 发布镜像：本地 build 后 push；阿里云上只 pull + up，无需源码（见 DEPLOY.md）
-# 版本号：与代码库 tag 一致，如 IMAGE_TAG=v0.1.0-beta.2
+# 版本号：与代码库 tag 一致，如 IMAGE_TAG=v0.1.1-beta.5
 services:
   backend:
     image: ${DOCKER_REGISTRY:-}qdhub-backend:${IMAGE_TAG:-latest}

@@ -308,6 +308,7 @@ func setupRealtimeSyncE2EContext(t *testing.T, csvPath string) *realtimeSyncE2EC
 		uowImpl,
 		metadataRepo,
 		quantDBFactory,
+		quantDBWriteQueue,
 		"",
 		nil,
 	)
@@ -558,6 +559,7 @@ func TestE2E_RealtimeSync_Real(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -780,6 +782,7 @@ func TestE2E_RealtimeSync_Real_Tick_Sina(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -1012,6 +1015,7 @@ func TestE2E_RealtimeSync_Real_List_Sina(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -1208,6 +1212,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Sina(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -1408,6 +1413,7 @@ func TestE2E_RealtimeSync_Real_LargeBatch500_Eastmoney(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -1618,6 +1624,7 @@ func TestE2E_RealtimeSync_Real_List_Eastmoney(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 
@@ -1810,6 +1817,7 @@ func TestE2E_RealtimeSync_Real_Tick_Eastmoney(t *testing.T) {
 		syncPlanRepo, sync.NewCronScheduleCalculator(), nil,
 		dataSourceRepo, datastoreRepo, workflowExecutor, sync.NewDependencyResolver(),
 		taskEngineAdapter, uow.NewUnitOfWork(db), metadataRepo, quantDBFactory,
+		quantDBWriteQueue,
 		"", nil,
 	)
 

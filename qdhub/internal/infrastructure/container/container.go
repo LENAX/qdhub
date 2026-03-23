@@ -46,6 +46,7 @@ import (
 	"qdhub/internal/infrastructure/realtimestore"
 	"qdhub/internal/infrastructure/scheduler"
 	"qdhub/internal/infrastructure/taskengine"
+	"qdhub/internal/infrastructure/taskengine/jobs"
 	"qdhub/internal/infrastructure/taskengine/workflows"
 	httpserver "qdhub/internal/interfaces/http"
 	"qdhub/pkg/config"
@@ -1143,6 +1144,7 @@ func (c *Container) initApplicationServices() error {
 		c.UoW,
 		c.MetadataRepo,
 		c.QuantDBFactory,
+		c.QuantDBWriteQueue,
 		c.config.RealtimeEnv,
 		c.RealtimeSourceSelector,
 	)
@@ -1417,6 +1419,15 @@ func (c *Container) Shutdown(ctx context.Context) error {
 		case <-ctx.Done():
 			logrus.Warn("Context cancelled while waiting for scheduler to stop")
 		}
+	}
+
+	// 实时 tick 在 TushareTickDBBatchWriteJob 内尚有未满批时，须在停 Task Engine / 关写队列前刷入 DuckDB
+	if c.QuantDBFactory != nil {
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 90*time.Second)
+		if _, err := jobs.FlushPendingTushareTickBatches(flushCtx, c.QuantDBFactory, c.QuantDBWriteQueue); err != nil {
+			logrus.Warnf("FlushPendingTushareTickBatches: %v", err)
+		}
+		cancelFlush()
 	}
 
 	// Shutdown Task Engine

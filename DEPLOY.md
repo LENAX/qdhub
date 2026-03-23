@@ -146,7 +146,7 @@ cd ~/qdhub-deploy
 # 镜像仓库（与推送时一致，结尾带 /）及版本号（可选）
 DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
 # IMAGE_TAG 不设时默认 latest；如需固定版本可取消注释
-# IMAGE_TAG=v0.1.0-beta.4
+# IMAGE_TAG=v0.1.1-beta.5
 
 # 数据与日志（阿里云数据盘）
 QDHUB_DATA_DIR=/mnt/vdb/qdhub/data
