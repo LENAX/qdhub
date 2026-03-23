@@ -434,8 +434,8 @@ GROUP BY trade_date ORDER BY trade_date`
 }
 
 // GetByDateAndType 涨跌停个股列表（limitType: up/down/z，对应 limit_list_d.limit 的 U/D/Z）
-// 涨停时若有 limit_list_ths 表则以其为主表；否则用 limit_list_d 按 limit 字段筛选。
-// 使用 limit_list_ths 时必须 INNER JOIN limit_list_d 且 limit='U'，避免同花顺表含跌停/炸板池时混入非涨停。
+// 默认优先使用 limit_list_ths（涨停池/跌停池/炸板池），无数据时回退 limit_list_d。
+// 使用 limit_list_ths 时通过 INNER JOIN limit_list_d 并按 limit 约束类型，避免混池。
 func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType string) ([]analysis.LimitStock, error) {
 	limitVal := strings.ToUpper(limitType)
 	switch limitVal {
@@ -450,14 +450,16 @@ func (r *Readers) GetByDateAndType(ctx context.Context, tradeDate, limitType str
 			limitVal = "U"
 		}
 	}
-	// 默认用 limit_list_d 查询，按 limit 筛选，并用 pct_chg 兜底防止错误分类混入
-	pctCondition := ""
-	if limitVal == "U" {
-		pctCondition = " AND l.pct_chg >= 9.8"
-	} else if limitVal == "D" {
-		pctCondition = " AND l.pct_chg <= -9.8"
-	}
-	sql := `
+
+	loadFromLimitListD := func() ([]map[string]any, error) {
+		// 回退：limit_list_d，按 limit + pct_chg 双重约束，避免错误分类混入
+		pctCondition := ""
+		if limitVal == "U" {
+			pctCondition = " AND l.pct_chg >= 9.8"
+		} else if limitVal == "D" {
+			pctCondition = " AND l.pct_chg <= -9.8"
+		}
+		sql := `
 SELECT l.ts_code, COALESCE(s.name, l.name, '') AS name,
        COALESCE(l.first_time, '') AS limit_time,
        COALESCE(l.last_time, '') AS last_limit_time,
@@ -472,11 +474,13 @@ FROM limit_list_d l
 LEFT JOIN stock_basic s ON l.ts_code = s.ts_code
 WHERE l.trade_date = ? AND l."limit" = ?` + pctCondition + `
 ORDER BY l.first_time`
-	args := []interface{}{tradeDate, limitVal}
-	if limitType == "up" || limitType == "U" {
-		if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
-			// 以 limit_list_ths 为主表；INNER JOIN limit_list_d 且 limit='U'，只返回涨停，避免同花顺表含跌停/炸板池时混入
-			sql = `
+		return r.db.Query(ctx, sql, tradeDate, limitVal)
+	}
+
+	// 默认先查同花顺表；同日无数据时回退到 limit_list_d
+	rows := make([]map[string]any, 0)
+	if thsOk, _ := r.db.TableExists(ctx, "limit_list_ths"); thsOk {
+		thsSQL := `
 SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name,
        COALESCE(ths.first_lu_time, l.first_time, '') AS limit_time,
        COALESCE(ths.last_lu_time, l.last_time, '') AS last_limit_time,
@@ -489,17 +493,31 @@ SELECT ths.ts_code, COALESCE(s.name, ths.name, l.name, '') AS name,
        COALESCE(ths.open_num, l.open_times, 0) AS open_times,
        COALESCE(s.industry, l.industry, '') AS industry
 FROM limit_list_ths ths
-INNER JOIN limit_list_d l ON l.ts_code = ths.ts_code AND l.trade_date = ths.trade_date AND l."limit" = 'U' AND l.pct_chg >= 9.8
+LEFT JOIN limit_list_d l ON l.ts_code = ths.ts_code AND l.trade_date = ths.trade_date
 LEFT JOIN stock_basic s ON s.ts_code = ths.ts_code
 WHERE ths.trade_date = ?
+  AND (
+    (? = 'U' AND ((l."limit" = 'U') OR (l."limit" IS NULL AND COALESCE(ths.pct_chg, 0) >= 9.8)))
+    OR
+    (? = 'D' AND ((l."limit" = 'D') OR (l."limit" IS NULL AND COALESCE(ths.pct_chg, 0) <= -9.8)))
+    OR
+    (? = 'Z' AND ((l."limit" = 'Z') OR (l."limit" IS NULL AND COALESCE(ths.open_num, 0) > 0 AND COALESCE(ths.pct_chg, 0) < 9.8)))
+  )
 ORDER BY COALESCE(ths.first_lu_time, l.first_time)`
-			args = []interface{}{tradeDate}
+		thsRows, thsErr := r.db.Query(ctx, thsSQL, tradeDate, limitVal, limitVal, limitVal)
+		if thsErr == nil && len(thsRows) > 0 {
+			rows = thsRows
 		}
 	}
-	rows, err := r.db.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
+
+	if len(rows) == 0 {
+		ldRows, err := loadFromLimitListD()
+		if err != nil {
+			return nil, err
+		}
+		rows = ldRows
 	}
+
 	out := make([]analysis.LimitStock, 0, len(rows))
 	for _, m := range rows {
 		name := str(m, "name")
