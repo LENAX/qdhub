@@ -20,6 +20,10 @@ services:
       - QDHUB_SYNC_MEM_CRITICAL_MB=${QDHUB_SYNC_MEM_CRITICAL_MB:-4096}
       - QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS=${QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS:-100}
       - QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS=${QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS:-400}
+      # 实时 tick 经内地 ts_proxy（Tushare 转发）；与 QDHUB_KEY_DIR 挂载的 public.pem 一致。可在 .env 覆盖 TUSHARE_PROXY_WS_URL
+      - TUSHARE_REALTIME_SOURCE=${TUSHARE_REALTIME_SOURCE:-forward}
+      - TUSHARE_PROXY_WS_URL=${TUSHARE_PROXY_WS_URL:-ws://47.107.235.54:8888/realtime}
+      - TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH=${TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH:-/root/.key/public.pem}
     volumes:
       - ${QDHUB_DATA_DIR:-/mnt/vdb/.qdhub/data}:/app/data
       - ${QDHUB_LOG_DIR:-/mnt/vdb/.qdhub/logs}:/app/logs

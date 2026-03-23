@@ -36,11 +36,11 @@ type WorkflowExecutorImpl struct {
 	realtimeEnv             string
 	realtimeSourceSelector  *realtimestore.RealtimeSourceSelector
 	// tushareRealtimeSource: "forward"=从 ts_proxy 接收，"direct"=直连 Tushare WS。默认 forward。
-	tushareRealtimeSource         string
+	tushareRealtimeSource        string
 	tushareProxyWSURL            string
 	tushareProxyRSAPublicKeyPath string
-	realtimeSourceResolver         RealtimeSourceResolver // optional: when set, use GetOrderedByPurpose for collector config
-	syncAPIDataJobTimeoutSec       int                    // 与 task_engine.task_timeout 一致，动态构建 BatchDataSync 时注入 Builder
+	realtimeSourceResolver       RealtimeSourceResolver // optional: when set, use GetOrderedByPurpose for collector config
+	syncAPIDataJobTimeoutSec     int                    // 与 task_engine.task_timeout 一致，动态构建 BatchDataSync 时注入 Builder
 }
 
 // NewWorkflowExecutor creates a new WorkflowExecutor implementation.
@@ -65,17 +65,17 @@ func NewWorkflowExecutor(
 		tushareRealtimeSource = "forward"
 	}
 	return &WorkflowExecutorImpl{
-		workflowRepo:                   workflowRepo,
-		taskEngineAdapter:              taskEngineAdapter,
-		metadataRepo:                   metadataRepo,
-		realtimeAdapterRegistry:        realtimeAdapterRegistry,
-		realtimeEnv:                    realtimeEnv,
-		realtimeSourceSelector:         realtimeSourceSelector,
-		realtimeSourceResolver:         realtimeSourceResolver,
-		tushareRealtimeSource:         tushareRealtimeSource,
+		workflowRepo:                 workflowRepo,
+		taskEngineAdapter:            taskEngineAdapter,
+		metadataRepo:                 metadataRepo,
+		realtimeAdapterRegistry:      realtimeAdapterRegistry,
+		realtimeEnv:                  realtimeEnv,
+		realtimeSourceSelector:       realtimeSourceSelector,
+		realtimeSourceResolver:       realtimeSourceResolver,
+		tushareRealtimeSource:        tushareRealtimeSource,
 		tushareProxyWSURL:            tushareProxyWSURL,
 		tushareProxyRSAPublicKeyPath: tushareProxyRSAPublicKeyPath,
-		syncAPIDataJobTimeoutSec:       syncAPIDataJobTimeoutSec,
+		syncAPIDataJobTimeoutSec:     syncAPIDataJobTimeoutSec,
 	}
 }
 
@@ -264,22 +264,20 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 	if (e.realtimeEnv == "production" || useForwardInDev) && containsAPI(req.APINames, "ts_realtime_mkt_tick") {
 		var collector taskrealtime.DataCollector
 		var collectorName string
-		// Prefer RealtimeSource from resolver (GetOrderedByPurpose); fallback to env.
+		// Prefer RealtimeSource from resolver (GetOrderedByPurpose); fallback to env（与 DB 配置 merge 规则同健康检查）.
 		if e.realtimeSourceResolver != nil {
 			sources, err := e.realtimeSourceResolver.GetOrderedByPurpose(domainrealtime.PurposeTsRealtimeMktTick)
 			if err == nil && len(sources) > 0 {
 				first := sources[0]
-				if e.realtimeSourceSelector != nil {
-					e.realtimeSourceSelector.SwitchTo(first.Type)
-				}
 				cfg, _ := first.ConfigMap()
 				if first.Type == domainrealtime.TypeTushareProxy {
-					wsURL, _ := cfg["ws_url"].(string)
-					rsaPath, _ := cfg["rsa_public_key_path"].(string)
-					if strings.TrimSpace(wsURL) != "" && strings.TrimSpace(rsaPath) != "" {
+					dbWS, _ := cfg["ws_url"].(string)
+					dbRSA, _ := cfg["rsa_public_key_path"].(string)
+					wsURL, rsaPath := MergeTushareProxyConfig(dbWS, dbRSA, e.tushareProxyWSURL, e.tushareProxyRSAPublicKeyPath)
+					if wsURL != "" && rsaPath != "" {
 						collector = &realtime.ForwardTickCollector{
-							ForwardWSURL:            strings.TrimSpace(wsURL),
-							ForwardRSAPublicKeyPath: strings.TrimSpace(rsaPath),
+							ForwardWSURL:            wsURL,
+							ForwardRSAPublicKeyPath: rsaPath,
 							TargetDBPath:            req.TargetDBPath,
 							Selector:                e.realtimeSourceSelector,
 						}
@@ -287,6 +285,9 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 					}
 				}
 				if collector == nil && first.Type == domainrealtime.TypeTushareWS {
+					if e.tushareRealtimeSource == "forward" {
+						return "", fmt.Errorf("ts_realtime_mkt_tick: TUSHARE_REALTIME_SOURCE=forward does not use direct Tushare WS; disable or lower priority of tushare_ws source, or configure tushare_proxy")
+					}
 					topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
 					token := req.Token
 					if t, _ := cfg["token"].(string); strings.TrimSpace(t) != "" {
@@ -309,12 +310,14 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 				strings.TrimSpace(e.tushareProxyRSAPublicKeyPath) != ""
 			if useForward {
 				collector = &realtime.ForwardTickCollector{
-					ForwardWSURL:            e.tushareProxyWSURL,
-					ForwardRSAPublicKeyPath: e.tushareProxyRSAPublicKeyPath,
+					ForwardWSURL:            strings.TrimSpace(e.tushareProxyWSURL),
+					ForwardRSAPublicKeyPath: strings.TrimSpace(e.tushareProxyRSAPublicKeyPath),
 					TargetDBPath:            req.TargetDBPath,
 					Selector:                e.realtimeSourceSelector,
 				}
 				collectorName = "tushare_proxy_tick"
+			} else if e.tushareRealtimeSource == "forward" {
+				return "", fmt.Errorf("ts_realtime_mkt_tick: TUSHARE_REALTIME_SOURCE=forward but tushare proxy is not configured (set TUSHARE_PROXY_WS_URL and TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH and/or realtime_sources tushare_proxy ws_url, rsa_public_key_path)")
 			} else {
 				topic, codes := resolveTushareWSFixedParams(req.FixedParamsByAPI)
 				collector = &realtime.TushareWSTickCollector{
@@ -325,6 +328,14 @@ func (e *WorkflowExecutorImpl) executeRealtimeStreaming(ctx context.Context, req
 					Selector:     e.realtimeSourceSelector,
 				}
 				collectorName = "tushare_ws_tick"
+			}
+		}
+		if e.realtimeSourceSelector != nil {
+			switch collectorName {
+			case "tushare_proxy_tick":
+				e.realtimeSourceSelector.SwitchTo(realtimestore.SourceTushareProxy)
+			case "tushare_ws_tick":
+				e.realtimeSourceSelector.SwitchTo(realtimestore.SourceTushareWS)
 			}
 		}
 		builder := workflows.NewTushareWSStreamingBuilder(registry, workflows.TushareWSStreamingParams{
@@ -428,6 +439,23 @@ func containsAPI(apiNames []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// MergeTushareProxyConfig 与 container 启动健康检查一致：env 同时提供 URL 与公钥时优先用 env；否则用 DB 值再以 env 补空字段。导出供 tests/unit 黑盒测试。
+func MergeTushareProxyConfig(dbWS, dbRSA, envWS, envRSA string) (ws, rsa string) {
+	dbWS, dbRSA = strings.TrimSpace(dbWS), strings.TrimSpace(dbRSA)
+	envWS, envRSA = strings.TrimSpace(envWS), strings.TrimSpace(envRSA)
+	if envWS != "" && envRSA != "" {
+		return envWS, envRSA
+	}
+	ws, rsa = dbWS, dbRSA
+	if ws == "" && envWS != "" {
+		ws = envWS
+	}
+	if rsa == "" && envRSA != "" {
+		rsa = envRSA
+	}
+	return ws, rsa
 }
 
 // cloneRealtimeRequestWithAPIs 复制请求并替换 APINames，用于开发环境将 ts_realtime_mkt_tick 降级为 realtime_quote。

@@ -155,6 +155,11 @@ QDHUB_LOG_DIR=/mnt/vdb/qdhub/logs
 # ts_proxy 公钥目录（其下放置 public.pem）；挂载为容器内 /root/.key，与默认 rsa_public_key_path 一致
 QDHUB_KEY_DIR=/mnt/vdb/qdhub/keys
 
+# 实时行情 ts_realtime_mkt_tick：经内地 ts_proxy（forward），勿留空否则交易时段计划启动会失败（不会静默改连 Tushare 直连）
+TUSHARE_REALTIME_SOURCE=forward
+TUSHARE_PROXY_WS_URL=ws://47.107.235.54:8888/realtime
+TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH=/root/.key/public.pem
+
 # 生产环境安全配置（强烈建议修改）
 # - QDHUB_SERVER_ENABLE_SWAGGER=false           关闭 /swagger、/docs
 # - QDHUB_AUTH_ADMIN_PASSWORD=<随机强密码>     覆盖默认 admin123（admin 账号）
@@ -177,6 +182,8 @@ sudo chown -R $USER:$USER /mnt/vdb/qdhub
 ```
 
 **ts_proxy（Tushare 转发）公钥**：将内地提供的 `public.pem` 放到 **`QDHUB_KEY_DIR`（默认 `/mnt/vdb/qdhub/keys`）** 下，命名为 **`public.pem`**。`docker-compose.image.yml` 已将该目录**只读**挂载到容器内 **`/root/.key`**，与库里默认的 `rsa_public_key_path` 一致。若公钥放在其他路径，可改 `.env` 中的 `QDHUB_KEY_DIR`，或改数据库 `realtime_sources` 里对应源的 `rsa_public_key_path` 与挂载目标一致。
+
+**ts_proxy WebSocket 地址**：`.env` 中设置 **`TUSHARE_PROXY_WS_URL`**（示例见上文，内地转发机默认路径为 `/realtime`、端口 `8888`），并保持 **`TUSHARE_REALTIME_SOURCE=forward`**。后端会将该地址与库表 `realtime_sources` 中 `tushare_proxy` 的配置合并（与启动健康检查规则一致）。香港 ECS 需能访问该 `ws://` 主机与端口（内地安全组放行香港出口 IP）。连通性可用仓库内 `qdhub/ts_proxy_diagnose` 自测。
 
 **注意**：`public.pem` 权限建议仅运维用户可读（如 `chmod 600`），勿提交到 Git。
 

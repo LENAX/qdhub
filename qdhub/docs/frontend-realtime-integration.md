@@ -10,21 +10,21 @@
 
 | API 名称 | 说明 | 数据源/模式 | 落库表名 | 前端订阅来源 |
 |----------|------|-------------|----------|--------------|
-| **realtime_quote** | 个股实时盘口快照 | 新浪/东财，轮询 Pull | `realtime_quote` | DuckDB 查询 或 **WebSocket 快照**（若后端在跑 Tushare WS 全市场） |
+| **realtime_quote** | 个股实时盘口快照 | 新浪/东财，轮询 Pull | `realtime_quote` | DuckDB 查询 或 **WebSocket 快照**（若后端在跑全市场 tick 写入 LatestQuoteStore） |
 | **realtime_tick** | 个股当日分笔成交 | 东财 SSE Push | `realtime_tick` | DuckDB 查询 |
 | **realtime_list** | 全市场实时涨跌榜 | 新浪/东财，轮询 Pull | `realtime_list` | DuckDB 查询 |
 | **rt_min** | 实时分钟 K 线 | 新浪/东财 Pull | `rt_min` | DuckDB 查询 |
 | **rt_idx_min** | 指数实时分钟 | 同上 | `rt_idx_min` | DuckDB 查询 |
-| **ts_realtime_mkt_tick** | Tushare 全市场 tick（五档盘口） | **Tushare WebSocket 长连接** | `ts_realtime_mkt_tick` | **WebSocket 快照**（推荐）或 DuckDB 查询 |
+| **ts_realtime_mkt_tick** | Tushare 全市场 tick（五档盘口） | **内地 ts_proxy 转发**（默认）或直连 Tushare WS（`TUSHARE_REALTIME_SOURCE=direct`） | `ts_realtime_mkt_tick` | **WebSocket 快照**（推荐）或 DuckDB 查询 |
 
 - **数据源**
   - **新浪（`src="sina"`）**：realtime_quote / realtime_list / realtime_tick。
   - **东方财富（`src="dc"` / `eastmoney`）**：realtime_quote（大批量）、realtime_tick（SSE Push）、realtime_list。
-  - **Tushare（仅 ts_realtime_mkt_tick）**：通过 Tushare 官方 WebSocket `wss://ws.tushare.pro/listening` 订阅全市场 tick，后端落库并写入**内存最新价缓存**，供前端 WebSocket 订阅。
+  - **Tushare（仅 ts_realtime_mkt_tick）**：默认经 **`TUSHARE_REALTIME_SOURCE=forward`** 连接内地 **ts_proxy**（由内地机订阅 `wss://ws.tushare.pro/listening` 再加密转发）；香港 QDHub 不直连 Tushare WS。可选 **`direct`** 时由本机连 Tushare 官方 WS。数据落库并写入**内存最新价缓存**（LatestQuoteStore），供前端 WebSocket 订阅。
 
 - **环境与主数据源**
-  - **环境变量 `QDHUB_ENV`**：`production`（生产）或 `development`（开发，默认）。仅当 `QDHUB_ENV=production` 时，计划中的 `ts_realtime_mkt_tick` 才会走 Tushare WebSocket；否则开发环境一律用 **Sina `realtime_quote`** 替代，不启用 Tushare WS（避免 IP 限制）。
-  - **生产环境双 Collector**：当 `QDHUB_ENV=production` 且计划含 `ts_realtime_mkt_tick` 时，后端**同时启动** Tushare WS 与 Sina `realtime_quote` 两个流；**仅当前选中的数据源**写入内存缓存（LatestQuoteStore）。当前源故障（如 Tushare 被 ban）时自动切换到另一源，另一源已在运行，无需重连。前端通过 WebSocket 推送中的 `current_source`、`sources_health`、`sources_error` 做有限感知（见下）。
+  - **环境变量 `QDHUB_ENV`**：`production`（生产）或 `development`（开发，默认）。仅当 `QDHUB_ENV=production`（或开发机显式配置 forward 的 `TUSHARE_PROXY_WS_URL` 等）时，`ts_realtime_mkt_tick` 才走上述 Tushare 全市场 tick 流；否则开发环境可将 `ts_realtime_mkt_tick` **降级为 Sina `realtime_quote`**（避免本机直连 Tushare 触发 IP 限制）。
+  - **生产 tick 主路径（推荐）**：`TUSHARE_REALTIME_SOURCE=forward` 且配置 `TUSHARE_PROXY_WS_URL` / `TUSHARE_PROXY_RSA_PUBLIC_KEY_PATH`（或与 `realtime_sources` 中 `tushare_proxy` 合并后齐全）。此时**不会**在缺省情况下再静默回落到香港直连 Tushare WS。标准迁移里 **Sina `realtime_quote`** 对应计划（如 `realtime-sina-quote`）**无交易时间窗**，不会与 `ReconcileRunningWindow` 自动并行；仅在你手动 connect 或灾备切换时才会与 tick 流并存。**仅当前选中的数据源**写入 LatestQuoteStore；前端可通过 WebSocket 推送中的 `current_source`、`sources_health`、`sources_error` 感知（见下）。
 
 ### 1.2 前端典型用法
 
