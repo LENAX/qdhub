@@ -233,15 +233,25 @@ func TestForwardTickCollector_Integration_Streaming15s(t *testing.T) {
 	mu.Unlock()
 	cancel()
 
-	assert.GreaterOrEqual(t, len(snapshot), 20, "expected at least 20 ticks in 15s streaming (interval 500ms)")
-	for i, p := range snapshot {
+	totalRows := 0
+	for _, p := range snapshot {
+		data, ok := p.Data.([]map[string]interface{})
+		require.True(t, ok)
+		totalRows += len(data)
+	}
+	assert.GreaterOrEqual(t, totalRows, 20, "expected at least 20 tick rows in 15s streaming (interval 500ms; batched by 3s publish)")
+	rowIdx := 0
+	for _, p := range snapshot {
 		assert.Equal(t, realtimestore.SourceTushareProxy, p.Source)
 		data, ok := p.Data.([]map[string]interface{})
 		require.True(t, ok)
-		require.Len(t, data, 1)
-		assert.Equal(t, "000001.SZ", data[0]["ts_code"])
-		if i < 3 {
-			assert.NotNil(t, data[0]["seq"])
+		require.GreaterOrEqual(t, len(data), 1)
+		for _, row := range data {
+			assert.Equal(t, "000001.SZ", row["ts_code"])
+			if rowIdx < 3 {
+				assert.NotNil(t, row["seq"])
+			}
+			rowIdx++
 		}
 	}
 }
@@ -354,12 +364,20 @@ func TestForwardTickCollector_Integration_InterruptReconnect(t *testing.T) {
 	mu.Unlock()
 	cancel()
 
-	assert.GreaterOrEqual(t, len(snapshot), 6, "expected at least 6 ticks (3 before disconnect + 3 after reconnect)")
+	totalRows := 0
+	for _, p := range snapshot {
+		data, ok := p.Data.([]map[string]interface{})
+		require.True(t, ok)
+		totalRows += len(data)
+	}
+	assert.GreaterOrEqual(t, totalRows, 6, "expected at least 6 tick rows (3 before disconnect + 3 after reconnect; may be batched)")
 	for _, p := range snapshot {
 		assert.Equal(t, realtimestore.SourceTushareProxy, p.Source)
 		data, ok := p.Data.([]map[string]interface{})
 		require.True(t, ok)
-		require.Len(t, data, 1)
-		assert.Equal(t, "000001.SZ", data[0]["ts_code"])
+		require.GreaterOrEqual(t, len(data), 1)
+		for _, row := range data {
+			assert.Equal(t, "000001.SZ", row["ts_code"])
+		}
 	}
 }

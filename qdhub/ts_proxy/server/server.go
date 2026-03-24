@@ -15,15 +15,17 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
+	writeWait      = 30 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = 30 * time.Second
 	maxMessageSize = 4 << 20
+	batchInterval  = time.Second
+	tickChSize     = 16384
 )
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
-	WriteBufferSize: 64 << 10,
+	WriteBufferSize: 256 << 10,
 	CheckOrigin:     func(*http.Request) bool { return true },
 }
 
@@ -32,6 +34,54 @@ type Session struct {
 	conn   *websocket.Conn
 	cipher *crypto.SessionCipher
 	mu     sync.Mutex
+	tickCh chan json.RawMessage
+	done   chan struct{}
+}
+
+func (s *Session) writeLoop() {
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			if err := s.flushBatch(); err != nil {
+				logrus.Warnf("[ts_proxy] flush batch: %v, closing session", err)
+				_ = s.conn.Close()
+				return
+			}
+		}
+	}
+}
+
+func (s *Session) flushBatch() error {
+	var batch []json.RawMessage
+	for {
+		select {
+		case tick := <-s.tickCh:
+			batch = append(batch, tick)
+		default:
+			goto flush
+		}
+	}
+flush:
+	if len(batch) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(batch)
+	if err != nil {
+		return err
+	}
+	ciphertext, err := s.cipher.Encrypt(payload)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	err = s.conn.WriteMessage(websocket.BinaryMessage, ciphertext)
+	s.mu.Unlock()
+	return err
 }
 
 // Broadcast broadcasts encrypted tick to all sessions that have completed key exchange.
@@ -50,7 +100,7 @@ func NewBroadcast(rsaPrivateKeyPath string) (*Broadcast, error) {
 	return &Broadcast{rsaPriv: priv}, nil
 }
 
-// ServeWS handles a single WebSocket connection: first frame = RSA-encrypted AES key (scheme B), then server pushes encrypted ticks.
+// ServeWS handles a single WebSocket connection: first frame = RSA-encrypted AES key (scheme B), then server pushes encrypted ticks via batched writes.
 func (b *Broadcast) ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -58,7 +108,7 @@ func (b *Broadcast) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	conn.SetReadLimit(256) // key exchange frame only
+	conn.SetReadLimit(256)
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	_, keyMsg, err := conn.ReadMessage()
@@ -76,29 +126,39 @@ func (b *Broadcast) ServeWS(w http.ResponseWriter, r *http.Request) {
 		logrus.Warnf("[ts_proxy] session cipher: %v", err)
 		return
 	}
-	sess := &Session{conn: conn, cipher: cipher}
+	sess := &Session{
+		conn:   conn,
+		cipher: cipher,
+		tickCh: make(chan json.RawMessage, tickChSize),
+		done:   make(chan struct{}),
+	}
 	b.mu.Lock()
 	b.sessions = append(b.sessions, sess)
 	b.mu.Unlock()
+	defer close(sess.done)
 	defer b.remove(sess)
 
 	conn.SetReadLimit(0)
 	conn.SetReadDeadline(time.Time{})
 	conn.SetPongHandler(func(string) error { conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
 	go func() {
 		ticker := time.NewTicker(pingPeriod)
 		defer ticker.Stop()
-		for range ticker.C {
-			sess.mu.Lock()
-			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait))
-			sess.mu.Unlock()
-			if err != nil {
+		for {
+			select {
+			case <-sess.done:
 				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait)); err != nil {
+					return
+				}
 			}
 		}
 	}()
 
-	// Block until client closes (we only push, no control from client after key exchange)
+	go sess.writeLoop()
+
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
@@ -117,7 +177,7 @@ func (b *Broadcast) remove(s *Session) {
 	}
 }
 
-// PushTick encrypts the normalized row and sends to all sessions (streaming, one row per frame).
+// PushTick sends the normalized tick to all sessions' batch channels (non-blocking).
 func (b *Broadcast) PushTick(row normalize.TickRow) {
 	plain, err := json.Marshal(row)
 	if err != nil {
@@ -128,19 +188,9 @@ func (b *Broadcast) PushTick(row normalize.TickRow) {
 	sessions := append([]*Session(nil), b.sessions...)
 	b.mu.Unlock()
 	for _, sess := range sessions {
-		ciphertext, err := sess.cipher.Encrypt(plain)
-		if err != nil {
-			logrus.Warnf("[ts_proxy] encrypt: %v", err)
-			continue
-		}
-		sess.mu.Lock()
-		sess.conn.SetWriteDeadline(time.Now().Add(writeWait))
-		err = sess.conn.WriteMessage(websocket.BinaryMessage, ciphertext)
-		sess.mu.Unlock()
-		if err != nil {
-			logrus.Warnf("[ts_proxy] write to client: %v, dropping session", err)
-			_ = sess.conn.Close()
-			b.remove(sess)
+		select {
+		case sess.tickCh <- json.RawMessage(plain):
+		default:
 		}
 	}
 }

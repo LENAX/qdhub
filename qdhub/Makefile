@@ -9,15 +9,17 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 GO := go
 GOTEST := $(GO) test
 GOBUILD := $(GO) build $(LDFLAGS)
+GO_IMAGE_DEV ?= golang:1.26-bookworm
+GO_COMPAT_BASE_IMAGE ?= debian:bullseye
 
 # Directories
 BIN_DIR := bin
 CMD_DIR := cmd
 
 .PHONY: all build clean test lint run help
-.PHONY: build-linux build-darwin build-windows build-all
+.PHONY: build-linux build-linux-amd64 build-linux-amd64-docker build-linux-amd64-dev build-linux-amd64-release-compat build-darwin build-windows build-all
 .PHONY: build-ts-proxy build-ts-proxy-diagnose build-ts-proxy-linux-amd64 build-ts-proxy-diagnose-linux-amd64
-.PHONY: test-unit test-integration test-e2e test-all
+.PHONY: test-unit test-integration test-integration-realtime test-e2e test-all
 .PHONY: deploy-dev deploy-prod
 .PHONY: deps tidy fmt vet
 .PHONY: install-swag docs
@@ -31,10 +33,15 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build          Build for current platform"
+	@echo "  make build-linux-amd64  Build for linux/amd64 only"
+	@echo "  make build-linux-amd64-docker  Build linux/amd64 in Docker (recommended on macOS)"
+	@echo "  make build-linux-amd64-dev  Fast linux/amd64 build for dev verification"
+	@echo "  make build-linux-amd64-release-compat  Build linux/amd64 release with older glibc baseline"
 	@echo "  make build-all      Build for all platforms"
 	@echo "  make test           Run all tests"
 	@echo "  make test-unit      Run unit tests"
 	@echo "  make test-integration  Run integration tests"
+	@echo "  make test-integration-realtime  Run realtime forward + ts_proxy batch integration tests only"
 	@echo "  make test-e2e       Run e2e tests"
 	@echo "  make run            Run the application"
 	@echo "  make lint           Run linters"
@@ -69,6 +76,18 @@ build-linux: deps
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 .
 	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-arm64 .
 
+build-linux-amd64: deps
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC=x86_64-linux-gnu-gcc $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 .
+
+build-linux-amd64-docker:
+	docker run --rm --platform linux/amd64 -v "$(CURDIR)":/src -v "$$HOME/go/pkg/mod":/go/pkg/mod -v "$$HOME/.cache/go-build":/root/.cache/go-build -w /src $(GO_IMAGE_DEV) sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)" -o $(BIN_DIR)/$(APP_NAME)-linux-amd64 .'
+
+build-linux-amd64-dev:
+	docker run --rm --platform linux/amd64 -v "$(CURDIR)":/src -v "$$HOME/go/pkg/mod":/go/pkg/mod -v "$$HOME/.cache/go-build":/root/.cache/go-build -w /src $(GO_IMAGE_DEV) sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)-dev -X main.buildTime=$(BUILD_TIME)" -o $(BIN_DIR)/$(APP_NAME)-linux-amd64-dev .'
+
+build-linux-amd64-release-compat:
+	docker run --rm --platform linux/amd64 -v "$(CURDIR)":/src -v "$$HOME/go/pkg/mod":/go/pkg/mod -v "$$HOME/.cache/go-build":/root/.cache/go-build -w /src $(GO_COMPAT_BASE_IMAGE) sh -c 'set -e; apt-get update >/dev/null; apt-get install -y --no-install-recommends ca-certificates curl build-essential >/dev/null; curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz -o /tmp/go.tar.gz; rm -rf /usr/local/go; tar -C /usr/local -xzf /tmp/go.tar.gz; /usr/local/go/bin/go version; CGO_ENABLED=1 GOOS=linux GOARCH=amd64 /usr/local/go/bin/go build -ldflags "-X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)" -o $(BIN_DIR)/$(APP_NAME)-linux-amd64-compat .'
+
 build-darwin: deps
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-amd64 .
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BIN_DIR)/$(APP_NAME)-darwin-arm64 .
@@ -99,6 +118,10 @@ test-unit:
 
 test-integration:
 	$(GOTEST) -v -tags=integration ./tests/integration/...
+
+# 实时转发链路（ForwardTickCollector + ts_proxy 批量）不依赖迁移后的 SQLite，适合 CI/发布前快速验证
+test-integration-realtime:
+	$(GOTEST) -v -tags=integration -count=1 ./tests/integration/... -run 'ForwardTick|TSProxy_Broadcast'
 
 test-e2e:
 	$(GOTEST) -v -tags=e2e ./tests/e2e/...
