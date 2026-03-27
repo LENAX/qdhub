@@ -867,6 +867,24 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				depNames = append(depNames, depName)
 				continue
 			}
+			if config.APIName == "index_daily" && isStkMinsTemplateAPIConfig(config) {
+				upstreamTask := config.UpstreamTask
+				if upstreamTask == "" {
+					upstreamTask = "FetchIndexBasic"
+				}
+				paramKey := config.ParamKey
+				if paramKey == "" {
+					paramKey = "ts_code"
+				}
+				idxTasks, depName, errIdx := b.buildIndexDailyChunkedSyncTasks(baseParams, dateTimeParams, config.ExtraParams, upstreamTask, paramKey, params.MaxStocks)
+				if errIdx != nil {
+					return nil, errIdx
+				}
+				tasks = append(tasks, idxTasks...)
+				addedTaskNames["Sync_"+config.APIName] = true
+				depNames = append(depNames, depName)
+				continue
+			}
 			syncTask, err := b.buildAPITask(config, baseParams, dateTimeParams)
 			if err != nil {
 				return nil, err
@@ -1094,7 +1112,7 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					WithCompensationFunction("CompensateSyncData").
 					Build()
 
-			case "ts_code":
+			case "ts_code", "index_code":
 				// 按代码迭代的 API：使用 template 模式生成子任务
 				// stk_mins 的 freq 在 GenerateDataSyncSubTasks/SyncAPIData 中默认注入为 1min，故不跳过
 				// 对于 RequiredParams，仅当存在我们无法自动提供的参数时才跳过：
@@ -1106,6 +1124,9 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					for _, reqParam := range strategy.RequiredParams {
 						// 由模板参数提供的字段：ts_code 或 APIParamName 本身
 						if reqParam == "ts_code" && (strategy.APIParamName == "" || strategy.APIParamName == "ts_code") {
+							continue
+						}
+						if reqParam == "index_code" && (strategy.APIParamName == "" || strategy.APIParamName == "index_code") {
 							continue
 						}
 						if strategy.APIParamName != "" && reqParam == strategy.APIParamName {
@@ -1123,6 +1144,9 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 
 				// 确定上游任务和参数键
 				upstreamTask := "FetchStockBasic"
+				if strategy.PreferredParam == "index_code" {
+					upstreamTask = "FetchIndexBasic"
+				}
 				for _, dep := range strategy.Dependencies {
 					if dep == "FetchIndexBasic" {
 						upstreamTask = "FetchIndexBasic"
@@ -1131,6 +1155,9 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 				}
 
 				apiParamKey := "ts_code"
+				if strategy.PreferredParam == "index_code" {
+					apiParamKey = "index_code"
+				}
 				if strategy.APIParamName != "" {
 					apiParamKey = strategy.APIParamName
 				}
@@ -1156,6 +1183,18 @@ func (b *BatchDataSyncWorkflowBuilder) Build() (*workflow.Workflow, error) {
 					addedTaskNames[taskName] = true
 					depNames = append(depNames, depName)
 					log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s（stk_mins 分片时间窗）", apiName, taskName)
+					continue
+				}
+				if apiName == "index_daily" {
+					idxTasks, depName, errIdx := b.buildIndexDailyChunkedSyncTasks(baseParams, dateTimeParams, nil, upstreamTask, apiParamKey, params.MaxStocks)
+					if errIdx != nil {
+						log.Printf("❌ [BuildWorkflow] 构建 index_daily 分片任务失败: %v", errIdx)
+						return nil, errIdx
+					}
+					tasks = append(tasks, idxTasks...)
+					addedTaskNames[taskName] = true
+					depNames = append(depNames, depName)
+					log.Printf("✅ [BuildWorkflow] 任务构建成功: API=%s, TaskName=%s（index_daily 一年窗口分片）", apiName, taskName)
 					continue
 				}
 
@@ -1400,9 +1439,72 @@ func (b *BatchDataSyncWorkflowBuilder) buildStkMinsChunkedSyncTasks(
 	return []*task.Task{rangeTask, templateTask}, taskName, nil
 }
 
+// buildIndexDailyChunkedSyncTasks 构建 index_daily 一年时间窗 + 按指数代码模板任务链。
+// 背景：index_daily 单次请求时间跨度上限为一年，需先切窗再按 ts_code 生成子任务。
+func (b *BatchDataSyncWorkflowBuilder) buildIndexDailyChunkedSyncTasks(
+	baseParams, dateTimeParams map[string]interface{},
+	extraParams map[string]interface{},
+	upstreamTask, paramKey string,
+	maxStocks int,
+) ([]*task.Task, string, error) {
+	startRaw, endRaw, err := stkMinsDateRangeFromMap(dateTimeParams)
+	if err != nil {
+		return nil, "", err
+	}
+
+	const rangeTaskName = "Generate_index_daily_TimeWindow"
+	taskName := "Sync_index_daily"
+	rangeParams := map[string]interface{}{
+		"start":      startRaw,
+		"end":        endRaw,
+		"freq":       "365D",
+		"inclusive":  "both",
+		"as_windows": true,
+	}
+	rangeTask, err := builder.NewTaskBuilder(rangeTaskName, "生成 index_daily 一年时间窗", b.registry).
+		WithJobFunction("GenerateDatetimeRange", rangeParams).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build index_daily range task: %w", err)
+	}
+
+	templateParams := mergeParams(mergeParams(baseParams, dateTimeParams), map[string]interface{}{
+		"api_name":                "index_daily",
+		"param_key":               paramKey,
+		"upstream_task":           upstreamTask,
+		"max_sub_tasks":           maxStocks,
+		"datetime_range_upstream": rangeTaskName,
+		"window_field":            "windows",
+	})
+	if paramKey != "ts_code" {
+		templateParams["upstream_param_key"] = "ts_code"
+	}
+	if len(extraParams) > 0 {
+		templateParams = mergeParams(templateParams, extraParams)
+	}
+	b.mergeSubtaskMemoryParams(templateParams)
+	templateTask, err := builder.NewTaskBuilder(taskName, "同步 index_daily 数据（按指数与一年时间窗）", b.registry).
+		WithJobFunction("GenerateDataSyncSubTasks", templateParams).
+		WithDependency(rangeTaskName).
+		WithDependency(upstreamTask).
+		WithTaskHandler(task.TaskStatusSuccess, "DataSyncSuccess").
+		WithTaskHandler(task.TaskStatusFailed, "DataSyncFailure").
+		WithTemplate(true).
+		WithCompensationFunction("CompensateSyncData").
+		Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("build index_daily template: %w", err)
+	}
+	log.Printf("✅ [BuildWorkflow] index_daily: 已构建 365D 时间窗 + 按指数模板")
+	return []*task.Task{rangeTask, templateTask}, taskName, nil
+}
+
 // buildAPITask 根据 APISyncConfig 构建同步任务
 func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, baseParams, dateTimeParams map[string]interface{}) (*task.Task, error) {
 	taskName := "Sync_" + config.APIName
+	strategy := b.getStrategy(config.APIName)
 
 	// 确定同步模式：如果有 ParamKey 则是模板任务，否则是直接任务
 	syncMode := config.SyncMode
@@ -1419,7 +1521,11 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 	if len(dependencies) == 0 {
 		// 默认依赖推断
 		if syncMode == "template" {
-			dependencies = []string{"FetchStockBasic"}
+			if strategy.PreferredParam == "index_code" {
+				dependencies = []string{"FetchIndexBasic"}
+			} else {
+				dependencies = []string{"FetchStockBasic"}
+			}
 		} else if config.UpstreamTask != "" {
 			dependencies = []string{config.UpstreamTask}
 		}
@@ -1429,7 +1535,11 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 		// 模板任务：按参数拆分生成子任务
 		upstreamTask := config.UpstreamTask
 		if upstreamTask == "" {
-			upstreamTask = "FetchStockBasic"
+			if strategy.PreferredParam == "index_code" {
+				upstreamTask = "FetchIndexBasic"
+			} else {
+				upstreamTask = "FetchStockBasic"
+			}
 		}
 
 		// 将 dateTimeParams（start_date/end_date）平铺为顶层参数，
@@ -1441,6 +1551,10 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 			"upstream_task": upstreamTask,
 			"max_sub_tasks": b.params.MaxStocks,
 		})
+		// index_weight 场景：上游 FetchIndexBasic 产出 ts_codes，而 API 参数键是 index_code
+		if strategy.PreferredParam == "index_code" && config.ParamKey == "index_code" {
+			templateParams["upstream_param_key"] = "ts_code"
+		}
 		if config.ExtraParams != nil {
 			templateParams = mergeParams(templateParams, config.ExtraParams)
 		}
@@ -1476,7 +1590,6 @@ func (b *BatchDataSyncWorkflowBuilder) buildAPITask(config APISyncConfig, basePa
 		params = mergeParams(params, config.ExtraParams)
 	}
 
-	strategy := b.getStrategy(config.APIName)
 	if len(strategy.FixedParams) > 0 || len(strategy.FixedParamKeys) > 0 {
 		params = mergeParamsWithStrategy(strategy, params, nil)
 		log.Printf("🔧 [buildAPITask] 应用策略 FixedParams: API=%s, FixedParams=%v, FixedParamKeys=%v, mergedParams=%v",
@@ -1737,6 +1850,29 @@ func (b *BatchDataSyncWorkflowBuilder) BuildFromExecutionGraph(
 				depNames = append(depNames, depName)
 				continue
 			}
+			if apiName == "index_daily" && config.SyncMode == sync.TaskSyncModeTemplate {
+				var paramKey, upstreamTask string
+				for _, pm := range config.ParamMappings {
+					if pm.IsList {
+						paramKey = pm.ParamName
+						upstreamTask = pm.SourceTask
+						break
+					}
+				}
+				if paramKey == "" {
+					paramKey = "ts_code"
+				}
+				if upstreamTask == "" {
+					upstreamTask = "FetchIndexBasic"
+				}
+				idxTasks, depName, errIdx := b.buildIndexDailyChunkedSyncTasks(baseParams, dateTimeParams, nil, upstreamTask, paramKey, maxStocks)
+				if errIdx != nil {
+					return nil, fmt.Errorf("build index_daily for %s: %w", apiName, errIdx)
+				}
+				tasks = append(tasks, idxTasks...)
+				depNames = append(depNames, depName)
+				continue
+			}
 
 			syncTask, err := b.buildTaskFromConfig(config, baseParams, dateTimeParams, maxStocks)
 			if err != nil {
@@ -1803,11 +1939,12 @@ func (b *BatchDataSyncWorkflowBuilder) buildTemplateTask(
 	maxStocks int,
 ) (*task.Task, error) {
 	// 从 ParamMappings 中获取主参数和上游任务
-	var paramKey, upstreamTask string
+	var paramKey, upstreamTask, upstreamParamKey string
 	for _, pm := range config.ParamMappings {
 		if pm.IsList {
 			paramKey = pm.ParamName
 			upstreamTask = pm.SourceTask
+			upstreamParamKey = pm.SourceField
 			break
 		}
 	}
@@ -1826,6 +1963,13 @@ func (b *BatchDataSyncWorkflowBuilder) buildTemplateTask(
 		"upstream_task": upstreamTask,
 		"max_sub_tasks": maxStocks,
 	})
+	// 当 API 参数键与上游字段不一致（如 index_code <- ts_code）时显式指定提取键
+	if upstreamParamKey == "" && paramKey == "index_code" {
+		upstreamParamKey = "ts_code"
+	}
+	if upstreamParamKey != "" && upstreamParamKey != paramKey {
+		cfgTpl["upstream_param_key"] = upstreamParamKey
+	}
 	b.mergeSubtaskMemoryParams(cfgTpl)
 
 	taskBuilder := builder.NewTaskBuilder(taskName, "同步"+config.APIName+"数据（模板任务）", b.registry).

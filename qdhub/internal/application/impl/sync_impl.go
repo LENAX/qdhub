@@ -941,7 +941,7 @@ func (s *SyncApplicationServiceImpl) supplementDependenciesFromStrategies(
 	}
 
 	for _, strategy := range strategies {
-		deps := strategyToParamDependencies(strategy)
+		deps := strategyToParamDependencies(strategy.APIName, strategy)
 		if len(deps) > 0 {
 			allAPIDependencies[strategy.APIName] = deps
 			logrus.Infof("[ResolveSyncPlan] param_dependencies for %s from api_sync_strategies (preferred_param=%s, support_date_range=%v)",
@@ -1106,7 +1106,7 @@ func (s *SyncApplicationServiceImpl) planRequiresDateRange(plan *sync.SyncPlan) 
 //   - preferred_param=trade_date, support_date_range  → direct mode (IsList=false), pass date range
 //   - preferred_param=ts_code                         → template mode (IsList=true), iterate over stock codes
 //   - preferred_param=none                            → no dependencies needed
-func strategyToParamDependencies(strategy *metadata.APISyncStrategy) []sync.ParamDependency {
+func strategyToParamDependencies(apiName string, strategy *metadata.APISyncStrategy) []sync.ParamDependency {
 	switch strategy.PreferredParam {
 	case metadata.SyncParamTradeDate:
 		return []sync.ParamDependency{{
@@ -1116,9 +1116,20 @@ func strategyToParamDependencies(strategy *metadata.APISyncStrategy) []sync.Para
 			IsList:      !strategy.SupportDateRange,
 		}}
 	case metadata.SyncParamTsCode:
+		sourceAPI := "stock_basic"
+		if strings.HasPrefix(apiName, "index_") {
+			sourceAPI = "index_basic"
+		}
 		return []sync.ParamDependency{{
 			ParamName:   "ts_code",
-			SourceAPI:   "stock_basic",
+			SourceAPI:   sourceAPI,
+			SourceField: "ts_code",
+			IsList:      true,
+		}}
+	case metadata.SyncParamIndexCode:
+		return []sync.ParamDependency{{
+			ParamName:   "index_code",
+			SourceAPI:   "index_basic",
 			SourceField: "ts_code",
 			IsList:      true,
 		}}

@@ -358,6 +358,8 @@ const (
 	SyncParamTradeDate SyncParamType = "trade_date"
 	// SyncParamTsCode 必须提供 ts_code，需要按股票代码拆分任务
 	SyncParamTsCode SyncParamType = "ts_code"
+	// SyncParamIndexCode 必须提供 index_code，需要按指数代码拆分任务
+	SyncParamIndexCode SyncParamType = "index_code"
 )
 
 // APISyncStrategy API 同步策略实体

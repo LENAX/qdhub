@@ -295,6 +295,13 @@ func (r *DependencyResolverImpl) inferDependenciesFromGraph(api string, sourceAP
 				SourceField: "ts_code",
 				IsList:      true,
 			})
+		case "index_basic":
+			deps = append(deps, ParamDependency{
+				ParamName:   "ts_code",
+				SourceAPI:   "index_basic",
+				SourceField: "ts_code",
+				IsList:      true,
+			})
 		}
 	}
 	return deps
@@ -331,6 +338,8 @@ func (r *DependencyResolverImpl) apiToTaskName(api string) string {
 		return "FetchTradeCal"
 	case "stock_basic":
 		return "FetchStockBasic"
+	case "index_basic":
+		return "FetchIndexBasic"
 	default:
 		return "Sync_" + api
 	}

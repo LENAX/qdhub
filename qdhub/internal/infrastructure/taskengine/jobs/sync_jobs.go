@@ -720,7 +720,7 @@ func SyncMultiParamAPIDataJob(tc *task.TaskContext) (interface{}, error) {
 //   - token: string - API Token
 //   - target_db_path: string - 目标数据库路径
 //   - max_sub_tasks: int - 最大子任务数量（0=不限制）；stk_mins 窗口模式下约束生成的子任务总数（windows×codes）
-//   - datetime_range_upstream: string - 可选，上游 GenerateDatetimeRange 任务名；与 api_name=stk_mins 联用
+//   - datetime_range_upstream: string - 可选，上游 GenerateDatetimeRange 任务名；启用窗口模式（windows×param）
 //   - window_field: string - 上游结果中的窗口列表字段，默认 "windows"
 //   - start_date: string - 日期范围开始（YYYYMMDD），用于过滤交易日；非窗口模式或非 trade_date 时注入 API
 //   - end_date: string - 日期范围结束（YYYYMMDD），用于过滤交易日
@@ -751,7 +751,7 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 	if windowField == "" {
 		windowField = "windows"
 	}
-	windowMode := datetimeRangeUpstream != "" && apiName == "stk_mins"
+	windowMode := datetimeRangeUpstream != ""
 
 	// 获取 Engine（仅用于 taskRegistry）
 	engineInterface, ok := tc.GetDependency("Engine")
@@ -847,13 +847,13 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 				"message":   fmt.Sprintf("上游任务 %s 无 windows，跳过子任务生成", datetimeRangeUpstream),
 			}, nil
 		}
-		logrus.Printf("📡 [GenerateDataSyncSubTasks] stk_mins 窗口模式: %d 个时间窗 × %d 个 %s (max_sub_tasks=%d, base_batch=%d)",
-			len(windows), len(paramValues), paramKey, maxSubTasks, settings.baseBatch)
+		logrus.Printf("📡 [GenerateDataSyncSubTasks] 窗口模式: api=%s, %d 个时间窗 × %d 个 %s (max_sub_tasks=%d, base_batch=%d)",
+			apiName, len(windows), len(paramValues), paramKey, maxSubTasks, settings.baseBatch)
 
 		generated := 0
 	windowLoop:
 		for wi, w := range windows {
-			apiStart, apiEnd := StkMinsAPIRangeFromHalfOpenWindow(w.Start, w.End)
+			apiStart, apiEnd := apiDateRangeFromHalfOpenWindow(apiName, w.Start, w.End)
 			if apiStart == "" || apiEnd == "" {
 				logrus.Printf("⚠️ [GenerateDataSyncSubTasks] 跳过无效窗口 wi=%d start=%q end=%q", wi, w.Start, w.End)
 				continue
@@ -872,14 +872,15 @@ func GenerateDataSyncSubTasksJob(tc *task.TaskContext) (interface{}, error) {
 					"sync_batch_id":    workflowInstanceID,
 					"params": map[string]interface{}{
 						paramKey:     paramValue,
-						"freq":       "1min",
 						"start_date": apiStart,
 						"end_date":   apiEnd,
 					},
 				}
 				paramsMap := subTaskParams["params"].(map[string]interface{})
-				if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
-					paramsMap["freq"] = "1min"
+				if apiName == "stk_mins" {
+					if _, ok := paramsMap["freq"]; !ok || paramsMap["freq"] == nil || paramsMap["freq"] == "" {
+						paramsMap["freq"] = "1min"
+					}
 				}
 
 				subTask, err := builder.NewTaskBuilder(subTaskName, fmt.Sprintf("同步 %s: %s=%s 窗%d %s~%s", apiName, paramKey, paramValue, wi, apiStart, apiEnd), taskRegistry).
@@ -2834,6 +2835,49 @@ func StkMinsAPIRangeFromHalfOpenWindow(windowStart, windowEnd string) (startOut,
 	}
 	last := we.Add(-time.Nanosecond)
 	endOut = time.Date(last.Year(), last.Month(), last.Day(), 15, 0, 0, 0, last.Location()).Format("2006-01-02 15:04:05")
+	if endOut < startOut {
+		endOut = startOut
+	}
+	return startOut, endOut
+}
+
+// apiDateRangeFromHalfOpenWindow 将 GenerateDatetimeRange 产出的半开区间 [start,end)
+// 转成 API 请求使用的闭区间日期范围。
+// - stk_mins: 返回 yyyy-mm-dd HH:MM:SS（会话 09:30~15:00）
+// - 其他 API: 返回 YYYYMMDD（end 取 end-1ns 所在日期，避免窗口重叠）
+func apiDateRangeFromHalfOpenWindow(apiName, windowStart, windowEnd string) (startOut, endOut string) {
+	if apiName == "stk_mins" {
+		return StkMinsAPIRangeFromHalfOpenWindow(windowStart, windowEnd)
+	}
+	ws, err := parseFlexibleDateTime(strings.TrimSpace(windowStart))
+	if err != nil {
+		s := strings.ReplaceAll(strings.TrimSpace(windowStart), "-", "")
+		e := strings.ReplaceAll(strings.TrimSpace(windowEnd), "-", "")
+		if len(s) >= 8 {
+			s = s[:8]
+		}
+		if len(e) >= 8 {
+			e = e[:8]
+		}
+		return s, e
+	}
+	we, err := parseFlexibleDateTime(strings.TrimSpace(windowEnd))
+	if err != nil {
+		s := ws.Format("20060102")
+		e := strings.ReplaceAll(strings.TrimSpace(windowEnd), "-", "")
+		if len(e) >= 8 {
+			e = e[:8]
+		}
+		if e == "" {
+			e = s
+		}
+		return s, e
+	}
+	startOut = ws.Format("20060102")
+	if !we.After(ws) {
+		return startOut, startOut
+	}
+	endOut = we.Add(-time.Nanosecond).Format("20060102")
 	if endOut < startOut {
 		endOut = startOut
 	}

@@ -1,0 +1,5 @@
+tushare
+duckdb
+pandas
+pydantic>=2
+typer

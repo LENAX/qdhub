@@ -1,4 +1,5 @@
 # Jupyter Lab 研究环境（与主站 docker-compose 独立）
+# 镜像 tag 用 JUPYTER_IMAGE_TAG（勿与主站 IMAGE_TAG 共用，否则 pull 主站时会错用 jupyter 专用 tag）
 # 挂载服务器上的 /mnt/data、/mnt/vdb/qdhub，便于做题材/情绪/龙头等课题
 # 启动：docker compose -f docker-compose.jupyter.yml up -d
 # 修改 JUPYTER_PASSWORD / JUPYTER_BASE_URL 等后：up -d --force-recreate
@@ -6,7 +7,7 @@
 
 services:
   jupyter-lab:
-    image: ${DOCKER_REGISTRY:-}qdhub-jupyter-lab:${IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY:-}qdhub-jupyter-lab:${JUPYTER_IMAGE_TAG:-latest}
     build:
       context: ./research-env
       dockerfile: Dockerfile

@@ -1,23 +1,25 @@
 # 仅用镜像部署，不包含 build，无需源码
-# 用法：在阿里云上放本文件 + .env.aliyun，执行 pull + up；IMAGE_TAG 与构建时一致（如 v0.1.1-beta.5）
+# 用法：在阿里云上放本文件 + .env，执行 pull + up
+# IMAGE_TAG 仅用于 qdhub-backend / qdhub-frontend（与 Git tag 或 CI 一致，如 v0.1.1-beta.5）。
+# 切勿把 Jupyter 专用 tag（如 v0.1.0-jupyter.1）写在 IMAGE_TAG；Jupyter 用 docker-compose.jupyter.yml 的 JUPYTER_IMAGE_TAG。
 services:
   backend:
     image: ${DOCKER_REGISTRY:?err}qdhub-backend:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
       - "8080:8080"
-    # 8G 整机：backend 约 6G 上限，余量给 OS / 前端 / page cache；可按机器调 QDHUB_SYNC_* / GOMEMLIMIT
-    mem_limit: 6g
-    memswap_limit: 6g
+    # 16G 整机：backend 约 10G 上限，余量给 OS / 前端 / page cache；可按机器调 QDHUB_SYNC_* / GOMEMLIMIT
+    mem_limit: 10g
+    memswap_limit: 10g
     environment:
       - QDHUB_ENV=production
       - QDHUB_SERVER_HOST=0.0.0.0
       - QDHUB_SERVER_PORT=8080
       - QDHUB_SERVER_ENABLE_SWAGGER=${QDHUB_SERVER_ENABLE_SWAGGER:-false}
       - QDHUB_AUTH_ADMIN_PASSWORD=${QDHUB_AUTH_ADMIN_PASSWORD}
-      - GOMEMLIMIT=${GOMEMLIMIT:-5GiB}
-      - QDHUB_SYNC_MEM_HIGH_MB=${QDHUB_SYNC_MEM_HIGH_MB:-2048}
-      - QDHUB_SYNC_MEM_CRITICAL_MB=${QDHUB_SYNC_MEM_CRITICAL_MB:-4096}
+      - GOMEMLIMIT=${GOMEMLIMIT:-9GiB}
+      - QDHUB_SYNC_MEM_HIGH_MB=${QDHUB_SYNC_MEM_HIGH_MB:-4096}
+      - QDHUB_SYNC_MEM_CRITICAL_MB=${QDHUB_SYNC_MEM_CRITICAL_MB:-6144}
       - QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS=${QDHUB_SUBTASK_BATCH_PAUSE_HIGH_MS:-100}
       - QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS=${QDHUB_SUBTASK_BATCH_PAUSE_CRITICAL_MS:-400}
       # 实时 tick 经内地 ts_proxy（Tushare 转发）；与 QDHUB_KEY_DIR 挂载的 public.pem 一致。可在 .env 覆盖 TUSHARE_PROXY_WS_URL

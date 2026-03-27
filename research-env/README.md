@@ -55,7 +55,7 @@ docker compose -f docker-compose.jupyter.yml up -d
 
 ## 在本地构建并推送到阿里云 ACR（linux/amd64）
 
-与主站 backend/frontend 一样，Jupyter 镜像也支持通过 `DOCKER_REGISTRY` + `IMAGE_TAG` 的方式管理，并推送到阿里云 ACR，供服务器直接 `pull` 使用。
+与主站分开：Jupyter 镜像使用 **`DOCKER_REGISTRY` + `JUPYTER_IMAGE_TAG`**（勿写入主站的 `IMAGE_TAG`，否则与 `docker-compose.image.yml` 共用 `.env` 时会拉错主站镜像）。
 
 ### 1. 在本地构建并推送
 
@@ -67,7 +67,7 @@ docker login crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com -u linxe
 
 # 2）与 DEPLOY.md 中一致的环境变量
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-jupyter.1   # 示例，可与主站 tag 对齐或单独命名
+export JUPYTER_IMAGE_TAG=v0.1.0-jupyter.1   # 示例，可与主站 tag 对齐或单独命名
 
 # 3）使用 buildx 按 linux/amd64 构建并推送（适配阿里云 ECS x86/amd64）
 docker buildx create --name qdhub-jupyter --use 2>/dev/null || true
@@ -75,7 +75,7 @@ docker buildx inspect --bootstrap
 
 docker buildx build \
   --platform linux/amd64 \
-  -t "${DOCKER_REGISTRY}qdhub-jupyter-lab:${IMAGE_TAG}" \
+  -t "${DOCKER_REGISTRY}qdhub-jupyter-lab:${JUPYTER_IMAGE_TAG}" \
   -f research-env/Dockerfile \
   research-env \
   --push
@@ -93,7 +93,7 @@ docker buildx build \
 
 ```bash
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-jupyter.1   # 必须与本地构建时一致
+export JUPYTER_IMAGE_TAG=v0.1.0-jupyter.1   # 必须与本地构建时一致
 
 export JUPYTER_MOUNT_DATA=/mnt/data/jupyter       # 按实际路径调整
 export JUPYTER_MOUNT_QDHUB=/mnt/data/qdhub  # 按实际路径调整

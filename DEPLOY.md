@@ -5,7 +5,7 @@
 - **本地/CI**：构建镜像 → 推送到镜像仓库（如阿里云 ACR）。
 - **阿里云 ECS**：只保留 `docker-compose.image.yml` 和 `.env.aliyun`，`pull` 后 `up`，**无需任何源代码**。
 
-**命令区分**：开发机若安装的是独立命令 `**docker-compose`**（带连字符），文档中「二、本地」用 `docker-compose`；服务器若为 Docker 插件 `**docker compose**`（空格），文档中「三、ECS」及故障排查在 ECS 上的步骤用 `docker compose`。按你当前环境替换即可。
+**命令区分**：开发机若安装的是独立命令 `**docker-compose`**（带连字符），文档中「二、本地」用 `docker-compose`；服务器若为 Docker 插件 `**docker compose`**（空格），文档中「三、ECS」及故障排查在 ECS 上的步骤用 `docker compose`。按你当前环境替换即可。
 
 ---
 
@@ -79,8 +79,8 @@ export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.co
 export IMAGE_TAG=v0.1.0-beta.3
 
 # 指定目标平台为 linux/amd64（ECS 常见架构）；开发机为 docker-compose 时用 docker-compose
-DOCKER_DEFAULT_PLATFORM=linux/amd64 docker-compose -f docker-compose.yml build
-docker-compose -f docker-compose.yml push
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml build
+docker compose -f docker-compose.yml push
 ```
 
 **本机与 ECS 同架构时（或本机为 x86）：**
@@ -141,6 +141,7 @@ cd ~/qdhub-deploy
 
 - **docker-compose.image.yml**：从本仓库复制一份（或只保留这一份 compose）。
 - **.env.aliyun**：环境变量。`IMAGE_TAG` 可留空以使用默认 `latest`，也可设置为固定版本（见下方示例）。部署时复制为 **.env**，便于兼容不支持 `--env-file` 的旧版 docker-compose。
+- `**pull` 报 `manifest unknown`（qdhub-backend / qdhub-frontend）**：说明 `**.env` 里 `IMAGE_TAG` 写成了仅存在于 `qdhub-jupyter-lab` 的 tag**（如 `v0.1.0-jupyter.1`）。请改为 ACR 里**确有**的 backend/frontend tag（例如 `v0.1.1-beta.5`），并把 Jupyter 专用 tag 只写在 `**JUPYTER_IMAGE_TAG`**（见「五、Jupyter」）。改完后执行：`docker compose -f docker-compose.image.yml config | grep image:` 确认解析出的镜像名正确。
 
 ```bash
 # 镜像仓库（与推送时一致，结尾带 /）及版本号（可选）
@@ -181,9 +182,9 @@ sudo mkdir -p /mnt/vdb/qdhub/data /mnt/vdb/qdhub/logs /mnt/vdb/qdhub/keys
 sudo chown -R $USER:$USER /mnt/vdb/qdhub
 ```
 
-**ts_proxy（Tushare 转发）公钥**：将内地提供的 `public.pem` 放到 **`QDHUB_KEY_DIR`（默认 `/mnt/vdb/qdhub/keys`）** 下，命名为 **`public.pem`**。`docker-compose.image.yml` 已将该目录**只读**挂载到容器内 **`/root/.key`**，与库里默认的 `rsa_public_key_path` 一致。若公钥放在其他路径，可改 `.env` 中的 `QDHUB_KEY_DIR`，或改数据库 `realtime_sources` 里对应源的 `rsa_public_key_path` 与挂载目标一致。
+**ts_proxy（Tushare 转发）公钥**：将内地提供的 `public.pem` 放到 `**QDHUB_KEY_DIR`（默认 `/mnt/vdb/qdhub/keys`）** 下，命名为 `**public.pem`**。`docker-compose.image.yml` 已将该目录**只读**挂载到容器内 `**/root/.key`**，与库里默认的 `rsa_public_key_path` 一致。若公钥放在其他路径，可改 `.env` 中的 `QDHUB_KEY_DIR`，或改数据库 `realtime_sources` 里对应源的 `rsa_public_key_path` 与挂载目标一致。
 
-**ts_proxy WebSocket 地址**：`.env` 中设置 **`TUSHARE_PROXY_WS_URL`**（示例见上文，内地转发机默认路径为 `/realtime`、端口 `8888`），并保持 **`TUSHARE_REALTIME_SOURCE=forward`**。后端会将该地址与库表 `realtime_sources` 中 `tushare_proxy` 的配置合并（与启动健康检查规则一致）。香港 ECS 需能访问该 `ws://` 主机与端口（内地安全组放行香港出口 IP）。连通性可用仓库内 `qdhub/ts_proxy_diagnose` 自测。
+**ts_proxy WebSocket 地址**：`.env` 中设置 `**TUSHARE_PROXY_WS_URL`**（示例见上文，内地转发机默认路径为 `/realtime`、端口 `8888`），并保持 `**TUSHARE_REALTIME_SOURCE=forward**`。后端会将该地址与库表 `realtime_sources` 中 `tushare_proxy` 的配置合并（与启动健康检查规则一致）。香港 ECS 需能访问该 `ws://` 主机与端口（内地安全组放行香港出口 IP）。连通性可用仓库内 `qdhub/ts_proxy_diagnose` 自测。
 
 **注意**：`public.pem` 权限建议仅运维用户可读（如 `chmod 600`），勿提交到 Git。
 
@@ -203,13 +204,13 @@ docker compose -f docker-compose.image.yml up -d
 
 - **当前服务器**：已迁移至香港，公网 IP `43.99.17.169`（原服务器已停用）。
 - **未配 ECS Nginx 时**：前端 `http://43.99.17.169:3001`，后端 API `http://43.99.17.169:8080`。
-- **配好 ECS Nginx（推荐）**：前端 `https://你的域名`（或 `http://` 跳转），由宿主机 Nginx 监听 80/443，反代到 `127.0.0.1:3001`。生产可参考仓库 **`deploy/qdhub.conf`**（含 SSE、`/api/v1/ws/`、Let’s Encrypt 路径等）；下方「5. ECS 上 Nginx」为原理示例，以仓库 `deploy/` 为准合并。
+- **配好 ECS Nginx（推荐）**：前端 `https://你的域名`（或 `http://` 跳转），由宿主机 Nginx 监听 80/443，反代到 `127.0.0.1:3001`。生产可参考仓库 `**deploy/qdhub.conf`**（含 SSE、`/api/v1/ws/`、Let’s Encrypt 路径等）；下方「5. ECS 上 Nginx」为原理示例，以仓库 `deploy/` 为准合并。
 
 ### 5. ECS 上 Nginx 做 HTTPS（可选）
 
 前端容器只暴露 **3001**，后端 API 为 **8080**，80/443 由 ECS 宿主机 Nginx 监听，便于挂证书、做 HTTPS。
 
-**要点**：`/api/v1/ws/*`（如实时行情 WebSocket）必须在 Nginx 上按 **WebSocket 升级**转发：需要 `Upgrade` 与 `Connection: upgrade`，且 **不能**像普通 HTTP 反代那样把 `Connection` 置空。否则上游 Go（`gorilla/websocket`）收不到合法握手，会返回 **400 Bad Request**（响应体约 12 字节），Postman 里表现为 `Unexpected server response: 400`。
+**要点**：`/api/v1/ws/`*（如实时行情 WebSocket）必须在 Nginx 上按 **WebSocket 升级**转发：需要 `Upgrade` 与 `Connection: upgrade`，且 **不能**像普通 HTTP 反代那样把 `Connection` 置空。否则上游 Go（`gorilla/websocket`）收不到合法握手，会返回 **400 Bad Request**（响应体约 12 字节），Postman 里表现为 `Unexpected server response: 400`。
 
 ```nginx
 # /etc/nginx/sites-available/quantrade.team 示例（含 API + WS）
@@ -322,14 +323,18 @@ docker compose -f docker-compose.image.yml up -d
 
 若需要在服务器上使用 Jupyter Lab，**须先在本地/CI 构建并推送 `qdhub-jupyter-lab` 镜像**，ECS 只 `pull` + `up`，不在服务器上 `build`。
 
+**与主站 tag 分离**：`docker-compose.image.yml` 使用 `**IMAGE_TAG`**（对应 `qdhub-backend` / `qdhub-frontend`）。`docker-compose.jupyter.yml` 使用 `**JUPYTER_IMAGE_TAG**`（仅 `qdhub-jupyter-lab`）。同一 `.env` 可同时写二者，**切勿**把 Jupyter 专用 tag（如 `v0.1.0-jupyter.1`）赋给 `IMAGE_TAG`，否则主站 `pull` 会报 `manifest unknown`。
+
 访问方式二选一（**同一容器实例不要混用**两种 URL 形态，见 `JUPYTER_BASE_URL`）：
 
-| 方式 | Nginx | 环境变量 |
-|------|--------|----------|
-| 路径前缀 | 主站配置里 `location /jupyter/`（见 **`deploy/qdhub.conf`** 若保留该段） | `JUPYTER_BASE_URL` 默认 `/jupyter/`（compose 默认即可） |
-| 独立子域 | 单独 **`deploy/jupyter.conf`**，`server_name` 如 `jupyter.quantrade.team`，Let’s Encrypt 单独签发该主机名 | `export JUPYTER_BASE_URL=/` |
 
-容器内挂载 **`deploy/jupyter_server_config.py`**（compose 已配置）；**密码**用 `JUPYTER_PASSWORD` 或 `JUPYTER_PASSWORD_HASH`（与 **非空** `JUPYTER_TOKEN` 互斥）。修改密码或 `JUPYTER_BASE_URL` 后须 **`docker compose -f docker-compose.jupyter.yml up -d --force-recreate`**。
+| 方式   | Nginx                                                                                        | 环境变量                                            |
+| ---- | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 路径前缀 | 主站配置里 `location /jupyter/`（见 `**deploy/qdhub.conf`** 若保留该段）                                  | `JUPYTER_BASE_URL` 默认 `/jupyter/`（compose 默认即可） |
+| 独立子域 | 单独 `**deploy/jupyter.conf**`，`server_name` 如 `jupyter.quantrade.team`，Let’s Encrypt 单独签发该主机名 | `export JUPYTER_BASE_URL=/`                     |
+
+
+容器内挂载 `**deploy/jupyter_server_config.py**`（compose 已配置）；**密码**用 `JUPYTER_PASSWORD` 或 `JUPYTER_PASSWORD_HASH`（与 **非空** `JUPYTER_TOKEN` 互斥）。修改密码或 `JUPYTER_BASE_URL` 后须 `**docker compose -f docker-compose.jupyter.yml up -d --force-recreate`**。
 
 ### 1. 本地构建并推送（linux/amd64）
 
@@ -337,7 +342,7 @@ docker compose -f docker-compose.image.yml up -d
 
 ```bash
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-jupyter.1
+export JUPYTER_IMAGE_TAG=v0.1.0-jupyter.1
 
 # 使用 buildx 按 linux/amd64 构建并推送（与 research-env/README.md 一致）
 docker buildx create --name qdhub-jupyter --use 2>/dev/null || true
@@ -345,7 +350,7 @@ docker buildx inspect --bootstrap
 
 docker buildx build \
   --platform linux/amd64 \
-  -t "${DOCKER_REGISTRY}qdhub-jupyter-lab:${IMAGE_TAG}" \
+  -t "${DOCKER_REGISTRY}qdhub-jupyter-lab:${JUPYTER_IMAGE_TAG}" \
   -f research-env/Dockerfile \
   research-env \
   --push
@@ -357,7 +362,7 @@ docker buildx build \
 
 ```bash
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-jupyter.1   # 必须与构建时一致
+export JUPYTER_IMAGE_TAG=v0.1.0-jupyter.1   # 必须与构建时一致；勿与主站 IMAGE_TAG 混用
 
 export JUPYTER_MOUNT_DATA=/mnt/data
 export JUPYTER_MOUNT_QDHUB=/mnt/vdb/qdhub
@@ -375,6 +380,6 @@ docker compose -f docker-compose.jupyter.yml pull jupyter-lab
 docker compose -f docker-compose.jupyter.yml up -d --force-recreate
 ```
 
-**Nginx**：子域方式将 **`deploy/jupyter.conf`** 拷至 `/etc/nginx/conf.d/`，证书目录为 `/etc/letsencrypt/live/<jupyter 主机名>/`；首次无证书时可先只启用 80 段再 `certbot certonly --nginx -d <主机名>`（见 `jupyter.conf` 文件头注释）。仅用路径方式时保证 **`deploy/jupyter_server_config.py` 与 `JUPYTER_BASE_URL`、主站 `location /jupyter/` 一致**。
+**Nginx**：子域方式将 `**deploy/jupyter.conf`** 拷至 `/etc/nginx/conf.d/`，证书目录为 `/etc/letsencrypt/live/<jupyter 主机名>/`；首次无证书时可先只启用 80 段再 `certbot certonly --nginx -d <主机名>`（见 `jupyter.conf` 文件头注释）。仅用路径方式时保证 `**deploy/jupyter_server_config.py` 与 `JUPYTER_BASE_URL`、主站 `location /jupyter/` 一致**。
 
-更细的构建与变量说明见 **`research-env/README.md`**。
+更细的构建与变量说明见 `**research-env/README.md`**。
