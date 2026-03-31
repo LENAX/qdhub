@@ -53,7 +53,9 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.GET("/concept-rotation", h.GetConceptRotation)
 		g.GET("/dragon-tiger", h.GetDragonTigerList)
 		g.GET("/money-flow", h.GetMoneyFlow)
+		g.GET("/moneyflow-rank", h.GetMoneyFlowRank)
 		g.GET("/moneyflow-concept", h.GetMoneyFlowConcept)
+		g.GET("/index-ohlcv", h.GetIndexOHLCV)
 		g.GET("/popularity-rank", h.GetPopularityRank)
 		g.GET("/news", h.ListNews)
 		g.GET("/news/stream", h.StreamNews)
@@ -931,6 +933,48 @@ func (h *AnalysisHandler) GetMoneyFlowConcept(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"trade_date": tradeDate, "items": list})
+}
+
+// GetMoneyFlowRank handles GET /api/v1/analysis/moneyflow-rank
+func (h *AnalysisHandler) GetMoneyFlowRank(c *gin.Context) {
+	scope := strings.TrimSpace(strings.ToLower(c.DefaultQuery("scope", "all")))
+	switch scope {
+	case "stock", "concept", "all":
+	default:
+		BadRequest(c, "scope must be stock, concept, or all")
+		return
+	}
+	tradeDate := strings.TrimSpace(c.Query("trade_date"))
+	req := analysis.MoneyFlowRankRequest{
+		TradeDate: tradeDate,
+		Scope:     scope,
+		Limit:     defaultInt(c.Query("limit"), 100),
+		Offset:    defaultInt(c.Query("offset"), 0),
+	}
+	res, err := h.svc.GetMoneyFlowRank(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, res)
+}
+
+// GetIndexOHLCV handles GET /api/v1/analysis/index-ohlcv
+func (h *AnalysisHandler) GetIndexOHLCV(c *gin.Context) {
+	tsCode := strings.TrimSpace(c.Query("ts_code"))
+	if tsCode == "" {
+		BadRequest(c, "ts_code required")
+		return
+	}
+	days := defaultInt(c.Query("days"), 10)
+	endDate := strings.TrimSpace(c.Query("end_date"))
+	req := analysis.IndexOHLCVRequest{TsCode: tsCode, Days: days, EndDate: endDate}
+	res, err := h.svc.GetIndexOHLCV(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, res)
 }
 
 // GetPopularityRank handles GET /api/v1/analysis/popularity-rank

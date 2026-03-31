@@ -71,6 +71,14 @@ func (a *AnalysisApplicationServiceImpl) GetMoneyFlow(ctx context.Context, req a
 func (a *AnalysisApplicationServiceImpl) GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error) {
 	return a.svc.GetMoneyFlowConcept(ctx, req)
 }
+
+func (a *AnalysisApplicationServiceImpl) GetMoneyFlowRank(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error) {
+	return a.svc.GetMoneyFlowRank(ctx, req)
+}
+
+func (a *AnalysisApplicationServiceImpl) GetIndexOHLCV(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error) {
+	return a.svc.GetIndexOHLCV(ctx, req)
+}
 func (a *AnalysisApplicationServiceImpl) GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return a.svc.GetPopularityRank(ctx, req)
 }

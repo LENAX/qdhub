@@ -187,6 +187,10 @@ func (m *FullMockSyncService) GetExecutionDetail(ctx context.Context, executionI
 	return &contracts.ExecutionDetail{}, nil
 }
 
+func (m *FullMockSyncService) ExecuteNewsRealtimeOnce(ctx context.Context) error {
+	return nil
+}
+
 // FullMockWorkflowService implements WorkflowApplicationService.
 type FullMockWorkflowService struct{}
 

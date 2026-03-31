@@ -144,6 +144,16 @@ type MoneyFlowConceptReader interface {
 	GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error)
 }
 
+// MoneyFlowRankReader 资金流入排名（个股 + 概念）
+type MoneyFlowRankReader interface {
+	GetMoneyFlowRank(ctx context.Context, req MoneyFlowRankRequest) (*MoneyFlowRankResult, error)
+}
+
+// IndexOHLCVReader 指数日线 OHLCV（index_daily）
+type IndexOHLCVReader interface {
+	GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error)
+}
+
 // PopularityRankReader 人气榜
 type PopularityRankReader interface {
 	GetRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)

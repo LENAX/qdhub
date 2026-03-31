@@ -2,6 +2,7 @@ package analysis_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -197,6 +198,16 @@ func (noopIntradayKline) GetIntradayKline(ctx context.Context, tsCode, tradeDate
 	return nil, nil
 }
 
+// noopMoneyFlowRankIndex MoneyFlowRankReader + IndexOHLCVReader
+type noopMoneyFlowRankIndex struct{}
+
+func (noopMoneyFlowRankIndex) GetMoneyFlowRank(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error) {
+	return nil, nil
+}
+func (noopMoneyFlowRankIndex) GetIndexOHLCV(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error) {
+	return nil, nil
+}
+
 func TestAnalysisService_GetKLine(t *testing.T) {
 	ctx := context.Background()
 	n := noop{}
@@ -217,6 +228,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 	nRealtimeTick := noopRealtimeTick{}
 	nIntradayTick := noopIntradayTick{}
 	nIntradayKline := noopIntradayKline{}
+	nRankIdx := noopMoneyFlowRankIndex{}
 
 	t.Run("none_adjust", func(t *testing.T) {
 		mockK := new(mockKLineReader)
@@ -230,6 +242,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
+			nRankIdx, nRankIdx,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -254,6 +267,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
+			nRankIdx, nRankIdx,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustQfq,
@@ -284,6 +298,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
+			nRankIdx, nRankIdx,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustHfq,
@@ -295,8 +310,12 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 		assert.InDelta(t, 11.5*2.0, data[1].Close, 1e-6)
 		assert.InDelta(t, 0.5, data[0].Change, 1e-6)
 		assert.InDelta(t, 5.0, data[0].PctChg, 1e-2)
-		assert.InDelta(t, 23.0-10.5, data[1].Change, 1e-6)
-		assert.InDelta(t, (23.0-10.5)/10.5*100, data[1].PctChg, 1e-2)
+		// 后复权：pre_close 与 close 同乘 adj_factor（与 applyAdjustAndToKLineData 一致）
+		round2 := func(x float64) float64 { return math.Round(x*100) / 100 }
+		preAdj := round2(10.5 * 2.0)
+		closeAdj := round2(11.5 * 2.0)
+		assert.InDelta(t, round2(closeAdj-preAdj), data[1].Change, 1e-6)
+		assert.InDelta(t, round2((closeAdj-preAdj)/preAdj*100), data[1].PctChg, 1e-2)
 		mockK.AssertExpectations(t)
 	})
 
@@ -309,6 +328,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
+			nRankIdx, nRankIdx,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "999999.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -327,6 +347,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
+			nRankIdx, nRankIdx,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,

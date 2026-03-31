@@ -42,6 +42,8 @@ type analysisServiceImpl struct {
 	realtimeTickReader          RealtimeTickReader
 	intradayTickReader          IntradayTickReader
 	intradayKlineReader         IntradayKlineReader
+	moneyFlowRankReader         MoneyFlowRankReader
+	indexOHLCVReader            IndexOHLCVReader
 }
 
 // NewAnalysisService 构造分析领域服务，依赖各 Reader 与 CustomQueryExecutor
@@ -79,6 +81,8 @@ func NewAnalysisService(
 	realtimeTickReader RealtimeTickReader,
 	intradayTickReader IntradayTickReader,
 	intradayKlineReader IntradayKlineReader,
+	moneyFlowRankReader MoneyFlowRankReader,
+	indexOHLCVReader IndexOHLCVReader,
 ) AnalysisService {
 	return &analysisServiceImpl{
 		kLineReader:                 kLineReader,
@@ -114,6 +118,8 @@ func NewAnalysisService(
 		realtimeTickReader:          realtimeTickReader,
 		intradayTickReader:          intradayTickReader,
 		intradayKlineReader:         intradayKlineReader,
+		moneyFlowRankReader:         moneyFlowRankReader,
+		indexOHLCVReader:            indexOHLCVReader,
 	}
 }
 
@@ -296,6 +302,14 @@ func (s *analysisServiceImpl) GetMoneyFlow(ctx context.Context, req MoneyFlowReq
 
 func (s *analysisServiceImpl) GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error) {
 	return s.moneyFlowConceptReader.GetMoneyFlowConcept(ctx, req)
+}
+
+func (s *analysisServiceImpl) GetMoneyFlowRank(ctx context.Context, req MoneyFlowRankRequest) (*MoneyFlowRankResult, error) {
+	return s.moneyFlowRankReader.GetMoneyFlowRank(ctx, req)
+}
+
+func (s *analysisServiceImpl) GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error) {
+	return s.indexOHLCVReader.GetIndexOHLCV(ctx, req)
 }
 
 func (s *analysisServiceImpl) GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error) {

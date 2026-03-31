@@ -45,6 +45,10 @@ type AnalysisService interface {
 	GetMoneyFlow(ctx context.Context, req MoneyFlowRequest) ([]MoneyFlow, error)
 	// 同花顺概念板块资金流入（moneyflow_cnt_ths）
 	GetMoneyFlowConcept(ctx context.Context, req MoneyFlowConceptRequest) ([]MoneyFlowConcept, error)
+	// 资金流入排名（个股：moneyflow → moneyflow_ths → moneyflow_dc；概念：moneyflow_cnt_ths）
+	GetMoneyFlowRank(ctx context.Context, req MoneyFlowRankRequest) (*MoneyFlowRankResult, error)
+	// 指数日线 OHLCV（仅 index_daily）
+	GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error)
 
 	// 人气榜
 	GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
@@ -171,6 +175,21 @@ type MoneyFlowRequest struct {
 	Market    *string // 市场类型
 	Limit     int     // 返回数量限制
 	Offset    int     // 偏移量
+}
+
+// MoneyFlowRankRequest 资金流入排名：scope 为 stock / concept / all（默认 all）；trade_date 空则取各数据源最新交易日
+type MoneyFlowRankRequest struct {
+	TradeDate string // YYYYMMDD，空表示自动解析
+	Scope     string // stock | concept | all
+	Limit     int
+	Offset    int
+}
+
+// IndexOHLCVRequest 指数日线窗口：days 默认 10；end_date 空则取该指数在 index_daily 中最新 trade_date
+type IndexOHLCVRequest struct {
+	TsCode  string
+	Days    int    // 近 N 个交易日（自然截取行数，非交易日历）
+	EndDate string // YYYYMMDD，空表示最新
 }
 
 // PopularityRankRequest 人气榜查询请求

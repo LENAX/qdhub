@@ -72,6 +72,8 @@ var (
 	_ analysis.IntradayTickReader          = (*Readers)(nil)
 	_ analysis.IntradayKlineReader         = (*Readers)(nil)
 	_ analysis.MoneyFlowConceptReader      = (*Readers)(nil)
+	_ analysis.MoneyFlowRankReader           = (*Readers)(nil)
+	_ analysis.IndexOHLCVReader              = (*Readers)(nil)
 )
 
 // GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算。
@@ -1387,6 +1389,304 @@ FROM moneyflow_cnt_ths WHERE trade_date = ?`
 		})
 	}
 	return out, nil
+}
+
+// GetMoneyFlowRank 资金流入排名：个股 moneyflow → moneyflow_ths → moneyflow_dc；概念 moneyflow_cnt_ths
+func (r *Readers) GetMoneyFlowRank(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error) {
+	scope := strings.TrimSpace(strings.ToLower(req.Scope))
+	if scope == "" {
+		scope = "all"
+	}
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	out := &analysis.MoneyFlowRankResult{
+		StockItems:   nil,
+		ConceptItems: nil,
+	}
+
+	var tradeDate string
+	if strings.TrimSpace(req.TradeDate) != "" {
+		tradeDate = strings.TrimSpace(req.TradeDate)
+	}
+
+	switch scope {
+	case "stock":
+		if tradeDate == "" {
+			tradeDate = r.resolveLatestStockMoneyflowDate(ctx)
+		}
+		if tradeDate == "" {
+			return out, nil
+		}
+		out.TradeDate = tradeDate
+		items, src := r.queryStockMoneyFlowRank(ctx, tradeDate, limit, offset)
+		out.StockSource = src
+		out.StockItems = items
+	case "concept":
+		if tradeDate == "" {
+			tradeDate = r.resolveLatestConceptMoneyflowDate(ctx)
+		}
+		if tradeDate == "" {
+			return out, nil
+		}
+		out.TradeDate = tradeDate
+		out.ConceptItems = r.queryConceptMoneyFlowRank(ctx, tradeDate, limit, offset)
+	case "all":
+		stockDate := tradeDate
+		conceptDate := tradeDate
+		if stockDate == "" {
+			stockDate = r.resolveLatestStockMoneyflowDate(ctx)
+		}
+		if conceptDate == "" {
+			conceptDate = r.resolveLatestConceptMoneyflowDate(ctx)
+		}
+		// 统一展示用 trade_date：优先请求值；否则取个股侧日期（若为空则 concept 侧）
+		if tradeDate != "" {
+			out.TradeDate = tradeDate
+		} else if stockDate != "" {
+			out.TradeDate = stockDate
+		} else {
+			out.TradeDate = conceptDate
+		}
+		if stockDate != "" {
+			items, src := r.queryStockMoneyFlowRank(ctx, stockDate, limit, offset)
+			out.StockSource = src
+			out.StockItems = items
+		}
+		if conceptDate != "" {
+			out.ConceptItems = r.queryConceptMoneyFlowRank(ctx, conceptDate, limit, offset)
+		}
+	default:
+		return nil, fmt.Errorf("invalid scope: %s (use stock|concept|all)", req.Scope)
+	}
+	return out, nil
+}
+
+func (r *Readers) resolveLatestStockMoneyflowDate(ctx context.Context) string {
+	for _, tbl := range []string{"moneyflow", "moneyflow_ths", "moneyflow_dc"} {
+		ok, _ := r.db.TableExists(ctx, tbl)
+		if !ok {
+			continue
+		}
+		rows, err := r.db.Query(ctx, "SELECT MAX(trade_date) AS m FROM "+tbl)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		if s := str(rows[0], "m"); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func (r *Readers) resolveLatestConceptMoneyflowDate(ctx context.Context) string {
+	ok, _ := r.db.TableExists(ctx, "moneyflow_cnt_ths")
+	if !ok {
+		return ""
+	}
+	rows, err := r.db.Query(ctx, "SELECT MAX(trade_date) AS m FROM moneyflow_cnt_ths")
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	return str(rows[0], "m")
+}
+
+// queryStockMoneyFlowRank 返回排名行与数据源名（moneyflow / moneyflow_ths / moneyflow_dc）
+func (r *Readers) queryStockMoneyFlowRank(ctx context.Context, tradeDate string, limit, offset int) ([]analysis.MoneyFlowStockRankItem, string) {
+	okMf, _ := r.db.TableExists(ctx, "moneyflow")
+	if okMf {
+		sql := `SELECT m.trade_date, m.ts_code,
+       COALESCE(s.name, '') AS name,
+       COALESCE(m.buy_sm_amount, 0) AS buy_sm_amount, COALESCE(m.sell_sm_amount, 0) AS sell_sm_amount,
+       COALESCE(m.buy_md_amount, 0) AS buy_md_amount, COALESCE(m.sell_md_amount, 0) AS sell_md_amount,
+       COALESCE(m.buy_lg_amount, 0) AS buy_lg_amount, COALESCE(m.sell_lg_amount, 0) AS sell_lg_amount,
+       COALESCE(m.buy_elg_amount, 0) AS buy_elg_amount, COALESCE(m.sell_elg_amount, 0) AS sell_elg_amount,
+       COALESCE(m.net_mf_amount, 0) AS net_mf_amount
+FROM moneyflow m
+LEFT JOIN stock_basic s ON m.ts_code = s.ts_code
+WHERE m.trade_date = ?
+ORDER BY m.net_mf_amount DESC NULLS LAST
+LIMIT ? OFFSET ?`
+		rows, err := r.db.Query(ctx, sql, tradeDate, limit, offset)
+		if err != nil {
+			return nil, "moneyflow"
+		}
+		out := make([]analysis.MoneyFlowStockRankItem, 0, len(rows))
+		for i, m := range rows {
+			out = append(out, analysis.MoneyFlowStockRankItem{
+				Rank:          offset + i + 1,
+				TradeDate:     str(m, "trade_date"),
+				TsCode:        str(m, "ts_code"),
+				Name:          str(m, "name"),
+				NetMfAmount:   float(m, "net_mf_amount"),
+				DataSource:    "moneyflow",
+				BuySmAmount:   float(m, "buy_sm_amount"),
+				SellSmAmount:  float(m, "sell_sm_amount"),
+				BuyMdAmount:   float(m, "buy_md_amount"),
+				SellMdAmount:  float(m, "sell_md_amount"),
+				BuyLgAmount:   float(m, "buy_lg_amount"),
+				SellLgAmount:  float(m, "sell_lg_amount"),
+				BuyElgAmount:  float(m, "buy_elg_amount"),
+				SellElgAmount: float(m, "sell_elg_amount"),
+			})
+		}
+		return out, "moneyflow"
+	}
+
+	okThs, _ := r.db.TableExists(ctx, "moneyflow_ths")
+	if okThs {
+		sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name,
+       COALESCE(buy_sm_amount, 0) AS buy_sm_amount, COALESCE(buy_md_amount, 0) AS buy_md_amount, COALESCE(buy_lg_amount, 0) AS buy_lg_amount,
+       COALESCE(net_amount, 0) AS net_mf_amount
+FROM moneyflow_ths
+WHERE trade_date = ?
+ORDER BY net_amount DESC NULLS LAST
+LIMIT ? OFFSET ?`
+		rows, err := r.db.Query(ctx, sql, tradeDate, limit, offset)
+		if err != nil {
+			return nil, "moneyflow_ths"
+		}
+		out := make([]analysis.MoneyFlowStockRankItem, 0, len(rows))
+		for i, m := range rows {
+			out = append(out, analysis.MoneyFlowStockRankItem{
+				Rank:        offset + i + 1,
+				TradeDate:   str(m, "trade_date"),
+				TsCode:      str(m, "ts_code"),
+				Name:        str(m, "name"),
+				NetMfAmount: float(m, "net_mf_amount"),
+				DataSource:  "moneyflow_ths",
+				BuySmAmount: float(m, "buy_sm_amount"),
+				BuyMdAmount: float(m, "buy_md_amount"),
+				BuyLgAmount: float(m, "buy_lg_amount"),
+			})
+		}
+		return out, "moneyflow_ths"
+	}
+
+	okDc, _ := r.db.TableExists(ctx, "moneyflow_dc")
+	if !okDc {
+		return nil, ""
+	}
+	sql := `SELECT trade_date, ts_code, COALESCE(name, '') AS name,
+       COALESCE(net_amount, 0) AS net_mf_amount
+FROM moneyflow_dc
+WHERE trade_date = ?
+ORDER BY net_amount DESC NULLS LAST
+LIMIT ? OFFSET ?`
+	rows, err := r.db.Query(ctx, sql, tradeDate, limit, offset)
+	if err != nil {
+		return nil, "moneyflow_dc"
+	}
+	out := make([]analysis.MoneyFlowStockRankItem, 0, len(rows))
+	for i, m := range rows {
+		out = append(out, analysis.MoneyFlowStockRankItem{
+			Rank:        offset + i + 1,
+			TradeDate:   str(m, "trade_date"),
+			TsCode:      str(m, "ts_code"),
+			Name:        str(m, "name"),
+			NetMfAmount: float(m, "net_mf_amount"),
+			DataSource:  "moneyflow_dc",
+		})
+	}
+	return out, "moneyflow_dc"
+}
+
+func (r *Readers) queryConceptMoneyFlowRank(ctx context.Context, tradeDate string, limit, offset int) []analysis.MoneyFlowConceptRankItem {
+	ok, _ := r.db.TableExists(ctx, "moneyflow_cnt_ths")
+	if !ok {
+		return nil
+	}
+	sql := `SELECT trade_date, code AS concept_code, name AS concept_name,
+       COALESCE(net_mf_amount, 0) AS net_inflow
+FROM moneyflow_cnt_ths WHERE trade_date = ?
+ORDER BY net_mf_amount DESC NULLS LAST
+LIMIT ? OFFSET ?`
+	rows, err := r.db.Query(ctx, sql, tradeDate, limit, offset)
+	if err != nil {
+		return nil
+	}
+	out := make([]analysis.MoneyFlowConceptRankItem, 0, len(rows))
+	for i, m := range rows {
+		out = append(out, analysis.MoneyFlowConceptRankItem{
+			Rank: offset + i + 1,
+			MoneyFlowConcept: analysis.MoneyFlowConcept{
+				TradeDate:   str(m, "trade_date"),
+				ConceptCode: str(m, "concept_code"),
+				ConceptName: str(m, "concept_name"),
+				NetInflow:   float(m, "net_inflow"),
+			},
+		})
+	}
+	return out
+}
+
+// GetIndexOHLCV 指数日线 OHLCV，仅 index_daily（无周/月回退）
+func (r *Readers) GetIndexOHLCV(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error) {
+	tsCode := strings.TrimSpace(req.TsCode)
+	if tsCode == "" {
+		return nil, fmt.Errorf("ts_code required")
+	}
+	days := req.Days
+	if days <= 0 {
+		days = 10
+	}
+	if days > 366 {
+		days = 366
+	}
+	res := &analysis.IndexOHLCVResult{TsCode: tsCode, WindowDays: days, Items: nil}
+	ok, _ := r.db.TableExists(ctx, "index_daily")
+	if !ok {
+		return res, nil
+	}
+	endDate := strings.TrimSpace(req.EndDate)
+	if endDate == "" {
+		rows, err := r.db.Query(ctx, `SELECT MAX(trade_date) AS m FROM index_daily WHERE ts_code = ?`, tsCode)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) == 0 {
+			return res, nil
+		}
+		endDate = str(rows[0], "m")
+	}
+	if endDate == "" {
+		return res, nil
+	}
+	res.EndDate = endDate
+
+	sql := `
+SELECT trade_date, open, high, low, close, vol, amount
+FROM (
+  SELECT trade_date, open, high, low, close, vol, amount
+  FROM index_daily
+  WHERE ts_code = ? AND trade_date <= ?
+  ORDER BY trade_date DESC
+  LIMIT ?
+) sub
+ORDER BY trade_date ASC`
+	rows, err := r.db.Query(ctx, sql, tsCode, endDate, days)
+	if err != nil {
+		return nil, fmt.Errorf("index_daily query: %w", err)
+	}
+	items := make([]analysis.IndexOHLCVRow, 0, len(rows))
+	for _, m := range rows {
+		items = append(items, analysis.IndexOHLCVRow{
+			TradeDate: str(m, "trade_date"),
+			Open:      float(m, "open"),
+			High:      float(m, "high"),
+			Low:       float(m, "low"),
+			Close:     float(m, "close"),
+			Vol:       float(m, "vol"),
+			Amount:    float(m, "amount"),
+		})
+	}
+	res.Items = items
+	return res, nil
 }
 
 // GetRank PopularityRankReader

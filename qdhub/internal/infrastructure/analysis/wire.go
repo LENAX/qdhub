@@ -40,5 +40,7 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		r, // RealtimeTickReader
 		r, // IntradayTickReader
 		r, // IntradayKlineReader
+		r, // MoneyFlowRankReader
+		r, // IndexOHLCVReader
 	)
 }

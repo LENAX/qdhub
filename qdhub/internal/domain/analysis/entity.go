@@ -356,6 +356,59 @@ type MoneyFlowConcept struct {
 	NetInflowRatio float64 `json:"net_inflow_ratio,omitempty"`
 }
 
+// MoneyFlowStockRankItem 个股资金净流入排名一行（主表 moneyflow，回退 moneyflow_ths / moneyflow_dc）
+type MoneyFlowStockRankItem struct {
+	Rank        int     `json:"rank"`
+	TradeDate   string  `json:"trade_date"`
+	TsCode      string  `json:"ts_code"`
+	Name        string  `json:"name"`
+	NetMfAmount float64 `json:"net_mf_amount"`
+	DataSource  string  `json:"data_source"` // moneyflow | moneyflow_ths | moneyflow_dc
+	// 来自 moneyflow 时填充较全；回退表字段可能不全
+	BuySmAmount   float64 `json:"buy_sm_amount,omitempty"`
+	SellSmAmount  float64 `json:"sell_sm_amount,omitempty"`
+	BuyMdAmount   float64 `json:"buy_md_amount,omitempty"`
+	SellMdAmount  float64 `json:"sell_md_amount,omitempty"`
+	BuyLgAmount   float64 `json:"buy_lg_amount,omitempty"`
+	SellLgAmount  float64 `json:"sell_lg_amount,omitempty"`
+	BuyElgAmount  float64 `json:"buy_elg_amount,omitempty"`
+	SellElgAmount float64 `json:"sell_elg_amount,omitempty"`
+	NetMfRatio    float64 `json:"net_mf_ratio,omitempty"`
+}
+
+// MoneyFlowConceptRankItem 概念板块资金流入排名一行（moneyflow_cnt_ths）
+type MoneyFlowConceptRankItem struct {
+	Rank int `json:"rank"`
+	MoneyFlowConcept
+}
+
+// MoneyFlowRankResult 资金流入排名（个股 + 概念）
+type MoneyFlowRankResult struct {
+	TradeDate    string                     `json:"trade_date"`
+	StockSource  string                     `json:"stock_data_source,omitempty"` // 个股排名所用表
+	StockItems   []MoneyFlowStockRankItem   `json:"stock_items"`
+	ConceptItems []MoneyFlowConceptRankItem `json:"concept_items"`
+}
+
+// IndexOHLCVRow 指数日线 OHLCV（index_daily）
+type IndexOHLCVRow struct {
+	TradeDate string  `json:"trade_date"`
+	Open      float64 `json:"open"`
+	High      float64 `json:"high"`
+	Low       float64 `json:"low"`
+	Close     float64 `json:"close"`
+	Vol       float64 `json:"vol"`
+	Amount    float64 `json:"amount"`
+}
+
+// IndexOHLCVResult 指数分析窗口结果
+type IndexOHLCVResult struct {
+	TsCode     string          `json:"ts_code"`
+	WindowDays int             `json:"window_days"`
+	EndDate    string          `json:"end_date"`
+	Items      []IndexOHLCVRow `json:"items"`
+}
+
 // PopularityRank 人气榜（值对象）
 type PopularityRank struct {
 	Rank         int     `json:"rank"`

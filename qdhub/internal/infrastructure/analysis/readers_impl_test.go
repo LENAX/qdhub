@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"qdhub/internal/domain/analysis"
 	domainDatastore "qdhub/internal/domain/datastore"
 	duckdbInfra "qdhub/internal/infrastructure/quantdb/duckdb"
 )
@@ -72,6 +73,148 @@ VALUES
 	}
 	if len(zRows) != 1 || zRows[0].TsCode != "000002.SZ" {
 		t.Fatalf("z rows mismatch: got=%+v", zRows)
+	}
+}
+
+func TestGetMoneyFlowRank_UsesMoneyflowTable(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_moneyflow_rank.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE stock_basic (ts_code VARCHAR, name VARCHAR)`,
+		`CREATE TABLE moneyflow (
+			trade_date VARCHAR, ts_code VARCHAR,
+			buy_sm_amount DOUBLE, sell_sm_amount DOUBLE, buy_md_amount DOUBLE, sell_md_amount DOUBLE,
+			buy_lg_amount DOUBLE, sell_lg_amount DOUBLE, buy_elg_amount DOUBLE, sell_elg_amount DOUBLE,
+			net_mf_amount DOUBLE
+		)`,
+		`CREATE TABLE moneyflow_cnt_ths (trade_date VARCHAR, code VARCHAR, name VARCHAR, net_mf_amount DOUBLE)`,
+	} {
+		if _, err := db.Execute(ctx, sql); err != nil {
+			t.Fatalf("ddl: %v", err)
+		}
+	}
+	td := "20250301"
+	if _, err := db.Execute(ctx, `INSERT INTO stock_basic VALUES ('000001.SZ', 'A'), ('000002.SZ', 'B')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `
+INSERT INTO moneyflow (trade_date, ts_code, buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount, buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount)
+VALUES (?, '000001.SZ', 0,0,0,0,0,0,0,0, 100), (?, '000002.SZ', 0,0,0,0,0,0,0,0, 200)
+`, td, td); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO moneyflow_cnt_ths VALUES (?, 'C001', '概念甲', 50)`, td); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	res, err := r.GetMoneyFlowRank(ctx, analysis.MoneyFlowRankRequest{Scope: "all", TradeDate: td, Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TradeDate != td || res.StockSource != "moneyflow" {
+		t.Fatalf("expected trade_date=%s stock_source=moneyflow, got %+v %+v", td, res.TradeDate, res.StockSource)
+	}
+	if len(res.StockItems) != 2 || res.StockItems[0].Rank != 1 || res.StockItems[0].TsCode != "000002.SZ" || res.StockItems[0].NetMfAmount != 200 {
+		t.Fatalf("stock rank: %+v", res.StockItems)
+	}
+	if len(res.ConceptItems) != 1 || res.ConceptItems[0].Rank != 1 || res.ConceptItems[0].ConceptName != "概念甲" {
+		t.Fatalf("concept rank: %+v", res.ConceptItems)
+	}
+}
+
+func TestGetMoneyFlowRank_FallbackMoneyflowThs(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_mf_ths.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE moneyflow_ths (
+			trade_date VARCHAR, ts_code VARCHAR, name VARCHAR,
+			buy_sm_amount DOUBLE, buy_md_amount DOUBLE, buy_lg_amount DOUBLE, net_amount DOUBLE
+		)`,
+	} {
+		if _, err := db.Execute(ctx, sql); err != nil {
+			t.Fatalf("ddl: %v", err)
+		}
+	}
+	td := "20250302"
+	if _, err := db.Execute(ctx, `INSERT INTO moneyflow_ths VALUES (?, '000001.SZ', 'A', 1, 2, 3, 10)`, td); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	res, err := r.GetMoneyFlowRank(ctx, analysis.MoneyFlowRankRequest{Scope: "stock", TradeDate: td, Limit: 5, Offset: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StockSource != "moneyflow_ths" || len(res.StockItems) != 1 || res.StockItems[0].DataSource != "moneyflow_ths" {
+		t.Fatalf("got %+v", res)
+	}
+}
+
+func TestGetIndexOHLCV_Window(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_idx.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	if _, err := db.Execute(ctx, `CREATE TABLE index_daily (
+		ts_code VARCHAR, trade_date VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, vol DOUBLE, amount DOUBLE
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	code := "000001.SH"
+	for _, d := range []string{"20250301", "20250302", "20250303", "20250304", "20250305"} {
+		if _, err := db.Execute(ctx, `INSERT INTO index_daily VALUES (?, ?, 1,1,1,1, 100, 1000)`, code, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := NewReaders(db)
+	res, err := r.GetIndexOHLCV(ctx, analysis.IndexOHLCVRequest{TsCode: code, Days: 3, EndDate: "20250305"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.EndDate != "20250305" || len(res.Items) != 3 {
+		t.Fatalf("got end=%s n=%d items=%+v", res.EndDate, len(res.Items), res.Items)
+	}
+	if res.Items[0].TradeDate != "20250303" || res.Items[2].TradeDate != "20250305" {
+		t.Fatalf("order: %+v", res.Items)
+	}
+}
+
+func TestGetIndexOHLCV_RequiresTsCode(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_idx2.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	r := NewReaders(db)
+	_, err = r.GetIndexOHLCV(ctx, analysis.IndexOHLCVRequest{TsCode: "", Days: 10})
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 
