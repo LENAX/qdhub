@@ -40,6 +40,23 @@ func TestStrategyToParamDependencies_UsesStockBasicForStockAPI(t *testing.T) {
 	}
 }
 
+func TestStrategyToParamDependencies_IndexWeightTsCodePreferred_UsesIndexCodeParam(t *testing.T) {
+	// 与 migration 004 一致：index_weight preferred_param=ts_code，但 API 参数名为 index_code
+	strategy := &metadata.APISyncStrategy{
+		PreferredParam: metadata.SyncParamTsCode,
+	}
+	deps := strategyToParamDependencies("index_weight", strategy)
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(deps))
+	}
+	if deps[0].ParamName != "index_code" {
+		t.Fatalf("expected param_name index_code, got %s", deps[0].ParamName)
+	}
+	if deps[0].SourceAPI != "index_basic" || deps[0].SourceField != "ts_code" || !deps[0].IsList {
+		t.Fatalf("unexpected dependency: %+v", deps[0])
+	}
+}
+
 func TestStrategyToParamDependencies_IndexCodeUsesIndexBasic(t *testing.T) {
 	strategy := &metadata.APISyncStrategy{
 		PreferredParam: metadata.SyncParamIndexCode,

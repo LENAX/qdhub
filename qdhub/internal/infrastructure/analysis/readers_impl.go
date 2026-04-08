@@ -72,8 +72,10 @@ var (
 	_ analysis.IntradayTickReader          = (*Readers)(nil)
 	_ analysis.IntradayKlineReader         = (*Readers)(nil)
 	_ analysis.MoneyFlowConceptReader      = (*Readers)(nil)
-	_ analysis.MoneyFlowRankReader           = (*Readers)(nil)
-	_ analysis.IndexOHLCVReader              = (*Readers)(nil)
+	_ analysis.MoneyFlowRankReader         = (*Readers)(nil)
+	_ analysis.IndexOHLCVReader            = (*Readers)(nil)
+	_ analysis.IndexSectorReader           = (*Readers)(nil)
+	_ analysis.IndexSectorMemberReader     = (*Readers)(nil)
 )
 
 // GetDailyWithAdjFactor 查询日线并关联复权因子，返回原始行供领域层复权计算。
@@ -110,12 +112,70 @@ ORDER BY d.trade_date`
 			AdjFactor: float(m, "adj_factor"),
 		})
 	}
+	// 指数：daily 无行情时从 index_daily 读取（无复权因子，adj_factor=1）
+	if len(out) == 0 {
+		idxOut, err := r.getIndexDailyRawRows(ctx, tsCode, startDate, endDate)
+		if err != nil {
+			return nil, err
+		}
+		out = idxOut
+	}
 	// 兜底：本地无数据且配置了 fallback 时，从数据源（如 Tushare）拉取
 	if len(out) == 0 && r.fallback != nil {
 		fallbackRows, fallbackErr := r.fallback.FetchDaily(ctx, tsCode, startDate, endDate)
 		if fallbackErr == nil && len(fallbackRows) > 0 {
 			return fallbackRows, nil
 		}
+	}
+	return out, nil
+}
+
+// getIndexDailyRawRows 从 index_daily 拉取原始行，供指数 K 线与复权链路复用（指数无复权因子，恒为 1）
+func (r *Readers) getIndexDailyRawRows(ctx context.Context, tsCode, startDate, endDate string) ([]analysis.RawDailyRow, error) {
+	ok, _ := r.db.TableExists(ctx, "index_daily")
+	if !ok || tsCode == "" {
+		return nil, nil
+	}
+	ibOk, _ := r.db.TableExists(ctx, "index_basic")
+	var sql string
+	if ibOk {
+		sql = `
+SELECT d.trade_date, COALESCE(ib.name, '') AS name, d.open, d.high, d.low, d.close, d.vol, d.amount,
+       COALESCE(d.pre_close, 0) AS pre_close, COALESCE(d.change, 0) AS change, COALESCE(d.pct_chg, 0) AS pct_chg,
+       1.0 AS adj_factor
+FROM index_daily d
+LEFT JOIN index_basic ib ON d.ts_code = ib.ts_code
+WHERE d.ts_code = ? AND d.trade_date >= ? AND d.trade_date <= ?
+ORDER BY d.trade_date`
+	} else {
+		sql = `
+SELECT trade_date, '' AS name, open, high, low, close, vol, amount,
+       COALESCE(pre_close, 0) AS pre_close, COALESCE(change, 0) AS change, COALESCE(pct_chg, 0) AS pct_chg,
+       1.0 AS adj_factor
+FROM index_daily
+WHERE ts_code = ? AND trade_date >= ? AND trade_date <= ?
+ORDER BY trade_date`
+	}
+	rows, err := r.db.Query(ctx, sql, tsCode, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("index_daily kline query: %w", err)
+	}
+	out := make([]analysis.RawDailyRow, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.RawDailyRow{
+			TradeDate: str(m, "trade_date"),
+			Name:      str(m, "name"),
+			Open:      float(m, "open"),
+			High:      float(m, "high"),
+			Low:       float(m, "low"),
+			Close:     float(m, "close"),
+			Vol:       float(m, "vol"),
+			Amount:    float(m, "amount"),
+			PreClose:  float(m, "pre_close"),
+			Change:    float(m, "change"),
+			PctChg:    float(m, "pct_chg"),
+			AdjFactor: 1.0,
+		})
 	}
 	return out, nil
 }
@@ -1623,6 +1683,172 @@ LIMIT ? OFFSET ?`
 		})
 	}
 	return out
+}
+
+// ListIndexSectors 申万等行业分类（index_classify）
+func (r *Readers) ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error) {
+	ok, _ := r.db.TableExists(ctx, "index_classify")
+	if !ok {
+		return nil, nil
+	}
+	sql := `SELECT index_code, industry_name, parent_code, level, industry_code, is_pub, src FROM index_classify WHERE 1=1`
+	args := []any{}
+	if req.Level != nil && strings.TrimSpace(*req.Level) != "" {
+		sql += " AND level = ?"
+		args = append(args, strings.TrimSpace(*req.Level))
+	}
+	if req.ParentCode != nil && strings.TrimSpace(*req.ParentCode) != "" {
+		sql += " AND parent_code = ?"
+		args = append(args, strings.TrimSpace(*req.ParentCode))
+	}
+	if req.Src != nil && strings.TrimSpace(*req.Src) != "" {
+		sql += " AND src = ?"
+		args = append(args, strings.TrimSpace(*req.Src))
+	}
+	if req.IndexCode != nil && strings.TrimSpace(*req.IndexCode) != "" {
+		sql += " AND index_code = ?"
+		args = append(args, strings.TrimSpace(*req.IndexCode))
+	}
+	if req.Query != nil && strings.TrimSpace(*req.Query) != "" {
+		q := "%" + strings.TrimSpace(*req.Query) + "%"
+		sql += " AND (industry_name ILIKE ? OR industry_code ILIKE ? OR index_code ILIKE ?)"
+		args = append(args, q, q, q)
+	}
+	sql += " ORDER BY index_code, industry_code LIMIT ? OFFSET ?"
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("index_classify: %w", err)
+	}
+	out := make([]analysis.IndexSectorInfo, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, analysis.IndexSectorInfo{
+			IndexCode:    str(m, "index_code"),
+			IndustryName: str(m, "industry_name"),
+			ParentCode:   str(m, "parent_code"),
+			Level:        str(m, "level"),
+			IndustryCode: str(m, "industry_code"),
+			IsPub:        str(m, "is_pub"),
+			Src:          str(m, "src"),
+		})
+	}
+	return out, nil
+}
+
+// ListIndexSectorMembers 指数成分（index_weight）或行业成分（index_member_all / ci_index_member）
+func (r *Readers) ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error) {
+	indexCode := strings.TrimSpace(req.IndexCode)
+	if indexCode == "" {
+		return nil, fmt.Errorf("index_code required")
+	}
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	tradeDate := strings.TrimSpace(req.TradeDate)
+
+	if ok, _ := r.db.TableExists(ctx, "index_weight"); ok {
+		if tradeDate == "" {
+			rows, err := r.db.Query(ctx, `SELECT MAX(trade_date) AS m FROM index_weight WHERE index_code = ?`, indexCode)
+			if err != nil {
+				return nil, fmt.Errorf("index_weight max date: %w", err)
+			}
+			if len(rows) > 0 {
+				tradeDate = str(rows[0], "m")
+			}
+		}
+		if tradeDate != "" {
+			sql := `
+SELECT w.index_code, w.con_code, w.trade_date, w.weight, COALESCE(s.name, '') AS name
+FROM index_weight w
+LEFT JOIN stock_basic s ON w.con_code = s.ts_code
+WHERE w.index_code = ? AND w.trade_date = ?
+ORDER BY w.weight DESC NULLS LAST
+LIMIT ? OFFSET ?`
+			rows, err := r.db.Query(ctx, sql, indexCode, tradeDate, limit, offset)
+			if err != nil {
+				return nil, fmt.Errorf("index_weight: %w", err)
+			}
+			if len(rows) > 0 {
+				out := make([]analysis.IndexSectorMember, 0, len(rows))
+				for _, m := range rows {
+					out = append(out, analysis.IndexSectorMember{
+						IndexCode:  str(m, "index_code"),
+						ConCode:    str(m, "con_code"),
+						Name:       str(m, "name"),
+						TradeDate:  str(m, "trade_date"),
+						Weight:     float(m, "weight"),
+						DataSource: "index_weight",
+					})
+				}
+				return out, nil
+			}
+		}
+	}
+
+	tryMemberTable := func(table string) ([]analysis.IndexSectorMember, error) {
+		sql := fmt.Sprintf(`
+SELECT l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, ts_code, name, in_date, out_date, is_new
+FROM %s
+WHERE (l1_code = ? OR l2_code = ? OR l3_code = ?)
+  AND (is_new IS NULL OR TRIM(COALESCE(is_new, '')) IN ('Y', 'y'))
+ORDER BY ts_code
+LIMIT ? OFFSET ?`, table)
+		rows, err := r.db.Query(ctx, sql, indexCode, indexCode, indexCode, limit, offset)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]analysis.IndexSectorMember, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, analysis.IndexSectorMember{
+				IndexCode:  indexCode,
+				ConCode:    str(m, "ts_code"),
+				Name:       str(m, "name"),
+				DataSource: table,
+				L1Code:     str(m, "l1_code"),
+				L1Name:     str(m, "l1_name"),
+				L2Code:     str(m, "l2_code"),
+				L2Name:     str(m, "l2_name"),
+				L3Code:     str(m, "l3_code"),
+				L3Name:     str(m, "l3_name"),
+				InDate:     str(m, "in_date"),
+				OutDate:    str(m, "out_date"),
+				IsNew:      str(m, "is_new"),
+			})
+		}
+		return out, nil
+	}
+
+	if ok, _ := r.db.TableExists(ctx, "index_member_all"); ok {
+		rows, err := tryMemberTable("index_member_all")
+		if err != nil {
+			return nil, fmt.Errorf("index_member_all: %w", err)
+		}
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	if ok, _ := r.db.TableExists(ctx, "ci_index_member"); ok {
+		rows, err := tryMemberTable("ci_index_member")
+		if err != nil {
+			return nil, fmt.Errorf("ci_index_member: %w", err)
+		}
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	return nil, nil
 }
 
 // GetIndexOHLCV 指数日线 OHLCV，仅 index_daily（无周/月回退）

@@ -1104,7 +1104,8 @@ func (s *SyncApplicationServiceImpl) planRequiresDateRange(plan *sync.SyncPlan) 
 // Mapping rules:
 //   - preferred_param=trade_date, !support_date_range → template mode (IsList=true), iterate over trade dates
 //   - preferred_param=trade_date, support_date_range  → direct mode (IsList=false), pass date range
-//   - preferred_param=ts_code                         → template mode (IsList=true), iterate over stock codes
+//   - preferred_param=ts_code                         → template mode (IsList=true)；股票来自 stock_basic，指数类 index_* 来自 index_basic
+//   - preferred_param=index_code                      → 同 index_basic.ts_code，参数名为 index_code（如 index_weight）
 //   - preferred_param=none                            → no dependencies needed
 func strategyToParamDependencies(apiName string, strategy *metadata.APISyncStrategy) []sync.ParamDependency {
 	switch strategy.PreferredParam {
@@ -1120,8 +1121,13 @@ func strategyToParamDependencies(apiName string, strategy *metadata.APISyncStrat
 		if strings.HasPrefix(apiName, "index_") {
 			sourceAPI = "index_basic"
 		}
+		paramName := "ts_code"
+		// Tushare index_weight 请求参数为 index_code，列表仍来自 index_basic.ts_code（与 batch_data_sync APIParamName 一致）
+		if apiName == "index_weight" {
+			paramName = "index_code"
+		}
 		return []sync.ParamDependency{{
-			ParamName:   "ts_code",
+			ParamName:   paramName,
 			SourceAPI:   sourceAPI,
 			SourceField: "ts_code",
 			IsList:      true,

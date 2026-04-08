@@ -9,9 +9,9 @@ import (
 
 // AnalysisApplicationServiceImpl 实现分析应用服务，委托领域服务
 type AnalysisApplicationServiceImpl struct {
-	svc                 analysis.AnalysisService
-	realtimeNewsReader  analysis.NewsReader // 可选：供 ListNewsFromRealtime/stream 使用
-	realtimeTickReader  analysis.TickReader // 可选：从 realtime DuckDB 读分时 tick
+	svc                analysis.AnalysisService
+	realtimeNewsReader analysis.NewsReader // 可选：供 ListNewsFromRealtime/stream 使用
+	realtimeTickReader analysis.TickReader // 可选：从 realtime DuckDB 读分时 tick
 }
 
 // NewAnalysisApplicationService 创建分析应用服务。
@@ -78,6 +78,12 @@ func (a *AnalysisApplicationServiceImpl) GetMoneyFlowRank(ctx context.Context, r
 
 func (a *AnalysisApplicationServiceImpl) GetIndexOHLCV(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error) {
 	return a.svc.GetIndexOHLCV(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error) {
+	return a.svc.ListIndexSectors(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error) {
+	return a.svc.ListIndexSectorMembers(ctx, req)
 }
 func (a *AnalysisApplicationServiceImpl) GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return a.svc.GetPopularityRank(ctx, req)

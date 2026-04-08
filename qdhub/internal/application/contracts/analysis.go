@@ -28,6 +28,8 @@ type AnalysisApplicationService interface {
 	GetMoneyFlowConcept(ctx context.Context, req analysis.MoneyFlowConceptRequest) ([]analysis.MoneyFlowConcept, error)
 	GetMoneyFlowRank(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error)
 	GetIndexOHLCV(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error)
+	ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error)
+	ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error)
 	GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error)
 	ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)
 	// ListNewsFromRealtime 从 realtime 数据源（realtime DuckDB news 表）拉取新闻，供 /analysis/news/stream 使用；无 realtime 时回退到 ListNews。

@@ -44,6 +44,8 @@ type analysisServiceImpl struct {
 	intradayKlineReader         IntradayKlineReader
 	moneyFlowRankReader         MoneyFlowRankReader
 	indexOHLCVReader            IndexOHLCVReader
+	indexSectorReader           IndexSectorReader
+	indexSectorMemberReader     IndexSectorMemberReader
 }
 
 // NewAnalysisService 构造分析领域服务，依赖各 Reader 与 CustomQueryExecutor
@@ -83,6 +85,8 @@ func NewAnalysisService(
 	intradayKlineReader IntradayKlineReader,
 	moneyFlowRankReader MoneyFlowRankReader,
 	indexOHLCVReader IndexOHLCVReader,
+	indexSectorReader IndexSectorReader,
+	indexSectorMemberReader IndexSectorMemberReader,
 ) AnalysisService {
 	return &analysisServiceImpl{
 		kLineReader:                 kLineReader,
@@ -120,6 +124,8 @@ func NewAnalysisService(
 		intradayKlineReader:         intradayKlineReader,
 		moneyFlowRankReader:         moneyFlowRankReader,
 		indexOHLCVReader:            indexOHLCVReader,
+		indexSectorReader:           indexSectorReader,
+		indexSectorMemberReader:     indexSectorMemberReader,
 	}
 }
 
@@ -310,6 +316,14 @@ func (s *analysisServiceImpl) GetMoneyFlowRank(ctx context.Context, req MoneyFlo
 
 func (s *analysisServiceImpl) GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error) {
 	return s.indexOHLCVReader.GetIndexOHLCV(ctx, req)
+}
+
+func (s *analysisServiceImpl) ListIndexSectors(ctx context.Context, req IndexSectorListRequest) ([]IndexSectorInfo, error) {
+	return s.indexSectorReader.ListIndexSectors(ctx, req)
+}
+
+func (s *analysisServiceImpl) ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error) {
+	return s.indexSectorMemberReader.ListIndexSectorMembers(ctx, req)
 }
 
 func (s *analysisServiceImpl) GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error) {

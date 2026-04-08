@@ -305,6 +305,36 @@ type IndexInfo struct {
 	PctChg    *float64 `json:"pct_chg,omitempty"`
 }
 
+// IndexSectorInfo 指数/行业分类行（index_classify，如申万行业）
+type IndexSectorInfo struct {
+	IndexCode    string `json:"index_code"`
+	IndustryName string `json:"industry_name"`
+	ParentCode   string `json:"parent_code"`
+	Level        string `json:"level"`
+	IndustryCode string `json:"industry_code"`
+	IsPub        string `json:"is_pub"`
+	Src          string `json:"src"`
+}
+
+// IndexSectorMember 指数或行业板块成分（index_weight 或 index_member_all / ci_index_member）
+type IndexSectorMember struct {
+	IndexCode  string  `json:"index_code"`
+	ConCode    string  `json:"con_code"` // 成分证券 ts_code
+	Name       string  `json:"name,omitempty"`
+	TradeDate  string  `json:"trade_date,omitempty"`
+	Weight     float64 `json:"weight,omitempty"`
+	DataSource string  `json:"data_source"` // index_weight | index_member_all | ci_index_member
+	L1Code     string  `json:"l1_code,omitempty"`
+	L1Name     string  `json:"l1_name,omitempty"`
+	L2Code     string  `json:"l2_code,omitempty"`
+	L2Name     string  `json:"l2_name,omitempty"`
+	L3Code     string  `json:"l3_code,omitempty"`
+	L3Name     string  `json:"l3_name,omitempty"`
+	InDate     string  `json:"in_date,omitempty"`
+	OutDate    string  `json:"out_date,omitempty"`
+	IsNew      string  `json:"is_new,omitempty"`
+}
+
 // ConceptInfo 题材概念信息（值对象）
 type ConceptInfo struct {
 	Code         string   `json:"code"`

@@ -154,6 +154,16 @@ type IndexOHLCVReader interface {
 	GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error)
 }
 
+// IndexSectorReader 指数/行业板块分类（index_classify）
+type IndexSectorReader interface {
+	ListIndexSectors(ctx context.Context, req IndexSectorListRequest) ([]IndexSectorInfo, error)
+}
+
+// IndexSectorMemberReader 指数或行业板块成分（index_weight 等）
+type IndexSectorMemberReader interface {
+	ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error)
+}
+
 // PopularityRankReader 人气榜
 type PopularityRankReader interface {
 	GetRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)

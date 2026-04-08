@@ -296,8 +296,12 @@ func (r *DependencyResolverImpl) inferDependenciesFromGraph(api string, sourceAP
 				IsList:      true,
 			})
 		case "index_basic":
+			paramName := "ts_code"
+			if api == "index_weight" {
+				paramName = "index_code"
+			}
 			deps = append(deps, ParamDependency{
-				ParamName:   "ts_code",
+				ParamName:   paramName,
 				SourceAPI:   "index_basic",
 				SourceField: "ts_code",
 				IsList:      true,

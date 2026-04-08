@@ -262,6 +262,33 @@ func TestDependencyResolver_Resolve_NoDependencies(t *testing.T) {
 	}
 }
 
+func TestDependencyResolver_Resolve_IndexDailyDependsOnFetchIndexBasic(t *testing.T) {
+	resolver := sync.NewDependencyResolver()
+
+	selectedAPIs := []string{"index_daily"}
+	allAPIDependencies := map[string][]sync.ParamDependency{
+		"index_daily": {
+			{ParamName: "ts_code", SourceAPI: "index_basic", SourceField: "ts_code", IsList: true},
+		},
+		"index_basic": {},
+	}
+
+	graph, _, err := resolver.Resolve(selectedAPIs, allAPIDependencies)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	cfg := graph.TaskConfigs["index_daily"]
+	if cfg == nil {
+		t.Fatal("missing task config for index_daily")
+	}
+	if len(cfg.Dependencies) != 1 || cfg.Dependencies[0] != "FetchIndexBasic" {
+		t.Fatalf("expected Dependencies [FetchIndexBasic], got %+v", cfg.Dependencies)
+	}
+	if len(cfg.ParamMappings) != 1 || cfg.ParamMappings[0].SourceTask != "FetchIndexBasic" {
+		t.Fatalf("expected ParamMappings SourceTask FetchIndexBasic, got %+v", cfg.ParamMappings)
+	}
+}
+
 func TestDependencyResolver_Resolve_ParamMappingGeneration(t *testing.T) {
 	resolver := sync.NewDependencyResolver()
 

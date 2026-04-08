@@ -208,6 +208,16 @@ func (noopMoneyFlowRankIndex) GetIndexOHLCV(ctx context.Context, req analysis.In
 	return nil, nil
 }
 
+// noopIndexSectorBoth IndexSectorReader + IndexSectorMemberReader
+type noopIndexSectorBoth struct{}
+
+func (noopIndexSectorBoth) ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error) {
+	return nil, nil
+}
+func (noopIndexSectorBoth) ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error) {
+	return nil, nil
+}
+
 func TestAnalysisService_GetKLine(t *testing.T) {
 	ctx := context.Background()
 	n := noop{}
@@ -229,6 +239,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 	nIntradayTick := noopIntradayTick{}
 	nIntradayKline := noopIntradayKline{}
 	nRankIdx := noopMoneyFlowRankIndex{}
+	nIdxSec := noopIndexSectorBoth{}
 
 	t.Run("none_adjust", func(t *testing.T) {
 		mockK := new(mockKLineReader)
@@ -242,7 +253,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -267,7 +278,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustQfq,
@@ -298,7 +309,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustHfq,
@@ -328,7 +339,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "999999.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -347,7 +358,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,

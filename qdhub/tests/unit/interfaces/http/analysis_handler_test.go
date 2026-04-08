@@ -19,8 +19,10 @@ import (
 
 // stubAnalysisApplicationService 仅用于 Analysis HTTP 单测；未覆盖的方法返回空值。
 type stubAnalysisApplicationService struct {
-	MoneyFlowRankHook func(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error)
-	IndexOHLCVHook    func(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error)
+	MoneyFlowRankHook          func(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error)
+	IndexOHLCVHook             func(ctx context.Context, req analysis.IndexOHLCVRequest) (*analysis.IndexOHLCVResult, error)
+	ListIndexSectorsHook       func(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error)
+	ListIndexSectorMembersHook func(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error)
 }
 
 var _ contracts.AnalysisApplicationService = (*stubAnalysisApplicationService)(nil)
@@ -37,6 +39,20 @@ func (s *stubAnalysisApplicationService) GetIndexOHLCV(ctx context.Context, req 
 		return s.IndexOHLCVHook(ctx, req)
 	}
 	return &analysis.IndexOHLCVResult{}, nil
+}
+
+func (s *stubAnalysisApplicationService) ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error) {
+	if s.ListIndexSectorsHook != nil {
+		return s.ListIndexSectorsHook(ctx, req)
+	}
+	return nil, nil
+}
+
+func (s *stubAnalysisApplicationService) ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error) {
+	if s.ListIndexSectorMembersHook != nil {
+		return s.ListIndexSectorMembersHook(ctx, req)
+	}
+	return nil, nil
 }
 
 func (s *stubAnalysisApplicationService) GetKLine(ctx context.Context, req analysis.KLineRequest) ([]analysis.KLineData, error) {
@@ -174,7 +190,7 @@ func TestAnalysisHandler_GetMoneyFlowRank_QueryParamsAndSuccess(t *testing.T) {
 		MoneyFlowRankHook: func(ctx context.Context, req analysis.MoneyFlowRankRequest) (*analysis.MoneyFlowRankResult, error) {
 			got = req
 			return &analysis.MoneyFlowRankResult{
-				TradeDate: "20250102",
+				TradeDate:   "20250102",
 				StockSource: "moneyflow",
 				StockItems: []analysis.MoneyFlowStockRankItem{
 					{Rank: 1, TsCode: "000001.SZ", NetMfAmount: 1.5, DataSource: "moneyflow"},
@@ -192,8 +208,8 @@ func TestAnalysisHandler_GetMoneyFlowRank_QueryParamsAndSuccess(t *testing.T) {
 	assert.Equal(t, 20, got.Limit)
 	assert.Equal(t, 5, got.Offset)
 	var resp struct {
-		Code    int                         `json:"code"`
-		Message string                      `json:"message"`
+		Code    int                          `json:"code"`
+		Message string                       `json:"message"`
 		Data    analysis.MoneyFlowRankResult `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -267,6 +283,55 @@ func TestAnalysisHandler_GetIndexOHLCV_DefaultDays(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 10, got.Days, "days 缺省应为 10")
+}
+
+func TestAnalysisHandler_ListIndexSectorMembers_MissingIndexCode(t *testing.T) {
+	stub := &stubAnalysisApplicationService{}
+	r := setupAnalysisRouter(stub)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analysis/index-sector-members", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestAnalysisHandler_ListIndexSectorMembers_QueryParamsAndSuccess(t *testing.T) {
+	var got analysis.IndexSectorMemberRequest
+	stub := &stubAnalysisApplicationService{
+		ListIndexSectorMembersHook: func(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error) {
+			got = req
+			return []analysis.IndexSectorMember{{IndexCode: req.IndexCode, ConCode: "000001.SZ", DataSource: "index_weight"}}, nil
+		},
+	}
+	r := setupAnalysisRouter(stub)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analysis/index-sector-members?index_code=000300.SH&trade_date=20250301&limit=50&offset=2", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "000300.SH", got.IndexCode)
+	assert.Equal(t, "20250301", got.TradeDate)
+	assert.Equal(t, 50, got.Limit)
+	assert.Equal(t, 2, got.Offset)
+}
+
+func TestAnalysisHandler_ListIndexSectors_Success(t *testing.T) {
+	var got analysis.IndexSectorListRequest
+	stub := &stubAnalysisApplicationService{
+		ListIndexSectorsHook: func(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error) {
+			got = req
+			return []analysis.IndexSectorInfo{{IndexCode: "801010.SI", IndustryName: "农林牧渔"}}, nil
+		},
+	}
+	r := setupAnalysisRouter(stub)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analysis/index-sectors?src=SW2021&level=L1&limit=20&offset=5", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotNil(t, got.Src)
+	assert.Equal(t, "SW2021", *got.Src)
+	assert.NotNil(t, got.Level)
+	assert.Equal(t, "L1", *got.Level)
+	assert.Equal(t, 20, got.Limit)
+	assert.Equal(t, 5, got.Offset)
 }
 
 func TestAnalysisHandler_GetIndexOHLCV_InvalidDaysFallsBackToDefault(t *testing.T) {

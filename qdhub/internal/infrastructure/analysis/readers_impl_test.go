@@ -218,3 +218,144 @@ func TestGetIndexOHLCV_RequiresTsCode(t *testing.T) {
 	}
 }
 
+func TestListIndexSectors(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_index_classify.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	if _, err := db.Execute(ctx, `CREATE TABLE index_classify (
+		index_code VARCHAR, industry_name VARCHAR, parent_code VARCHAR, level VARCHAR,
+		industry_code VARCHAR, is_pub VARCHAR, src VARCHAR
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO index_classify VALUES
+		('801010.SI', '农林牧渔', '0', 'L1', '801010', 'Y', 'SW2021'),
+		('801020.SI', '采掘', '0', 'L1', '801020', 'Y', 'SW2021')`); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	list, err := r.ListIndexSectors(ctx, analysis.IndexSectorListRequest{Src: strPtr("SW2021"), Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].IndustryName == "" {
+		t.Fatalf("got %+v", list)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestListIndexSectorMembers_IndexWeight(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_index_weight.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE stock_basic (ts_code VARCHAR, name VARCHAR)`,
+		`CREATE TABLE index_weight (index_code VARCHAR, con_code VARCHAR, trade_date VARCHAR, weight DOUBLE)`,
+	} {
+		if _, err := db.Execute(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO stock_basic VALUES ('000001.SZ', '平安'), ('000002.SZ', '万科')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO index_weight VALUES
+		('000300.SH', '000001.SZ', '20250301', 1.5),
+		('000300.SH', '000002.SZ', '20250301', 2.0)`); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	list, err := r.ListIndexSectorMembers(ctx, analysis.IndexSectorMemberRequest{IndexCode: "000300.SH", TradeDate: "20250301", Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].DataSource != "index_weight" || list[0].ConCode == "" {
+		t.Fatalf("got %+v", list)
+	}
+}
+
+func TestListIndexSectorMembers_FallbackMemberAll(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_index_member_all.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	if _, err := db.Execute(ctx, `CREATE TABLE index_member_all (
+		l1_code VARCHAR, l1_name VARCHAR, l2_code VARCHAR, l2_name VARCHAR, l3_code VARCHAR, l3_name VARCHAR,
+		ts_code VARCHAR, name VARCHAR, in_date VARCHAR, out_date VARCHAR, is_new VARCHAR
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO index_member_all VALUES
+		('801010.SI', '农林牧渔', '801011.SI', '子类', '801012.SI', '三级', '600000.SH', '浦发', '20200101', '', 'Y')`); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	list, err := r.ListIndexSectorMembers(ctx, analysis.IndexSectorMemberRequest{IndexCode: "801012.SI", Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].DataSource != "index_member_all" || list[0].ConCode != "600000.SH" {
+		t.Fatalf("got %+v", list)
+	}
+}
+
+func TestGetDailyWithAdjFactor_UsesIndexDailyWhenDailyEmpty(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "readers_kline_index.duckdb")
+	factory := duckdbInfra.NewFactory()
+	t.Cleanup(func() { _ = factory.Close() })
+	db, err := factory.Create(domainDatastore.QuantDBConfig{
+		Type: domainDatastore.DataStoreTypeDuckDB, StoragePath: dbPath,
+	})
+	if err != nil {
+		t.Fatalf("create duckdb: %v", err)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE daily (ts_code VARCHAR, trade_date VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, vol DOUBLE, amount DOUBLE, pre_close DOUBLE, change DOUBLE, pct_chg DOUBLE)`,
+		`CREATE TABLE adj_factor (ts_code VARCHAR, trade_date VARCHAR, adj_factor DOUBLE)`,
+		`CREATE TABLE stock_basic (ts_code VARCHAR, name VARCHAR)`,
+	} {
+		if _, err := db.Execute(ctx, sql); err != nil {
+			t.Fatalf("ddl: %v", err)
+		}
+	}
+	if _, err := db.Execute(ctx, `CREATE TABLE index_daily (
+		ts_code VARCHAR, trade_date VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
+		vol DOUBLE, amount DOUBLE, pre_close DOUBLE, change DOUBLE, pct_chg DOUBLE
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO index_daily VALUES
+		('000001.SH', '20250301', 3000, 3010, 2990, 3005, 1e9, 1e12, 3000, 5, 0.17)`); err != nil {
+		t.Fatal(err)
+	}
+	r := NewReaders(db)
+	rows, err := r.GetDailyWithAdjFactor(ctx, "000001.SH", "20250301", "20250301")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Close != 3005 || rows[0].AdjFactor != 1.0 {
+		t.Fatalf("got %+v", rows)
+	}
+}

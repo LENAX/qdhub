@@ -49,6 +49,10 @@ type AnalysisService interface {
 	GetMoneyFlowRank(ctx context.Context, req MoneyFlowRankRequest) (*MoneyFlowRankResult, error)
 	// 指数日线 OHLCV（仅 index_daily）
 	GetIndexOHLCV(ctx context.Context, req IndexOHLCVRequest) (*IndexOHLCVResult, error)
+	// 指数/行业板块分类（index_classify）
+	ListIndexSectors(ctx context.Context, req IndexSectorListRequest) ([]IndexSectorInfo, error)
+	// 指数成分或行业成分（index_weight 优先，可回退 index_member_all / ci_index_member）
+	ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error)
 
 	// 人气榜
 	GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
@@ -190,6 +194,25 @@ type IndexOHLCVRequest struct {
 	TsCode  string
 	Days    int    // 近 N 个交易日（自然截取行数，非交易日历）
 	EndDate string // YYYYMMDD，空表示最新
+}
+
+// IndexSectorListRequest 指数板块分类筛选（index_classify）
+type IndexSectorListRequest struct {
+	Level      *string // L1/L2/L3
+	ParentCode *string
+	Src        *string // SW2014 / SW2021 等
+	IndexCode  *string // 精确匹配 index_code
+	Query      *string // 模糊匹配 industry_name / industry_code / index_code
+	Limit      int
+	Offset     int
+}
+
+// IndexSectorMemberRequest 成分查询：index_code 必填；trade_date 空则取 index_weight 中该指数最新交易日
+type IndexSectorMemberRequest struct {
+	IndexCode string
+	TradeDate string // YYYYMMDD，可空
+	Limit     int
+	Offset    int
 }
 
 // PopularityRankRequest 人气榜查询请求

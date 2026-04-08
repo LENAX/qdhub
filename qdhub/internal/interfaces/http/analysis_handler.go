@@ -16,7 +16,7 @@ import (
 
 // AnalysisHandler 分析模块 HTTP Handler
 type AnalysisHandler struct {
-	svc         contracts.AnalysisApplicationService
+	svc          contracts.AnalysisApplicationService
 	newsNotifier NewsUpdateNotifier // 可选：非 nil 时新闻写入后主动通知 SSE 推送
 }
 
@@ -36,6 +36,8 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.GET("/stocks/snapshot", h.GetStockSnapshot)
 		g.GET("/stocks/:ts_code/basic", h.GetStockBasic)
 		g.GET("/indices", h.ListIndices)
+		g.GET("/index-sectors", h.ListIndexSectors)
+		g.GET("/index-sector-members", h.ListIndexSectorMembers)
 		g.GET("/concepts", h.ListConcepts)
 		g.GET("/financial/indicators", h.GetFinancialIndicators)
 		g.GET("/financial/income", h.GetFinancialIncome)
@@ -287,6 +289,61 @@ func (h *AnalysisHandler) ListIndices(c *gin.Context) {
 		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.ListIndices(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// ListIndexSectors handles GET /api/v1/analysis/index-sectors（index_classify）
+func (h *AnalysisHandler) ListIndexSectors(c *gin.Context) {
+	var level, parentCode, src, indexCode, query *string
+	if v := c.Query("level"); v != "" {
+		level = &v
+	}
+	if v := c.Query("parent_code"); v != "" {
+		parentCode = &v
+	}
+	if v := c.Query("src"); v != "" {
+		src = &v
+	}
+	if v := c.Query("index_code"); v != "" {
+		indexCode = &v
+	}
+	if v := c.Query("query"); v != "" {
+		query = &v
+	}
+	req := analysis.IndexSectorListRequest{
+		Level: level, ParentCode: parentCode, Src: src, IndexCode: indexCode, Query: query,
+		Limit: defaultInt(c.Query("limit"), 100), Offset: defaultInt(c.Query("offset"), 0),
+	}
+	list, err := h.svc.ListIndexSectors(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, gin.H{"total": len(list), "items": list})
+}
+
+// ListIndexSectorMembers handles GET /api/v1/analysis/index-sector-members（index_weight 等）
+func (h *AnalysisHandler) ListIndexSectorMembers(c *gin.Context) {
+	indexCode := strings.TrimSpace(c.Query("index_code"))
+	if indexCode == "" {
+		BadRequest(c, "index_code required")
+		return
+	}
+	var tradeDate string
+	if v := strings.TrimSpace(c.Query("trade_date")); v != "" {
+		tradeDate = v
+	}
+	req := analysis.IndexSectorMemberRequest{
+		IndexCode: indexCode,
+		TradeDate: tradeDate,
+		Limit:     defaultInt(c.Query("limit"), 500),
+		Offset:    defaultInt(c.Query("offset"), 0),
+	}
+	list, err := h.svc.ListIndexSectorMembers(c.Request.Context(), req)
 	if err != nil {
 		HandleError(c, err)
 		return

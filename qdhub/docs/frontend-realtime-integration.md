@@ -263,20 +263,46 @@
 
 4. **历史/离线**
    - 通过分析或 SQL 接口查询 DuckDB 表 `realtime_quote`、`realtime_tick`、`realtime_list`、`ts_realtime_mkt_tick`。
-   - **历史回放 API**（见下节）：K 线 `GET /api/v1/analysis/kline`（日/周/月）；分时与盘口回放 `GET /api/v1/analysis/intraday-ticks?ts_code=&trade_date=`；可选分钟 K `GET /api/v1/analysis/intraday-kline?ts_code=&trade_date=&period=1m`。按交易日选择器切换 `trade_date` 即可。
+   - **历史回放 API**（见下节）：K 线 `GET /api/v1/analysis/kline`（日/周/月；**`ts_code` 可为个股或指数**，指数无 `daily` 时后端读 `index_daily`）；分时与盘口回放 `GET /api/v1/analysis/intraday-ticks?ts_code=&trade_date=`；可选分钟 K `GET /api/v1/analysis/intraday-kline?ts_code=&trade_date=&period=1m`。按交易日选择器切换 `trade_date` 即可。
+   - **指数/板块**：申万行业分类 `GET /api/v1/analysis/index-sectors`；指数或行业成分 `GET /api/v1/analysis/index-sector-members?index_code=`；近窗 OHLCV 也可用 `GET /api/v1/analysis/index-ohlcv`（见下表）。
 
 ---
 
 ## 六、历史回放 API 列表
 
+### 6.1 通用约定（Analysis）
+
+- **Base path**：`/api/v1/analysis`（与上表路径拼接为完整 URL）。
+- **认证**：`Authorization: Bearer <access_token>`（与本文其它受保护接口一致）。
+- **成功响应**：`{ "code": 0, "data": ..., "msg": "ok" }`；列表类常为 `data: { "total": number, "items": [...] }` 或直接数组，以后端实际返回为准。
+
+### 6.2 K 线、分时与实时分笔
+
 | 接口 | 说明 | 参数 |
 |------|------|------|
-| `GET /api/v1/analysis/kline` | 日/周/月 K 线 | ts_code, start_date, end_date, adjust_type, period |
+| `GET /api/v1/analysis/kline` | 日/周/月 K 线 | ts_code, start_date, end_date, adjust_type（none/qfq/hfq）, period（D/W/M） |
 | `GET /api/v1/analysis/intraday-ticks` | 按日分时 + 盘口回放（tick 序列，含五档） | ts_code, trade_date |
 | `GET /api/v1/analysis/intraday-kline` | 分钟 K 线（若有） | ts_code, trade_date, period=1m |
 | `GET /api/v1/analysis/realtime-tick` | 当日实时分笔（最近 N 条） | ts_code, limit |
 
-前端可按交易日选择器切换 `trade_date`，调用上述接口实现历史分时、盘口与 K 线回放。
+**指数 K 线**：`ts_code` 传指数代码（如 `000001.SH`、`399001.SZ`）。后端优先查个股 `daily`；无数据时改查 `index_daily`。指数无复权因子，**`adjust_type` 取 qfq/hfq 时与 none 等价**（均为原始点位）。
+
+### 6.3 指数列表、OHLCV 与板块/成分
+
+| 接口 | 说明 | 主要参数 | 返回要点 |
+|------|------|----------|----------|
+| `GET /api/v1/analysis/indices` | 指数基础列表 | market, category, limit, offset | `{ total, items }`，items 为 IndexInfo |
+| `GET /api/v1/analysis/index-ohlcv` | 指数日线近窗 OHLCV | ts_code, days（默认 10）, end_date（可选） | `IndexOHLCVResult`，仅 `index_daily` |
+| `GET /api/v1/analysis/index-sectors` | 申万等行业分类（表 `index_classify`） | level, parent_code, src（如 SW2021）, index_code, query, limit, offset | `{ total, items }`，IndexSectorInfo |
+| `GET /api/v1/analysis/index-sector-members` | 指数成分或行业成分 | **index_code**（必填）, trade_date（可选；空则取 index_weight 最新日）, limit, offset | `{ total, items }`；优先 **index_weight**，否则 **index_member_all** / **ci_index_member** 按行业代码匹配 |
+
+**前端建议**：
+
+- 画大盘/行业指数 K 线：与个股同一套 `kline` 组件，仅切换 `ts_code`；或用 `index-ohlcv` 做「最近 N 根」快捷图。
+- 行业树/筛选：先 `index-sectors`（按 `src`+`level`），再 `index-sector-members` 拉成分（行业代码常作 `index_code` 传入）。
+- 沪深 300 等宽基成分：`index_code` 用指数代码（如 `000300.SH`），依赖库内已同步 `index_weight`。
+
+前端可按交易日选择器切换 `trade_date`，调用分时与 K 线接口实现历史回放；板块类接口按业务选择 `trade_date` 或依赖后端默认最新日。
 
 ---
 
