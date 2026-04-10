@@ -20,7 +20,7 @@ import (
 type RealtimeWSHandler struct {
 	store        *realtimestore.LatestQuoteStore
 	watchlistSvc contracts.WatchlistApplicationService // 可选：为空时不做收藏联动
-	selector     *realtimestore.RealtimeSourceSelector  // 可选：多源时返回 current_source/sources_health/sources_error
+	selector     *realtimestore.RealtimeSourceSelector // 可选：多源时返回 current_source/sources_health/sources_error
 	upgrader     websocket.Upgrader
 }
 
@@ -43,22 +43,114 @@ func (h *RealtimeWSHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/ws/realtime-quotes", h.HandleQuotesWS)
 }
 
-// setSourceAwareness 写入 current_source、sources_health、sources_error，供前端有限感知多源与故障原因。
-func (h *RealtimeWSHandler) setSourceAwareness(payload map[string]interface{}) {
+type fullSnapshotPayload struct {
+	Type          string            `json:"type"`
+	Scope         string            `json:"scope"`
+	Timestamp     int64             `json:"timestamp"`
+	Items         json.RawMessage   `json:"items"`
+	CurrentSource string            `json:"current_source"`
+	SourcesHealth map[string]string `json:"sources_health"`
+	SourcesError  map[string]string `json:"sources_error"`
+}
+
+type subsetSnapshotPayload struct {
+	Type          string                            `json:"type"`
+	Scope         string                            `json:"scope"`
+	Timestamp     int64                             `json:"timestamp"`
+	TSCodes       []string                          `json:"ts_codes,omitempty"`
+	Items         map[string]realtimestore.Quote    `json:"items"`
+	CurrentSource string                            `json:"current_source"`
+	SourcesHealth map[string]string                 `json:"sources_health"`
+	SourcesError  map[string]string                 `json:"sources_error"`
+}
+
+// sourceAwareness 返回 current_source、sources_health、sources_error，供前端有限感知多源与故障原因。
+func (h *RealtimeWSHandler) sourceAwareness() (string, map[string]string, map[string]string) {
 	if h.selector == nil {
-		payload["current_source"] = realtimestore.SourceSina
-		payload["sources_health"] = map[string]string{realtimestore.SourceSina: realtimestore.HealthHealthy}
-		payload["sources_error"] = map[string]string{realtimestore.SourceSina: ""}
-		return
+		return realtimestore.SourceSina,
+			map[string]string{realtimestore.SourceSina: realtimestore.HealthHealthy},
+			map[string]string{realtimestore.SourceSina: ""}
 	}
-	payload["current_source"] = h.selector.CurrentSource()
-	payload["sources_health"] = h.selector.SourcesHealth()
-	payload["sources_error"] = h.selector.SourcesError()
+	return h.selector.CurrentSource(), h.selector.SourcesHealth(), h.selector.SourcesError()
 }
 
 type realtimeSubscribeReq struct {
 	Action  string   `json:"action"`
 	TSCodes []string `json:"ts_codes"`
+}
+
+func (h *RealtimeWSHandler) loadDefaultWatchlistCodes(userID string) []string {
+	if h.watchlistSvc == nil || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	entries, err := h.watchlistSvc.GetWatchlist(context.Background(), shared.ID(userID))
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	codes := make([]string, 0, len(entries))
+	for _, e := range entries {
+		code := strings.TrimSpace(e.TsCode)
+		if code == "" {
+			continue
+		}
+		codes = append(codes, code)
+	}
+	return codes
+}
+
+func resolveRealtimePushScope(subs map[string]struct{}, defaultWatchlistCodes []string) ([]string, bool) {
+	current := make([]string, 0, len(subs))
+	full := false
+	for k := range subs {
+		current = append(current, k)
+		if strings.EqualFold(k, "full") {
+			full = true
+		}
+	}
+	if full {
+		if len(defaultWatchlistCodes) > 0 {
+			return append([]string(nil), defaultWatchlistCodes...), false
+		}
+		return current, true
+	}
+	return current, false
+}
+
+func (h *RealtimeWSHandler) buildFullSnapshot() ([]byte, error) {
+	itemsJSON, _, err := h.store.BuildFullItemsJSON()
+	if err != nil {
+		return nil, err
+	}
+	currentSource, sourcesHealth, sourcesError := h.sourceAwareness()
+	payload := fullSnapshotPayload{
+		Type:          "snapshot",
+		Scope:         "full",
+		Timestamp:     time.Now().UnixMilli(),
+		Items:         json.RawMessage(itemsJSON),
+		CurrentSource: currentSource,
+		SourcesHealth: sourcesHealth,
+		SourcesError:  sourcesError,
+	}
+	return json.Marshal(payload)
+}
+
+func (h *RealtimeWSHandler) buildSubsetSnapshot(pushCodes []string) ([]byte, error) {
+	items := h.store.GetSubsetQuotes(pushCodes)
+	if len(items) == 0 && len(pushCodes) > 0 {
+		logrus.Debugf("[RealtimeWS] subset snapshot has no items for ts_codes=%v (store may not have received ticks yet)", pushCodes)
+	}
+	currentSource, sourcesHealth, sourcesError := h.sourceAwareness()
+	payload := subsetSnapshotPayload{
+		Type:          "snapshot",
+		Scope:         "subset",
+		Timestamp:     time.Now().UnixMilli(),
+		TSCodes:       append([]string(nil), pushCodes...),
+		Items:         items,
+		CurrentSource: currentSource,
+		SourcesHealth: sourcesHealth,
+		SourcesError:  sourcesError,
+	}
+	return json.Marshal(payload)
 }
 
 func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
@@ -73,6 +165,7 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 	if v, ok := c.Get(UserIDKey); ok && v != nil {
 		userID, _ = v.(string)
 	}
+	defaultWatchlistCodes := h.loadDefaultWatchlistCodes(userID)
 
 	var subMu sync.RWMutex
 	subs := map[string]struct{}{"full": {}}
@@ -113,54 +206,20 @@ func (h *RealtimeWSHandler) HandleQuotesWS(c *gin.Context) {
 			return
 		case <-ticker.C:
 			subMu.RLock()
-			current := make([]string, 0, len(subs))
-			full := false
+			currentSubs := make(map[string]struct{}, len(subs))
 			for k := range subs {
-				current = append(current, k)
-				if strings.EqualFold(k, "full") {
-					full = true
-				}
+				currentSubs[k] = struct{}{}
 			}
 			subMu.RUnlock()
 
-			// 当为「全市场」且已登录且有收藏时，改为按收藏列表推送（subset）
-			pushCodes := current
-			pushFull := full
-			if full && h.watchlistSvc != nil && userID != "" {
-				entries, err := h.watchlistSvc.GetWatchlist(context.Background(), shared.ID(userID))
-				if err == nil && len(entries) > 0 {
-					codes := make([]string, 0, len(entries))
-					for _, e := range entries {
-						codes = append(codes, e.TsCode)
-					}
-					pushFull = false
-					pushCodes = codes
-				}
-			}
+			pushCodes, pushFull := resolveRealtimePushScope(currentSubs, defaultWatchlistCodes)
 
-			var payload map[string]interface{}
+			var b []byte
 			if pushFull {
-				payload = map[string]interface{}{
-					"type":      "snapshot",
-					"scope":     "full",
-					"timestamp": time.Now().UnixMilli(),
-					"items":     h.store.GetAll(),
-				}
+				b, err = h.buildFullSnapshot()
 			} else {
-				items := h.store.GetBatch(pushCodes)
-				payload = map[string]interface{}{
-					"type":      "snapshot",
-					"scope":     "subset",
-					"timestamp": time.Now().UnixMilli(),
-					"ts_codes":  pushCodes,
-					"items":     items,
-				}
-				if len(items) == 0 && len(pushCodes) > 0 {
-					logrus.Debugf("[RealtimeWS] subset snapshot has no items for ts_codes=%v (store may not have received ticks yet)", pushCodes)
-				}
+				b, err = h.buildSubsetSnapshot(pushCodes)
 			}
-			h.setSourceAwareness(payload)
-			b, err := json.Marshal(payload)
 			if err != nil {
 				return
 			}

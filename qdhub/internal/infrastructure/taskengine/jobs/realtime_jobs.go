@@ -320,19 +320,26 @@ func writeRealtimeRowsWithFactory(
 	var n int64
 	if wq == nil {
 		n, err = quantDB.BulkInsert(ctx, tableName, rows)
+		if err != nil {
+			logrus.Warnf("[writeRealtimeBatch] BulkInsert %s: %v", tableName, err)
+			return 0, err
+		}
+		logrus.Infof("[writeRealtimeBatch] wrote api=%s source=%s rows=%d", apiName, source, n)
 	} else {
-		n, err = wq.EnqueueAndWait(ctx, datastore.QuantDBBatchWriteRequest{
+		// 使用异步 Enqueue，避免阻塞 task engine goroutine 等待 DuckDB 写入完成。
+		// WriteQueue 按 BatchSize/MaxWaitSec 自动批量刷盘；返回值为乐观计数（已入队行数）。
+		err = wq.Enqueue(ctx, datastore.QuantDBBatchWriteRequest{
 			Path:      targetDBPath,
 			TableName: tableName,
 			Data:      rows,
 		})
+		if err != nil {
+			logrus.Warnf("[writeRealtimeBatch] Enqueue %s: %v", tableName, err)
+			return 0, err
+		}
+		n = int64(len(rows))
+		logrus.Debugf("[writeRealtimeBatch] enqueued api=%s source=%s rows=%d", apiName, source, n)
 	}
-
-	if err != nil {
-		logrus.Warnf("[writeRealtimeBatch] BulkInsert %s: %v", tableName, err)
-		return 0, err
-	}
-	logrus.Printf("[writeRealtimeBatch] wrote api=%s source=%s rows=%d", apiName, source, n)
 	return n, nil
 }
 

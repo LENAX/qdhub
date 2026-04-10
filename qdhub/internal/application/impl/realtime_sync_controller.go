@@ -4,7 +4,6 @@ package impl
 import (
 	"context"
 	"fmt"
-	"runtime"
 	gosync "sync"
 	"time"
 
@@ -208,7 +207,6 @@ func (c *RealtimeSyncControllerImpl) newsPollingLoop(ctx context.Context) {
 		} else {
 			logrus.Infof("[RealtimeSyncController] news sync done (%s)", time.Since(start).Round(time.Millisecond))
 		}
-		runtime.GC()
 		select {
 		case <-ctx.Done():
 			return

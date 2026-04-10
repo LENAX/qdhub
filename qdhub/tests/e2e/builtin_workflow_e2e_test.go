@@ -734,7 +734,7 @@ func setupBuiltinWorkflowE2EContext(t *testing.T) *builtinWorkflowE2EContext {
 		} else {
 			readers = analysisinfra.NewReaders(duckDBAdapter)
 		}
-		analysisAppService = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers), nil)
+		analysisAppService = impl.NewAnalysisApplicationService(analysisinfra.NewAnalysisServiceFromReaders(readers), nil, nil)
 		t.Logf("✅ Analysis 应用服务已创建（含兜底）")
 	}
 

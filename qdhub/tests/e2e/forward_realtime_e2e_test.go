@@ -63,6 +63,7 @@ func mockForwardWSServerE2E(t *testing.T, priv *rsa.PrivateKey, tickRow map[stri
 
 // TestE2E_ForwardRealtimeTick 验证：forward 开关 + mock ts_proxy 下，ExecuteRealtimeDataSync(ts_realtime_mkt_tick) 使用转发端并收到一条 tick 写入 LatestQuoteStore。
 func TestE2E_ForwardRealtimeTick(t *testing.T) {
+	realtimestore.DefaultLatestQuoteStore().Clear()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 

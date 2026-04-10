@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"runtime"
 	"strings"
 	"time"
 
@@ -17,9 +16,14 @@ import (
 )
 
 const (
-	forwardFlushInterval = 3 * time.Second
+	// forwardFlushInterval 控制每次向 task engine 发布 tick 批次的间隔。
+	// 值越大，DuckDB 单次写入行数越多（效率更高），但历史 tick 入库延迟也更大。
+	// LatestQuoteStore（WS 推送数据源）在 tick 到达时立即更新，不受此间隔影响。
+	forwardFlushInterval = 10 * time.Second
 	forwardReadDeadline  = 90 * time.Second
 	forwardPongWrite     = 10 * time.Second
+	// forwardBatchInitCap 预估 10 秒内累积的 tick 量，减少 batch slice 扩容次数。
+	forwardBatchInitCap = 4096
 )
 
 // ForwardTickCollector 从 ts_proxy 转发端接收加密 tick 流（方案 B：RSA 交换 AES + AES 解密）。
@@ -111,22 +115,25 @@ func (c *ForwardTickCollector) runOnce(ctx context.Context, publish coreRealtime
 	}
 
 	store := realtimestore.DefaultLatestQuoteStore()
-	batch := make([]map[string]interface{}, 0, 256)
+	batch := make([]map[string]interface{}, 0, forwardBatchInitCap)
 
 	flushBatch := func() {
 		if len(batch) == 0 {
 			return
 		}
+		// 将当前 batch 移交给 task engine event，重新分配新 slice 作为下一批的缓冲区。
+		// 避免 batch[:0] 复用同一底层数组导致 event.Data 被后续写入污染（slice 别名问题）。
+		toPublish := batch
+		batch = make([]map[string]interface{}, 0, cap(toPublish))
 		event := coreRealtime.NewRealtimeEvent(coreRealtime.EventDataArrived, "", "", &coreRealtime.DataArrivedPayload{
-			Data:   batch,
+			Data:   toPublish,
 			Source: realtimestore.SourceTushareProxy,
 		})
 		if err := publish(event); err != nil {
-			logrus.Warnf("[ForwardTickCollector] publish batch(%d): %v", len(batch), err)
-			return
+			logrus.Warnf("[ForwardTickCollector] publish batch(%d): %v", len(toPublish), err)
+			// publish 失败则归还旧 slice 继续积累，丢弃新分配的空 batch
+			batch = toPublish
 		}
-		batch = make([]map[string]interface{}, 0, 256)
-		runtime.GC()
 	}
 
 	type readResult struct {
