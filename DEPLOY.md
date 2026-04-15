@@ -76,7 +76,7 @@ docker login crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com -u linxe
 
 ```bash
 export DOCKER_REGISTRY=crpi-v04h3vax0c07n7c5.cn-shenzhen.personal.cr.aliyuncs.com/steve-namespace/
-export IMAGE_TAG=v0.1.0-beta.3
+export IMAGE_TAG=v0.1.1-beta.12
 
 # 指定目标平台为 linux/amd64（ECS 常见架构）；开发机为 docker-compose 时用 docker-compose
 DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose -f docker-compose.yml build
@@ -184,7 +184,7 @@ sudo chown -R $USER:$USER /mnt/vdb/qdhub
 
 **ts_proxy（Tushare 转发）公钥**：将内地提供的 `public.pem` 放到 `**QDHUB_KEY_DIR`（默认 `/mnt/vdb/qdhub/keys`）** 下，命名为 `**public.pem`**。`docker-compose.image.yml` 已将该目录**只读**挂载到容器内 `**/root/.key`**，与库里默认的 `rsa_public_key_path` 一致。若公钥放在其他路径，可改 `.env` 中的 `QDHUB_KEY_DIR`，或改数据库 `realtime_sources` 里对应源的 `rsa_public_key_path` 与挂载目标一致。
 
-**ts_proxy WebSocket 地址**：`.env` 中设置 `**TUSHARE_PROXY_WS_URL`**（示例见上文，内地转发机默认路径为 `/realtime`、端口 `8888`），并保持 `**TUSHARE_REALTIME_SOURCE=forward**`。后端会将该地址与库表 `realtime_sources` 中 `tushare_proxy` 的配置合并（与启动健康检查规则一致）。香港 ECS 需能访问该 `ws://` 主机与端口（内地安全组放行香港出口 IP）。连通性可用仓库内 `qdhub/ts_proxy_diagnose` 自测。
+**ts_proxy WebSocket 地址**：`.env` 中设置 `**TUSHARE_PROXY_WS_URL`**（示例见上文，内地转发机默认路径为 `/realtime`、端口 `8888`），并保持 `**TUSHARE_REALTIME_SOURCE=forward`**。后端会将该地址与库表 `realtime_sources` 中 `tushare_proxy` 的配置合并（与启动健康检查规则一致）。香港 ECS 需能访问该 `ws://` 主机与端口（内地安全组放行香港出口 IP）。连通性可用仓库内 `qdhub/ts_proxy_diagnose` 自测。
 
 **注意**：`public.pem` 权限建议仅运维用户可读（如 `chmod 600`），勿提交到 Git。
 
@@ -323,7 +323,7 @@ docker compose -f docker-compose.image.yml up -d
 
 若需要在服务器上使用 Jupyter Lab，**须先在本地/CI 构建并推送 `qdhub-jupyter-lab` 镜像**，ECS 只 `pull` + `up`，不在服务器上 `build`。
 
-**与主站 tag 分离**：`docker-compose.image.yml` 使用 `**IMAGE_TAG`**（对应 `qdhub-backend` / `qdhub-frontend`）。`docker-compose.jupyter.yml` 使用 `**JUPYTER_IMAGE_TAG**`（仅 `qdhub-jupyter-lab`）。同一 `.env` 可同时写二者，**切勿**把 Jupyter 专用 tag（如 `v0.1.0-jupyter.1`）赋给 `IMAGE_TAG`，否则主站 `pull` 会报 `manifest unknown`。
+**与主站 tag 分离**：`docker-compose.image.yml` 使用 `**IMAGE_TAG`**（对应 `qdhub-backend` / `qdhub-frontend`）。`docker-compose.jupyter.yml` 使用 `**JUPYTER_IMAGE_TAG`**（仅 `qdhub-jupyter-lab`）。同一 `.env` 可同时写二者，**切勿**把 Jupyter 专用 tag（如 `v0.1.0-jupyter.1`）赋给 `IMAGE_TAG`，否则主站 `pull` 会报 `manifest unknown`。
 
 访问方式二选一（**同一容器实例不要混用**两种 URL 形态，见 `JUPYTER_BASE_URL`）：
 
@@ -331,7 +331,7 @@ docker compose -f docker-compose.image.yml up -d
 | 方式   | Nginx                                                                                        | 环境变量                                            |
 | ---- | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | 路径前缀 | 主站配置里 `location /jupyter/`（见 `**deploy/qdhub.conf`** 若保留该段）                                  | `JUPYTER_BASE_URL` 默认 `/jupyter/`（compose 默认即可） |
-| 独立子域 | 单独 `**deploy/jupyter.conf**`，`server_name` 如 `jupyter.quantrade.team`，Let’s Encrypt 单独签发该主机名 | `export JUPYTER_BASE_URL=/`                     |
+| 独立子域 | 单独 `**deploy/jupyter.conf`**，`server_name` 如 `jupyter.quantrade.team`，Let’s Encrypt 单独签发该主机名 | `export JUPYTER_BASE_URL=/`                     |
 
 
 容器内挂载 `**deploy/jupyter_server_config.py**`（compose 已配置）；**密码**用 `JUPYTER_PASSWORD` 或 `JUPYTER_PASSWORD_HASH`（与 **非空** `JUPYTER_TOKEN` 互斥）。修改密码或 `JUPYTER_BASE_URL` 后须 `**docker compose -f docker-compose.jupyter.yml up -d --force-recreate`**。

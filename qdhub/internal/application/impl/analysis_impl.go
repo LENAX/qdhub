@@ -88,6 +88,18 @@ func (a *AnalysisApplicationServiceImpl) ListIndexSectorMembers(ctx context.Cont
 func (a *AnalysisApplicationServiceImpl) GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return a.svc.GetPopularityRank(ctx, req)
 }
+func (a *AnalysisApplicationServiceImpl) GetMarketSentiment(ctx context.Context, req analysis.MarketSentimentRequest) (*analysis.DailySentimentResult, error) {
+	return a.svc.GetMarketSentiment(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetSentimentHistory(ctx context.Context, req analysis.SentimentHistoryRequest) (*analysis.SentimentHistoryResult, error) {
+	return a.svc.GetSentimentHistory(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetSentimentExtremes(ctx context.Context, req analysis.SentimentExtremesRequest) (*analysis.SentimentExtremesResult, error) {
+	return a.svc.GetSentimentExtremes(ctx, req)
+}
+func (a *AnalysisApplicationServiceImpl) GetSectorLeaders(ctx context.Context, req analysis.SectorLeaderRequest) (*analysis.SectorLeaderResult, error) {
+	return a.svc.GetSectorLeaders(ctx, req)
+}
 func (a *AnalysisApplicationServiceImpl) ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
 	if a.realtimeNewsReader != nil {
 		items, err := a.realtimeNewsReader.List(ctx, req)

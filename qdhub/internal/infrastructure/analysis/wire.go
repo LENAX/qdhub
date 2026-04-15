@@ -44,5 +44,7 @@ func NewAnalysisServiceFromReaders(r *Readers) analysis.AnalysisService {
 		r, // IndexOHLCVReader
 		r, // IndexSectorReader
 		r, // IndexSectorMemberReader
+		&sentimentReadersImpl{r}, // SentimentRawReader
+		&sectorLeaderReaderImpl{r}, // SectorLeaderReader
 	)
 }

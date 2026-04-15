@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -59,6 +60,10 @@ func (h *AnalysisHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		g.GET("/moneyflow-concept", h.GetMoneyFlowConcept)
 		g.GET("/index-ohlcv", h.GetIndexOHLCV)
 		g.GET("/popularity-rank", h.GetPopularityRank)
+		g.GET("/market-sentiment", h.GetMarketSentiment)
+		g.GET("/market-sentiment/history", h.GetSentimentHistory)
+		g.GET("/market-sentiment/extremes", h.GetSentimentExtremes)
+		g.GET("/sector-leaders", h.GetSectorLeaders)
 		g.GET("/news", h.ListNews)
 		g.GET("/news/stream", h.StreamNews)
 		g.GET("/realtime-tick", h.GetRealtimeTicks)
@@ -75,6 +80,17 @@ func defaultInt(s string, def int) int {
 	}
 	v, _ := strconv.Atoi(s)
 	if v <= 0 {
+		return def
+	}
+	return v
+}
+
+func defaultFloat(s string, def float64) float64 {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
 		return def
 	}
 	return v
@@ -1035,28 +1051,167 @@ func (h *AnalysisHandler) GetIndexOHLCV(c *gin.Context) {
 }
 
 // GetPopularityRank handles GET /api/v1/analysis/popularity-rank
-// @Summary      Get popularity rank
-// @Description  Get stock popularity rank by volume or other metric
+// @Summary      人气榜（多源统一入口）
+// @Description  src=ths(同花顺)|eastmoney(东方财富)|kpl(开盘啦)，非法值返回 400；trade_date 空则取最新
 // @Tags         Analysis
 // @Accept       json
 // @Produce      json
-// @Param        rank_type  query     string  false  "Rank type (e.g. volume)" default(volume)
-// @Param        limit     query     int     false  "Limit" default(20)
+// @Param        src        query     string  false  "数据源: ths|eastmoney|kpl" default(ths)
+// @Param        trade_date query     string  false  "交易日期 YYYYMMDD"
+// @Param        limit      query     int     false  "返回条数" default(50)
+// @Param        offset     query     int     false  "偏移量"   default(0)
 // @Success      200       {object}  Response
+// @Failure      400       {object}  Response
 // @Failure      500       {object}  Response
 // @Security     BearerAuth
 // @Router       /analysis/popularity-rank [get]
 func (h *AnalysisHandler) GetPopularityRank(c *gin.Context) {
-	rankType := c.DefaultQuery("rank_type", "volume")
+	src := c.DefaultQuery("src", "ths")
+	if !analysis.ValidPopularityRankSrc(src) {
+		BadRequest(c, fmt.Sprintf("invalid src %q, must be one of: ths, eastmoney, kpl", src))
+		return
+	}
 	req := analysis.PopularityRankRequest{
-		RankType: rankType, Limit: defaultInt(c.Query("limit"), 20),
+		Src:       src,
+		TradeDate: c.Query("trade_date"),
+		Limit:     defaultInt(c.Query("limit"), 50),
+		Offset:    defaultInt(c.Query("offset"), 0),
 	}
 	list, err := h.svc.GetPopularityRank(c.Request.Context(), req)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-	Success(c, gin.H{"rank_type": rankType, "items": list})
+	Success(c, gin.H{"src": src, "trade_date": req.TradeDate, "items": list})
+}
+
+// GetMarketSentiment handles GET /api/v1/analysis/market-sentiment
+// @Summary      当日市场情绪
+// @Description  三层情绪（接力/趋势/四象限）加权合成，返回分位分、等级、明细
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        trade_date query  string  false  "交易日期 YYYYMMDD，空则最新"
+// @Param        style      query  string  false  "权重口径: relay|balanced|trend" default(balanced)
+// @Param        window     query  int     false  "分位数窗口（交易日）"            default(120)
+// @Param        hot_src    query  string  false  "热股数据源: ths|eastmoney|kpl"  default(ths)
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/market-sentiment [get]
+func (h *AnalysisHandler) GetMarketSentiment(c *gin.Context) {
+	req := analysis.MarketSentimentRequest{
+		TradeDate: c.Query("trade_date"),
+		Style:     analysis.SentimentStyle(c.DefaultQuery("style", "balanced")),
+		Window:    defaultInt(c.Query("window"), 120),
+		HotSrc:    c.DefaultQuery("hot_src", "ths"),
+	}
+	result, err := h.svc.GetMarketSentiment(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
+}
+
+// GetSentimentHistory handles GET /api/v1/analysis/market-sentiment/history
+// @Summary      情绪历史时序
+// @Description  返回指定日期范围内每日情绪分位分、等级
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        start_date query  string  true   "开始日期 YYYYMMDD"
+// @Param        end_date   query  string  true   "结束日期 YYYYMMDD"
+// @Param        style      query  string  false  "权重口径: relay|balanced|trend" default(balanced)
+// @Param        window     query  int     false  "分位数窗口" default(120)
+// @Param        hot_src    query  string  false  "热股数据源" default(ths)
+// @Success      200  {object}  Response
+// @Failure      400  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/market-sentiment/history [get]
+func (h *AnalysisHandler) GetSentimentHistory(c *gin.Context) {
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	if startDate == "" || endDate == "" {
+		BadRequest(c, "start_date and end_date are required")
+		return
+	}
+	req := analysis.SentimentHistoryRequest{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Style:     analysis.SentimentStyle(c.DefaultQuery("style", "balanced")),
+		Window:    defaultInt(c.Query("window"), 120),
+		HotSrc:    c.DefaultQuery("hot_src", "ths"),
+	}
+	result, err := h.svc.GetSentimentHistory(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
+}
+
+// GetSentimentExtremes handles GET /api/v1/analysis/market-sentiment/extremes
+// @Summary      冰点/沸点极值统计
+// @Description  统计近期冰点/沸点出现次数及出现后反转概率
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        end_date            query  string  false  "截止日 YYYYMMDD，空则最新"
+// @Param        style               query  string  false  "权重口径" default(balanced)
+// @Param        window              query  int     false  "分位数窗口" default(120)
+// @Param        freezing_threshold  query  float64 false  "冰点阈值 [0,1]" default(0.15)
+// @Param        boiling_threshold   query  float64 false  "沸点阈值 [0,1]" default(0.85)
+// @Param        hot_src             query  string  false  "热股数据源" default(ths)
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/market-sentiment/extremes [get]
+func (h *AnalysisHandler) GetSentimentExtremes(c *gin.Context) {
+	req := analysis.SentimentExtremesRequest{
+		EndDate:           c.Query("end_date"),
+		Style:             analysis.SentimentStyle(c.DefaultQuery("style", "balanced")),
+		Window:            defaultInt(c.Query("window"), 120),
+		FreezingThreshold: defaultFloat(c.Query("freezing_threshold"), 0.15),
+		BoilingThreshold:  defaultFloat(c.Query("boiling_threshold"), 0.85),
+		HotSrc:            c.DefaultQuery("hot_src", "ths"),
+	}
+	result, err := h.svc.GetSentimentExtremes(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
+}
+
+// GetSectorLeaders handles GET /api/v1/analysis/sector-leaders
+// @Summary      领涨/领跌板块统计
+// @Description  返回指定时间段内领涨和领跌板块（含龙头股）
+// @Tags         Analysis
+// @Accept       json
+// @Produce      json
+// @Param        start_date         query  string  false  "开始日期，空则近5个交易日"
+// @Param        end_date           query  string  false  "结束日期，空则最新"
+// @Param        concept_index_src  query  string  false  "概念指数来源: ths|eastmoney" default(ths)
+// @Param        limit              query  int     false  "每方向前N名" default(20)
+// @Success      200  {object}  Response
+// @Failure      500  {object}  Response
+// @Security     BearerAuth
+// @Router       /analysis/sector-leaders [get]
+func (h *AnalysisHandler) GetSectorLeaders(c *gin.Context) {
+	req := analysis.SectorLeaderRequest{
+		StartDate:       c.Query("start_date"),
+		EndDate:         c.Query("end_date"),
+		ConceptIndexSrc: c.DefaultQuery("concept_index_src", "ths"),
+		Limit:           defaultInt(c.Query("limit"), 20),
+	}
+	result, err := h.svc.GetSectorLeaders(c.Request.Context(), req)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	Success(c, result)
 }
 
 // ListNews handles GET /api/v1/analysis/news

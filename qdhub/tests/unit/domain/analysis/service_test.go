@@ -218,6 +218,29 @@ func (noopIndexSectorBoth) ListIndexSectorMembers(ctx context.Context, req analy
 	return nil, nil
 }
 
+// noopSentimentRaw SentimentRawReader
+type noopSentimentRaw struct{}
+
+func (noopSentimentRaw) GetRelayRawData(ctx context.Context, tradeDate string) (*analysis.RelayRawData, error) {
+	return &analysis.RelayRawData{}, nil
+}
+func (noopSentimentRaw) GetTrendRawData(ctx context.Context, tradeDate string, hotSrc string) (*analysis.TrendRawData, error) {
+	return &analysis.TrendRawData{}, nil
+}
+func (noopSentimentRaw) GetMatrixRawData(ctx context.Context, tradeDate string, hotSrc string, top int) (*analysis.MatrixRawData, error) {
+	return &analysis.MatrixRawData{}, nil
+}
+func (noopSentimentRaw) GetSentimentTradeDates(ctx context.Context, endDate string, window int) ([]string, error) {
+	return nil, nil
+}
+
+// noopSectorLeader SectorLeaderReader
+type noopSectorLeader struct{}
+
+func (noopSectorLeader) GetSectorLeaders(ctx context.Context, req analysis.SectorLeaderRequest) (*analysis.SectorLeaderResult, error) {
+	return &analysis.SectorLeaderResult{}, nil
+}
+
 func TestAnalysisService_GetKLine(t *testing.T) {
 	ctx := context.Background()
 	n := noop{}
@@ -253,7 +276,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec, noopSentimentRaw{}, noopSectorLeader{},
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -278,7 +301,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec, noopSentimentRaw{}, noopSectorLeader{},
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustQfq,
@@ -309,7 +332,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec, noopSentimentRaw{}, noopSectorLeader{},
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustHfq,
@@ -339,7 +362,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec, noopSentimentRaw{}, noopSectorLeader{},
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "999999.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,
@@ -358,7 +381,7 @@ func TestAnalysisService_GetKLine(t *testing.T) {
 			nStock, nSnapshot, nIndex, nConcept, n, n, n, n,
 			nNews, nLimitUp, nLimitUpLadder, nLimitUpCmp, nLimitUpBySector, nFirstLimitUp, n, n, n, n, n,
 			nTradeCal, nRealtimeTick, nIntradayTick, nIntradayKline,
-			nRankIdx, nRankIdx, nIdxSec, nIdxSec,
+			nRankIdx, nRankIdx, nIdxSec, nIdxSec, noopSentimentRaw{}, noopSectorLeader{},
 		)
 		data, err := svc.GetKLine(ctx, analysis.KLineRequest{
 			TsCode: "000001.SZ", StartDate: "20240101", EndDate: "20240131", AdjustType: analysis.AdjustNone,

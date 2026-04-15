@@ -54,8 +54,18 @@ type AnalysisService interface {
 	// 指数成分或行业成分（index_weight 优先，可回退 index_member_all / ci_index_member）
 	ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error)
 
-	// 人气榜
+	// 人气榜（统一入口，src 参数选择数据源）
 	GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
+
+	// 市场情绪 - 单日完整情绪
+	GetMarketSentiment(ctx context.Context, req MarketSentimentRequest) (*DailySentimentResult, error)
+	// 市场情绪 - 历史情绪时序
+	GetSentimentHistory(ctx context.Context, req SentimentHistoryRequest) (*SentimentHistoryResult, error)
+	// 市场情绪 - 冰点/沸点极值统计
+	GetSentimentExtremes(ctx context.Context, req SentimentExtremesRequest) (*SentimentExtremesResult, error)
+
+	// 领涨/领跌板块统计
+	GetSectorLeaders(ctx context.Context, req SectorLeaderRequest) (*SectorLeaderResult, error)
 
 	// 新闻列表
 	ListNews(ctx context.Context, req NewsListRequest) ([]NewsItem, error)
@@ -217,8 +227,10 @@ type IndexSectorMemberRequest struct {
 
 // PopularityRankRequest 人气榜查询请求
 type PopularityRankRequest struct {
-	RankType string // 排名类型：volume/amount/turnover
-	Limit    int    // 返回前N名
+	Src       string // 数据源：ths|eastmoney|kpl，默认 ths；非法值返回错误
+	TradeDate string // YYYYMMDD，空则取该数据源最新交易日
+	Limit     int    // 返回前N名，默认 50
+	Offset    int    // 偏移量
 }
 
 // NewsListRequest 新闻列表查询请求（支持财联社式电报流：按时间倒序、来源过滤）

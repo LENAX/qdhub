@@ -164,9 +164,26 @@ type IndexSectorMemberReader interface {
 	ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error)
 }
 
-// PopularityRankReader 人气榜
+// PopularityRankReader 人气榜统一入口（多源）
 type PopularityRankReader interface {
 	GetRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error)
+}
+
+// SentimentRawReader 情绪三层原始数据读取
+type SentimentRawReader interface {
+	// GetRelayRawData 接力层原始数据（涨停、天梯、晋级率、昨日溢价）
+	GetRelayRawData(ctx context.Context, tradeDate string) (*RelayRawData, error)
+	// GetTrendRawData 趋势层原始数据（涨跌家数、多头排列、20日新高、热股持续）
+	GetTrendRawData(ctx context.Context, tradeDate string, hotSrc string) (*TrendRawData, error)
+	// GetMatrixRawData 四象限层原始数据（隔夜溢价/日内收益矩阵）
+	GetMatrixRawData(ctx context.Context, tradeDate string, hotSrc string, top int) (*MatrixRawData, error)
+	// GetSentimentTradeDates 取 endDate 往前 window 个交易日（含 endDate）
+	GetSentimentTradeDates(ctx context.Context, endDate string, window int) ([]string, error)
+}
+
+// SectorLeaderReader 领涨/领跌板块读取
+type SectorLeaderReader interface {
+	GetSectorLeaders(ctx context.Context, req SectorLeaderRequest) (*SectorLeaderResult, error)
 }
 
 // NewsReader 新闻列表
