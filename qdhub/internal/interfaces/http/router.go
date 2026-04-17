@@ -47,14 +47,15 @@ type Server struct {
 	httpServer *http.Server
 
 	// Handlers
-	authHandler          *AuthHandler
-	metadataHandler      *MetadataHandler
-	dataStoreHandler     *DataStoreHandler
-	syncHandler          *SyncHandler
-	workflowHandler      *WorkflowHandler
-	analysisHandler      *AnalysisHandler
-	watchlistHandler     *WatchlistHandler
-	realtimeWSHandler    *RealtimeWSHandler
+	authHandler           *AuthHandler
+	metadataHandler       *MetadataHandler
+	dataStoreHandler      *DataStoreHandler
+	syncHandler           *SyncHandler
+	workflowHandler       *WorkflowHandler
+	analysisHandler       *AnalysisHandler
+	metricsHandler        *MetricsHandler
+	watchlistHandler      *WatchlistHandler
+	realtimeWSHandler     *RealtimeWSHandler
 	realtimeSourceHandler *RealtimeSourceHandler
 
 	// Auth components
@@ -81,6 +82,7 @@ func NewServer(
 	syncSvc contracts.SyncApplicationService,
 	workflowSvc contracts.WorkflowApplicationService,
 	analysisSvc contracts.AnalysisApplicationService,
+	metricsSvc contracts.MetricsApplicationService,
 	newsUpdateNotifier NewsUpdateNotifier,
 	watchlistHandler *WatchlistHandler,
 	realtimeWSHandler *RealtimeWSHandler,
@@ -99,21 +101,24 @@ func NewServer(
 
 	// Create handlers
 	server := &Server{
-		config:            config,
-		engine:            engine,
-		authHandler:       NewAuthHandler(authSvc),
-		metadataHandler:   NewMetadataHandler(metadataSvc),
-		dataStoreHandler:  NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
-		syncHandler:       NewSyncHandler(syncSvc),
-		workflowHandler:   NewWorkflowHandler(workflowSvc),
-		realtimeWSHandler:    realtimeWSHandler,
+		config:                config,
+		engine:                engine,
+		authHandler:           NewAuthHandler(authSvc),
+		metadataHandler:       NewMetadataHandler(metadataSvc),
+		dataStoreHandler:      NewDataStoreHandler(dataStoreSvc, dataQualitySvc),
+		syncHandler:           NewSyncHandler(syncSvc),
+		workflowHandler:       NewWorkflowHandler(workflowSvc),
+		realtimeWSHandler:     realtimeWSHandler,
 		realtimeSourceHandler: realtimeSourceHandler,
-		jwtManager:           jwtManager,
-		enforcer:             enforcer,
-		debugDBDSN:           debugDBDSN,
+		jwtManager:            jwtManager,
+		enforcer:              enforcer,
+		debugDBDSN:            debugDBDSN,
 	}
 	if analysisSvc != nil {
 		server.analysisHandler = NewAnalysisHandler(analysisSvc, newsUpdateNotifier)
+	}
+	if metricsSvc != nil {
+		server.metricsHandler = NewMetricsHandler(metricsSvc)
 	}
 	if watchlistHandler != nil {
 		server.watchlistHandler = watchlistHandler
@@ -182,6 +187,9 @@ func (s *Server) setupRoutes() {
 			s.workflowHandler.RegisterRoutes(protected)
 			if s.analysisHandler != nil {
 				s.analysisHandler.RegisterRoutes(protected)
+			}
+			if s.metricsHandler != nil {
+				s.metricsHandler.RegisterRoutes(protected)
 			}
 			if s.watchlistHandler != nil {
 				s.watchlistHandler.RegisterRoutes(protected)

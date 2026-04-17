@@ -23,6 +23,7 @@ import (
 	"qdhub/internal/domain/auth"
 	"qdhub/internal/domain/datastore"
 	"qdhub/internal/domain/metadata"
+	domainmetrics "qdhub/internal/domain/metrics"
 	domainrealtime "qdhub/internal/domain/realtime"
 	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
@@ -30,12 +31,13 @@ import (
 	"qdhub/internal/domain/workflow"
 	analysisinfra "qdhub/internal/infrastructure/analysis"
 	authinfra "qdhub/internal/infrastructure/auth"
-	"qdhub/internal/infrastructure/healthcheck"
 	"qdhub/internal/infrastructure/data_sync/cache"
 	"qdhub/internal/infrastructure/datasource"
 	"qdhub/internal/infrastructure/datasource/tushare"
 	"qdhub/internal/infrastructure/datasource/tushare/realtime"
 	"qdhub/internal/infrastructure/datasourcevalidator"
+	"qdhub/internal/infrastructure/healthcheck"
+	metricsinfra "qdhub/internal/infrastructure/metrics"
 	"qdhub/internal/infrastructure/persistence"
 	"qdhub/internal/infrastructure/persistence/repository"
 	"qdhub/internal/infrastructure/persistence/uow"
@@ -174,8 +176,9 @@ type Container struct {
 	DataQualitySvc contracts.DataQualityApplicationService
 	SyncSvc        contracts.SyncApplicationService
 	WorkflowSvc    contracts.WorkflowApplicationService
-	AuthSvc    contracts.AuthApplicationService
-	AnalysisSvc contracts.AnalysisApplicationService
+	AuthSvc        contracts.AuthApplicationService
+	AnalysisSvc    contracts.AnalysisApplicationService
+	MetricsSvc     contracts.MetricsApplicationService
 
 	// Built-in Workflow Initializer
 	BuiltInInitializer *impl.BuiltInWorkflowInitializer
@@ -244,8 +247,8 @@ type Config struct {
 	RealtimeEnv string // "production" | "development"，默认 development；对应 QDHUB_ENV
 
 	// Tushare 实时数据来源：forward=从 ts_proxy 转发端接收，direct=直连 Tushare WS。默认 forward。
-	TushareRealtimeSource       string // "forward" | "direct"
-	TushareProxyWSURL         string // ts_proxy WS 地址，如 ws://host:8888/realtime
+	TushareRealtimeSource        string // "forward" | "direct"
+	TushareProxyWSURL            string // ts_proxy WS 地址，如 ws://host:8888/realtime
 	TushareProxyRSAPublicKeyPath string // ts_proxy RSA 公钥路径（方案 B 客户端加密 AES 密钥）
 }
 
@@ -269,13 +272,13 @@ func DefaultConfig() Config {
 			MemoryHighMB:       4096, // 4GB by default
 			MemoryCriticalMB:   6144, // 6GB by default
 		},
-		JWTSecret:         "change-me-in-production",
-		JWTExpiration:     24 * time.Hour,
-		RefreshExpiration: 7 * 24 * time.Hour,
-		RealtimeEnv:                   "development",
-		TushareRealtimeSource:         "forward", // 默认从转发端接收
-TushareProxyWSURL:           "",
-			TushareProxyRSAPublicKeyPath: "",
+		JWTSecret:                    "change-me-in-production",
+		JWTExpiration:                24 * time.Hour,
+		RefreshExpiration:            7 * 24 * time.Hour,
+		RealtimeEnv:                  "development",
+		TushareRealtimeSource:        "forward", // 默认从转发端接收
+		TushareProxyWSURL:            "",
+		TushareProxyRSAPublicKeyPath: "",
 	}
 }
 
@@ -1103,6 +1106,9 @@ func (c *Container) initAuth() error {
 		if err := authinfra.EnsureRealtimeSourcesPolicies(enforcer); err != nil {
 			return fmt.Errorf("failed to ensure realtime-sources policies: %w", err)
 		}
+		if err := authinfra.EnsureMetricsPolicies(enforcer); err != nil {
+			return fmt.Errorf("failed to ensure metrics policies: %w", err)
+		}
 	}
 
 	logrus.Info("Auth components initialized")
@@ -1169,6 +1175,46 @@ func (c *Container) initApplicationServices() error {
 	tradingDayProvider := healthcheck.NewDuckDBTradingDayProvider(c.QuantDBAdapter)
 	realtimeChecker := &healthcheck.Checker{TradingDayProvider: tradingDayProvider}
 	c.RealtimeSourceSvc = impl.NewRealtimeSourceApplicationService(c.RealtimeSourceRepo, realtimeChecker)
+
+	metricsQuantDB := c.QuantDBAdapter
+	if metricsQuantDB == nil && c.DataStoreRepo != nil && c.QuantDBFactory != nil {
+		stores, err := c.DataStoreRepo.List()
+		if err == nil {
+			for _, ds := range stores {
+				if ds.Type != datastore.DataStoreTypeDuckDB || strings.TrimSpace(ds.StoragePath) == "" || ds.Status != shared.StatusActive {
+					continue
+				}
+				adapter, createErr := c.QuantDBFactory.Create(datastore.QuantDBConfig{
+					Type:        datastore.DataStoreTypeDuckDB,
+					StoragePath: ds.StoragePath,
+				})
+				if createErr == nil {
+					c.QuantDBAdapter = adapter
+					metricsQuantDB = adapter
+					break
+				}
+			}
+		}
+	}
+	if metricsQuantDB != nil {
+		if err := metricsinfra.EnsureSchema(context.Background(), metricsQuantDB); err != nil {
+			return fmt.Errorf("failed to ensure metrics schema: %w", err)
+		}
+		metricRepo := metricsinfra.NewMetricDefRepoDuckDB(metricsQuantDB)
+		factorRepo := metricsinfra.NewFactorValueRepoDuckDB(metricsQuantDB)
+		signalRepo := metricsinfra.NewSignalValueRepoDuckDB(metricsQuantDB)
+		universeRepo := metricsinfra.NewUniverseRepoDuckDB(metricsQuantDB)
+		jobRepo := metricsinfra.NewComputeJobRepoDuckDB(metricsQuantDB)
+		metricsService := metricsinfra.NewService(
+			metricsQuantDB,
+			domainmetrics.NewDSLParser(),
+			metricRepo,
+			factorRepo,
+			signalRepo,
+			universeRepo,
+		)
+		c.MetricsSvc = impl.NewMetricsApplicationService(metricsService, metricsService, jobRepo)
+	}
 
 	// Startup health check for enabled realtime sources with health_check_on_startup=true
 	logrus.Info("Realtime sources: running startup connectivity check (health_check_on_startup=true)...")
@@ -1385,6 +1431,7 @@ func (c *Container) initHTTPServer() error {
 		c.SyncSvc,
 		c.WorkflowSvc,
 		c.AnalysisSvc,
+		c.MetricsSvc,
 		c.NewsUpdateNotifier,
 		watchlistHandler,
 		realtimeWSHandler,
