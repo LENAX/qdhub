@@ -1,0 +1,2 @@
+# OpenClaw Agent 辅助（彭道富龙头打分等）。安装: pip install -r openclaw/requirements.txt
+pydantic>=2.4
