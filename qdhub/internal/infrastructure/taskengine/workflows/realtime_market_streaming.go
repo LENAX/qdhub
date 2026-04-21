@@ -35,6 +35,8 @@ type RealtimeMarketStreamingParams struct {
 // - 通过 WorkflowBuilder.WithDataCollector 注册 DataCollector 实现。
 // 诊断与限流：DataCollector（如 QuotePullCollector）内建每 3 秒打印工作状态与已获取数据条数；
 // 若实时接口被 ban/多 IP 限制，Collector 返回错误，工作流自动取消并返回错误信息。
+// 全市场 tick（ts_realtime_mkt_tick）经 ts_proxy 时由 WorkflowExecutor 使用 TushareWSStreamingBuilder，
+// 采集器为 ForwardTickCollector（Run 内自持断线重连）；本 Builder 服务 realtime_quote / realtime_tick 等路径。
 type RealtimeMarketStreamingBuilder struct {
 	registry task.FunctionRegistry
 	params   RealtimeMarketStreamingParams
@@ -78,7 +80,7 @@ func (b *RealtimeMarketStreamingBuilder) Build() (*workflow.Workflow, error) {
 	}
 
 	// RealtimeTask：行情采集（Continuous DataCollector）
-	quoteCollectorTask, err := builder.NewRealtimeTaskBuilder("quote_collector", "实时行情采集", b.registry).
+	quoteCollectorB := builder.NewRealtimeTaskBuilder("quote_collector", "实时行情采集", b.registry).
 		WithContinuousMode().
 		WithTaskType(taskrealtime.TaskTypeDataCollector).
 		// 指定内置 Job 函数名称，避免底层基础任务校验 JobFunctionName 为空
@@ -87,8 +89,12 @@ func (b *RealtimeMarketStreamingBuilder) Build() (*workflow.Workflow, error) {
 		WithMode(collectorMode).
 		WithEndpoint("tushare_realtime", "http").
 		// FlushInterval 由 SyncPlan 的 pull_interval_seconds 映射，DataCollector 内部可按需使用。
-		WithFlushInterval(time.Duration(b.effectivePullInterval()) * time.Second).
-		Build()
+		WithFlushInterval(time.Duration(b.effectivePullInterval()) * time.Second)
+	if collectorMode == taskrealtime.CollectorModePush {
+		// Push 长连接：与引擎默认一致（0=无限次），采集器侧仍负责实际重连策略。
+		quoteCollectorB = quoteCollectorB.WithReconnect(true, 0)
+	}
+	quoteCollectorTask, err := quoteCollectorB.Build()
 	if err != nil {
 		return nil, fmt.Errorf("build quote collector task: %w", err)
 	}

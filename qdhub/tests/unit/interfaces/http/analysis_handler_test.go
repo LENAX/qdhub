@@ -109,6 +109,18 @@ func (s *stubAnalysisApplicationService) GetMoneyFlowConcept(ctx context.Context
 func (s *stubAnalysisApplicationService) GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
 	return nil, nil
 }
+func (s *stubAnalysisApplicationService) GetMarketSentiment(ctx context.Context, req analysis.MarketSentimentRequest) (*analysis.DailySentimentResult, error) {
+	return nil, nil
+}
+func (s *stubAnalysisApplicationService) GetSentimentHistory(ctx context.Context, req analysis.SentimentHistoryRequest) (*analysis.SentimentHistoryResult, error) {
+	return nil, nil
+}
+func (s *stubAnalysisApplicationService) GetSentimentExtremes(ctx context.Context, req analysis.SentimentExtremesRequest) (*analysis.SentimentExtremesResult, error) {
+	return nil, nil
+}
+func (s *stubAnalysisApplicationService) GetSectorLeaders(ctx context.Context, req analysis.SectorLeaderRequest) (*analysis.SectorLeaderResult, error) {
+	return nil, nil
+}
 func (s *stubAnalysisApplicationService) ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error) {
 	return nil, nil
 }

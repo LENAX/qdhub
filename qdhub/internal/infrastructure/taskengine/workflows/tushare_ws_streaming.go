@@ -51,6 +51,7 @@ func (b *TushareWSStreamingBuilder) Build() (*workflow.Workflow, error) {
 		return nil, fmt.Errorf("tushare ws streaming: collector and collectorName are required")
 	}
 
+	// ForwardTickCollector / TushareWSTickCollector 均在 Run 内自持断线重连；此处显式声明引擎侧重连策略（0=无限次）。
 	collectorTask, err := builder.NewRealtimeTaskBuilder("tushare_ws_collector", "tushare WS 实时采集", b.registry).
 		WithContinuousMode().
 		WithTaskType(taskrealtime.TaskTypeDataCollector).
@@ -58,6 +59,7 @@ func (b *TushareWSStreamingBuilder) Build() (*workflow.Workflow, error) {
 		WithMode(taskrealtime.CollectorModePush).
 		WithEndpoint("wss://ws.tushare.pro/listening", "ws").
 		WithJobFunction("RealtimeDataCollector", map[string]interface{}{}).
+		WithReconnect(true, 0).
 		Build()
 	if err != nil {
 		return nil, fmt.Errorf("build collector task: %w", err)

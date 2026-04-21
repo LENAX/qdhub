@@ -27,6 +27,7 @@ import (
 
 	"qdhub/internal/application/impl"
 	"qdhub/internal/domain/auth"
+	"qdhub/internal/domain/shared"
 	"qdhub/internal/domain/sync"
 	authinfra "qdhub/internal/infrastructure/auth"
 	"qdhub/internal/infrastructure/persistence"
@@ -97,6 +98,7 @@ type E2ETestContext struct {
 	Server            *httphandler.Server
 	HTTPClient        *http.Client
 	BaseURL           string
+	AuthToken         string
 	TaskEngineAdapter *e2eTaskEngineAdapter
 	JobScheduler      *e2eJobScheduler
 	cleanup           func()
@@ -137,6 +139,34 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 		t.Fatalf("执行迁移失败: %v", err)
 	}
 
+	// 执行 Auth 迁移脚本（casbin_rule/users/user_roles）
+	authMigrationSQL, err := os.ReadFile("../../migrations/002_auth_schema.sqlite.up.sql")
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("读取 Auth 迁移文件失败: %v", err)
+	}
+	_, err = db.Exec(string(authMigrationSQL))
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("执行 Auth 迁移失败: %v", err)
+	}
+
+	// 执行 DataSource 扩展迁移脚本（common_data_apis）
+	dataSourceExtMigrationSQL, err := os.ReadFile("../../migrations/011_data_source_common_data_apis.up.sql")
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("读取 DataSource 扩展迁移文件失败: %v", err)
+	}
+	_, err = db.Exec(string(dataSourceExtMigrationSQL))
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("执行 DataSource 扩展迁移失败: %v", err)
+	}
+
 	// 创建 repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
@@ -170,6 +200,9 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 	require.NoError(t, err)
 	err = authinfra.InitializeDefaultPolicies(enforcer)
 	require.NoError(t, err)
+	authToken, err := jwtManager.GenerateAccessToken(shared.NewID(), "e2e-admin", []string{"admin"})
+	require.NoError(t, err)
+	ctx.AuthToken = authToken
 	authSvc := impl.NewAuthApplicationService(userRepo, userRepo, passwordHasher, jwtManager)
 
 	if cfg.Mode == "mock" {
@@ -180,7 +213,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			Port: 0,
 			Mode: gin.TestMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = "" // Mock 模式不需要 BaseURL
@@ -204,7 +237,7 @@ func setupE2EFullTestContext(t *testing.T) *E2ETestContext {
 			WriteTimeout: 30 * time.Second,
 			Mode:         gin.DebugMode,
 		}
-		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
+		server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
 		ctx.Server = server
 		ctx.Router = server.Engine()
 		ctx.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
@@ -277,6 +310,9 @@ func (ctx *E2ETestContext) doRequest(method, path string, body interface{}) (*ht
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if ctx.AuthToken != "" && strings.HasPrefix(path, "/api/v1/") && !strings.HasPrefix(path, "/api/v1/auth/") {
+			req.Header.Set("Authorization", "Bearer "+ctx.AuthToken)
+		}
 		w := httptest.NewRecorder()
 		ctx.Router.ServeHTTP(w, req)
 		// ResponseRecorder.Result() 返回 *http.Response
@@ -289,6 +325,9 @@ func (ctx *E2ETestContext) doRequest(method, path string, body interface{}) (*ht
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if ctx.AuthToken != "" && strings.HasPrefix(path, "/api/v1/") && !strings.HasPrefix(path, "/api/v1/auth/") {
+			req.Header.Set("Authorization", "Bearer "+ctx.AuthToken)
+		}
 		return ctx.HTTPClient.Do(req)
 	}
 }

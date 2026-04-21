@@ -1,5 +1,9 @@
-basePath: /api/v1
 definitions:
+  contracts.CreateMetricRequest:
+    properties:
+      metric:
+        $ref: '#/definitions/metrics.MetricDef'
+    type: object
   contracts.LoginRequest:
     properties:
       password:
@@ -26,6 +30,25 @@ definitions:
     - password
     - username
     type: object
+  contracts.SubmitMetricJobRequest:
+    properties:
+      end_time:
+        type: string
+      job_type:
+        $ref: '#/definitions/metrics.ComputeJobType'
+      priority:
+        type: integer
+      range_type:
+        $ref: '#/definitions/metrics.ComputeRangeType'
+      start_time:
+        type: string
+      target_ids:
+        items:
+          type: string
+        type: array
+      trigger_reason:
+        type: string
+    type: object
   contracts.UpdatePasswordRequest:
     properties:
       new_password:
@@ -47,6 +70,15 @@ definitions:
         type: array
       description:
         type: string
+      fixed_param_keys:
+        description: keys that cannot be overridden
+        items:
+          type: string
+        type: array
+      fixed_params:
+        additionalProperties: true
+        description: JSON object
+        type: object
       preferred_param:
         description: none/trade_date/ts_code
         type: string
@@ -109,6 +141,24 @@ definitions:
       incremental_start_date_column:
         type: string
       name:
+        type: string
+      plan_mode:
+        description: 'PlanMode: "batch"（默认）或 "realtime"'
+        type: string
+      pull_interval_seconds:
+        description: Pull 间隔（秒），0=默认 60
+        type: integer
+      schedule_end_cron:
+        description: 运行时段：停止 cron
+        type: string
+      schedule_pause_end_cron:
+        description: 午休暂停结束 cron，如 13:00
+        type: string
+      schedule_pause_start_cron:
+        description: 午休暂停开始 cron，如 11:30
+        type: string
+      schedule_start_cron:
+        description: 运行时段：启动 cron（仅 realtime）
         type: string
       selected_apis:
         items:
@@ -209,6 +259,13 @@ definitions:
         type: array
       description:
         type: string
+      fixed_param_keys:
+        items:
+          type: string
+        type: array
+      fixed_params:
+        additionalProperties: true
+        type: object
       preferred_param:
         type: string
       required_params:
@@ -257,10 +314,143 @@ definitions:
         type: string
       name:
         type: string
+      plan_mode:
+        description: 'PlanMode: "batch" 或 "realtime"'
+        type: string
+      pull_interval_seconds:
+        type: integer
+      schedule_end_cron:
+        type: string
+      schedule_pause_end_cron:
+        type: string
+      schedule_pause_start_cron:
+        type: string
+      schedule_start_cron:
+        type: string
       selected_apis:
         items:
           type: string
         type: array
+    type: object
+  metrics.ComputeJobType:
+    enum:
+    - factor_recalculate
+    - signal_recalculate
+    - universe_materialize
+    type: string
+    x-enum-varnames:
+    - ComputeJobTypeFactorRecalculate
+    - ComputeJobTypeSignalRecalculate
+    - ComputeJobTypeUniverseMaterial
+  metrics.ComputeRangeType:
+    enum:
+    - incremental
+    - date_range
+    - full_rebuild
+    type: string
+    x-enum-varnames:
+    - ComputeRangeIncremental
+    - ComputeRangeDateRange
+    - ComputeRangeFullRebuild
+  metrics.FactorDirection:
+    enum:
+    - higher_better
+    - lower_better
+    type: string
+    x-enum-varnames:
+    - FactorDirectionHigherBetter
+    - FactorDirectionLowerBetter
+  metrics.FactorSpec:
+    properties:
+      direction:
+        $ref: '#/definitions/metrics.FactorDirection'
+    type: object
+  metrics.Frequency:
+    enum:
+    - 1d
+    type: string
+    x-enum-varnames:
+    - FrequencyDaily
+  metrics.MetricDef:
+    properties:
+      category:
+        type: string
+      created_at:
+        type: string
+      depends_on:
+        items:
+          type: string
+        type: array
+      display_name_cn:
+        type: string
+      expression:
+        type: string
+      factor_spec:
+        $ref: '#/definitions/metrics.FactorSpec'
+      frequency:
+        $ref: '#/definitions/metrics.Frequency'
+      kind:
+        $ref: '#/definitions/metrics.MetricKind'
+      metric_id:
+        type: string
+      signal_spec:
+        $ref: '#/definitions/metrics.SignalSpec'
+      source_resolution:
+        type: string
+      status:
+        $ref: '#/definitions/metrics.MetricStatus'
+      universe_spec:
+        $ref: '#/definitions/metrics.UniverseSpec'
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  metrics.MetricKind:
+    enum:
+    - factor
+    - signal
+    - universe
+    type: string
+    x-enum-varnames:
+    - MetricKindFactor
+    - MetricKindSignal
+    - MetricKindUniverse
+  metrics.MetricStatus:
+    enum:
+    - draft
+    - active
+    - paused
+    - deprecated
+    - archived
+    type: string
+    x-enum-varnames:
+    - MetricStatusDraft
+    - MetricStatusActive
+    - MetricStatusPaused
+    - MetricStatusDeprecated
+    - MetricStatusArchived
+  metrics.SignalOutputKind:
+    enum:
+    - bool
+    - enum_string
+    type: string
+    x-enum-varnames:
+    - SignalOutputBool
+    - SignalOutputEnum
+  metrics.SignalSpec:
+    properties:
+      output_kind:
+        $ref: '#/definitions/metrics.SignalOutputKind'
+    type: object
+  metrics.UniverseSpec:
+    properties:
+      exclude_delisted:
+        type: boolean
+      exclude_st:
+        type: boolean
+      exclude_suspended:
+        type: boolean
     type: object
   sync.ExecuteParams:
     properties:
@@ -275,20 +465,8 @@ definitions:
       target_db_path:
         type: string
     type: object
-host: localhost:8080
 info:
-  contact:
-    email: support@qdhub.example.com
-    name: QDHub Support
-    url: https://github.com/qdhub/qdhub
-  description: |-
-    QDHub - Quantitative Data Hub Management System API
-    Provides metadata management, automatic table creation, data synchronization, and workflow orchestration.
-  license:
-    name: MIT
-    url: https://opensource.org/licenses/MIT
-  title: QDHub API
-  version: "1.0"
+  contact: {}
 paths:
   /analysis/concept-heat:
     get:
@@ -866,16 +1044,168 @@ paths:
       summary: Get limit up list
       tags:
       - Analysis
+  /analysis/market-sentiment:
+    get:
+      consumes:
+      - application/json
+      description: 三层情绪（接力/趋势/四象限）加权合成，返回分位分、等级、明细
+      parameters:
+      - description: 交易日期 YYYYMMDD，空则最新
+        in: query
+        name: trade_date
+        type: string
+      - default: balanced
+        description: '权重口径: relay|balanced|trend'
+        in: query
+        name: style
+        type: string
+      - default: 120
+        description: 分位数窗口（交易日）
+        in: query
+        name: window
+        type: integer
+      - default: ths
+        description: '热股数据源: ths|eastmoney|kpl'
+        in: query
+        name: hot_src
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: 当日市场情绪
+      tags:
+      - Analysis
+  /analysis/market-sentiment/extremes:
+    get:
+      consumes:
+      - application/json
+      description: 统计近期冰点/沸点出现次数及出现后反转概率
+      parameters:
+      - description: 截止日 YYYYMMDD，空则最新
+        in: query
+        name: end_date
+        type: string
+      - default: balanced
+        description: 权重口径
+        in: query
+        name: style
+        type: string
+      - default: 120
+        description: 分位数窗口
+        in: query
+        name: window
+        type: integer
+      - default: 0.15
+        description: 冰点阈值 [0,1]
+        format: float64
+        in: query
+        name: freezing_threshold
+        type: number
+      - default: 0.85
+        description: 沸点阈值 [0,1]
+        format: float64
+        in: query
+        name: boiling_threshold
+        type: number
+      - default: ths
+        description: 热股数据源
+        in: query
+        name: hot_src
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: 冰点/沸点极值统计
+      tags:
+      - Analysis
+  /analysis/market-sentiment/history:
+    get:
+      consumes:
+      - application/json
+      description: 返回指定日期范围内每日情绪分位分、等级
+      parameters:
+      - description: 开始日期 YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: 结束日期 YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: balanced
+        description: '权重口径: relay|balanced|trend'
+        in: query
+        name: style
+        type: string
+      - default: 120
+        description: 分位数窗口
+        in: query
+        name: window
+        type: integer
+      - default: ths
+        description: 热股数据源
+        in: query
+        name: hot_src
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: 情绪历史时序
+      tags:
+      - Analysis
   /analysis/money-flow:
     get:
       consumes:
       - application/json
-      description: Get main/net money flow for a trade date
+      description: Get main/net money flow by date, date range, or stock code
       parameters:
-      - description: Trade date YYYYMMDD
+      - description: Trade date YYYYMMDD (single day)
         in: query
         name: trade_date
-        required: true
+        type: string
+      - description: Start date YYYYMMDD (range query, use with end_date)
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD (range query, use with start_date)
+        in: query
+        name: end_date
         type: string
       - description: Stock code
         in: query
@@ -967,15 +1297,68 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get stock popularity rank by volume or other metric
+      description: src=ths(同花顺)|eastmoney(东方财富)|kpl(开盘啦)，非法值返回 400；trade_date 空则取最新
       parameters:
-      - default: volume
-        description: Rank type (e.g. volume)
+      - default: ths
+        description: '数据源: ths|eastmoney|kpl'
         in: query
-        name: rank_type
+        name: src
+        type: string
+      - description: 交易日期 YYYYMMDD
+        in: query
+        name: trade_date
+        type: string
+      - default: 50
+        description: 返回条数
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: 人气榜（多源统一入口）
+      tags:
+      - Analysis
+  /analysis/sector-leaders:
+    get:
+      consumes:
+      - application/json
+      description: 返回指定时间段内领涨和领跌板块（含龙头股）
+      parameters:
+      - description: 开始日期，空则近5个交易日
+        in: query
+        name: start_date
+        type: string
+      - description: 结束日期，空则最新
+        in: query
+        name: end_date
+        type: string
+      - default: ths
+        description: '概念指数来源: ths|eastmoney'
+        in: query
+        name: concept_index_src
         type: string
       - default: 20
-        description: Limit
+        description: 每方向前N名
         in: query
         name: limit
         type: integer
@@ -992,7 +1375,7 @@ paths:
             $ref: '#/definitions/http.Response'
       security:
       - BearerAuth: []
-      summary: Get popularity rank
+      summary: 领涨/领跌板块统计
       tags:
       - Analysis
   /analysis/sector-limit-up-stats:
@@ -2338,7 +2721,8 @@ paths:
   /datastores/{id}/tables/{tableName}/data:
     get:
       description: 'Returns a page of rows from a table and total count. Query: page,
-        page_size, q (search), search_column (optional)'
+        page_size, q (search), search_column (optional), order_by (column), order
+        (asc|desc)'
       parameters:
       - description: Data store ID
         in: path
@@ -2367,6 +2751,15 @@ paths:
       - description: Column to search in (omit for all)
         in: query
         name: search_column
+        type: string
+      - description: Column name for ORDER BY
+        in: query
+        name: order_by
+        type: string
+      - default: asc
+        description: 'Sort direction: asc or desc'
+        in: query
+        name: order
         type: string
       produces:
       - application/json
@@ -2764,6 +3157,314 @@ paths:
       summary: Get task instances
       tags:
       - Workflows
+  /metrics:
+    get:
+      consumes:
+      - application/json
+      description: List registered metrics with optional kind/status/category/query
+        filters
+      parameters:
+      - description: 'Metric kind: factor/signal/universe'
+        in: query
+        name: kind
+        type: string
+      - description: Metric status
+        in: query
+        name: status
+        type: string
+      - description: Metric category
+        in: query
+        name: category
+        type: string
+      - description: Query by metric_id/display_name_cn
+        in: query
+        name: query
+        type: string
+      - default: 1d
+        description: Frequency
+        in: query
+        name: frequency
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: List metric definitions
+      tags:
+      - Metrics
+  /metrics/{metric_id}:
+    get:
+      consumes:
+      - application/json
+      description: Get one metric definition by metric_id
+      parameters:
+      - description: Metric ID
+        in: path
+        name: metric_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get metric detail
+      tags:
+      - Metrics
+  /metrics/definitions:
+    post:
+      consumes:
+      - application/json
+      description: Register a factor, signal or universe metric definition
+      parameters:
+      - description: Metric definition
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.CreateMetricRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Create metric definition
+      tags:
+      - Metrics
+  /metrics/factor-panel:
+    get:
+      consumes:
+      - application/json
+      description: Read factor values by metric_ids/date range and optional universe
+        filter
+      parameters:
+      - description: Comma separated metric IDs
+        in: query
+        name: metric_ids
+        required: true
+        type: string
+      - description: Universe ID
+        in: query
+        name: universe_id
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: 1d
+        description: Frequency
+        in: query
+        name: frequency
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get factor panel
+      tags:
+      - Metrics
+  /metrics/jobs:
+    post:
+      consumes:
+      - application/json
+      description: Submit an asynchronous factor/signal/universe materialization job
+      parameters:
+      - description: Job request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/contracts.SubmitMetricJobRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Submit metric compute job
+      tags:
+      - Metrics
+  /metrics/jobs/{job_id}:
+    get:
+      consumes:
+      - application/json
+      description: Query async metric compute job status by job_id
+      parameters:
+      - description: Job ID
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get metric job status
+      tags:
+      - Metrics
+  /metrics/signal-series:
+    get:
+      consumes:
+      - application/json
+      description: Read signal results by metric_ids/date range and optional entity_ids
+        filter
+      parameters:
+      - description: Comma separated metric IDs
+        in: query
+        name: metric_ids
+        required: true
+        type: string
+      - description: Comma separated entity IDs
+        in: query
+        name: entity_ids
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        required: true
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        required: true
+        type: string
+      - default: 1d
+        description: Frequency
+        in: query
+        name: frequency
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get signal series
+      tags:
+      - Metrics
+  /metrics/universe-members:
+    get:
+      consumes:
+      - application/json
+      description: Read universe membership by universe_id and trade_date/date range
+      parameters:
+      - description: Universe ID
+        in: query
+        name: universe_id
+        required: true
+        type: string
+      - description: Trade date YYYYMMDD
+        in: query
+        name: trade_date
+        type: string
+      - description: Start date YYYYMMDD
+        in: query
+        name: start_date
+        type: string
+      - description: End date YYYYMMDD
+        in: query
+        name: end_date
+        type: string
+      - default: 1d
+        description: Frequency
+        in: query
+        name: frequency
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/http.Response'
+      security:
+      - BearerAuth: []
+      summary: Get universe members
+      tags:
+      - Metrics
   /sync-plans:
     get:
       consumes:
@@ -3247,15 +3948,4 @@ paths:
       summary: Handle execution callback
       tags:
       - SyncPlans
-securityDefinitions:
-  ApiKeyAuth:
-    description: API Key for authentication
-    in: header
-    name: Authorization
-    type: apiKey
-  BearerAuth:
-    description: JWT Bearer token (e.g. "Bearer <access_token>")
-    in: header
-    name: Authorization
-    type: apiKey
 swagger: "2.0"

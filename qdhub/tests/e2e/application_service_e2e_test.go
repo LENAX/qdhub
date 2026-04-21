@@ -428,6 +428,18 @@ func setupTestDB(t *testing.T) (*persistence.DB, func()) {
 	_, err = db.Exec(string(migrationSQL))
 	require.NoError(t, err)
 
+	// 执行 Auth 迁移脚本（casbin_rule/users/user_roles）
+	authMigrationSQL, err := os.ReadFile("../../migrations/002_auth_schema.sqlite.up.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(authMigrationSQL))
+	require.NoError(t, err)
+
+	// 执行 DataSource 扩展迁移脚本（common_data_apis）
+	dataSourceExtMigrationSQL, err := os.ReadFile("../../migrations/011_data_source_common_data_apis.up.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(dataSourceExtMigrationSQL))
+	require.NoError(t, err)
+
 	// 执行 SyncPlan 迁移脚本
 	syncPlanMigrationSQL, err := os.ReadFile("../../migrations/003_sync_plan_migration.up.sql")
 	require.NoError(t, err)
