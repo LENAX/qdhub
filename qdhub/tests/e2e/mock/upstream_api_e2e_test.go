@@ -474,6 +474,9 @@ func TestE2E_UpstreamResultPassing_ParallelSubTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建 Engine 失败: %v", err)
 	}
+	// V3：子任务失败路径未触发模板完成与结果聚合，下游依赖任务不会调度。
+	// 本场景需要「部分子任务失败后仍聚合」，与 V2 行为一致。
+	eng.SetInstanceManagerVersion(engine.InstanceManagerV2)
 
 	ctx := context.Background()
 	if err := eng.Start(ctx); err != nil {

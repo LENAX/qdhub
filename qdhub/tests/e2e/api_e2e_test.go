@@ -278,6 +278,34 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 		t.Fatalf("Failed to execute migration: %v", err)
 	}
 
+	// Execute auth migration (casbin_rule/users/user_roles)
+	authMigrationSQL, err := os.ReadFile("../../migrations/002_auth_schema.sqlite.up.sql")
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("Failed to read auth migration file: %v", err)
+	}
+	_, err = db.Exec(string(authMigrationSQL))
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("Failed to execute auth migration: %v", err)
+	}
+
+	// Execute data source extension migration (common_data_apis)
+	dataSourceExtMigrationSQL, err := os.ReadFile("../../migrations/011_data_source_common_data_apis.up.sql")
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("Failed to read data source extension migration file: %v", err)
+	}
+	_, err = db.Exec(string(dataSourceExtMigrationSQL))
+	if err != nil {
+		db.Close()
+		os.Remove(dsn)
+		t.Fatalf("Failed to execute data source extension migration: %v", err)
+	}
+
 	// Create repositories
 	dataSourceRepo := repository.NewDataSourceRepository(db)
 	dsRepo := repository.NewQuantDataStoreRepository(db)
@@ -319,7 +347,7 @@ func setupE2ETestContext(t *testing.T) (*e2eTestContext, func()) {
 		Port: 0,
 		Mode: gin.TestMode,
 	}
-	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
+	server := httphandler.NewServer(config, authSvc, metadataSvc, dataStoreSvc, nil, syncSvc, workflowSvc, nil, nil, nil, nil, nil, nil, jwtManager, enforcer, "")
 
 	cleanup := func() {
 		db.Close()

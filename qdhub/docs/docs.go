@@ -9,15 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {
-            "name": "QDHub Support",
-            "url": "https://github.com/qdhub/qdhub",
-            "email": "support@qdhub.example.com"
-        },
-        "license": {
-            "name": "MIT",
-            "url": "https://opensource.org/licenses/MIT"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -919,6 +911,225 @@ const docTemplate = `{
                 }
             }
         },
+        "/analysis/market-sentiment": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "三层情绪（接力/趋势/四象限）加权合成，返回分位分、等级、明细",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "当日市场情绪",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "交易日期 YYYYMMDD，空则最新",
+                        "name": "trade_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "balanced",
+                        "description": "权重口径: relay|balanced|trend",
+                        "name": "style",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 120,
+                        "description": "分位数窗口（交易日）",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "ths",
+                        "description": "热股数据源: ths|eastmoney|kpl",
+                        "name": "hot_src",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/market-sentiment/extremes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "统计近期冰点/沸点出现次数及出现后反转概率",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "冰点/沸点极值统计",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "截止日 YYYYMMDD，空则最新",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "balanced",
+                        "description": "权重口径",
+                        "name": "style",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 120,
+                        "description": "分位数窗口",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "format": "float64",
+                        "default": 0.15,
+                        "description": "冰点阈值 [0,1]",
+                        "name": "freezing_threshold",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "format": "float64",
+                        "default": 0.85,
+                        "description": "沸点阈值 [0,1]",
+                        "name": "boiling_threshold",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "ths",
+                        "description": "热股数据源",
+                        "name": "hot_src",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/market-sentiment/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回指定日期范围内每日情绪分位分、等级",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "情绪历史时序",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "开始日期 YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束日期 YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "balanced",
+                        "description": "权重口径: relay|balanced|trend",
+                        "name": "style",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 120,
+                        "description": "分位数窗口",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "ths",
+                        "description": "热股数据源",
+                        "name": "hot_src",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/analysis/money-flow": {
             "get": {
                 "security": [
@@ -926,7 +1137,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get main/net money flow for a trade date",
+                "description": "Get main/net money flow by date, date range, or stock code",
                 "consumes": [
                     "application/json"
                 ],
@@ -940,10 +1151,21 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Trade date YYYYMMDD",
+                        "description": "Trade date YYYYMMDD (single day)",
                         "name": "trade_date",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD (range query, use with end_date)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD (range query, use with start_date)",
+                        "name": "end_date",
+                        "in": "query"
                     },
                     {
                         "type": "string",
@@ -1075,7 +1297,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get stock popularity rank by volume or other metric",
+                "description": "src=ths(同花顺)|eastmoney(东方财富)|kpl(开盘啦)，非法值返回 400；trade_date 空则取最新",
                 "consumes": [
                     "application/json"
                 ],
@@ -1085,19 +1307,100 @@ const docTemplate = `{
                 "tags": [
                     "Analysis"
                 ],
-                "summary": "Get popularity rank",
+                "summary": "人气榜（多源统一入口）",
                 "parameters": [
                     {
                         "type": "string",
-                        "default": "volume",
-                        "description": "Rank type (e.g. volume)",
-                        "name": "rank_type",
+                        "default": "ths",
+                        "description": "数据源: ths|eastmoney|kpl",
+                        "name": "src",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "交易日期 YYYYMMDD",
+                        "name": "trade_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "返回条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/analysis/sector-leaders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回指定时间段内领涨和领跌板块（含龙头股）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Analysis"
+                ],
+                "summary": "领涨/领跌板块统计",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "开始日期，空则近5个交易日",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束日期，空则最新",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "ths",
+                        "description": "概念指数来源: ths|eastmoney",
+                        "name": "concept_index_src",
                         "in": "query"
                     },
                     {
                         "type": "integer",
                         "default": 20,
-                        "description": "Limit",
+                        "description": "每方向前N名",
                         "name": "limit",
                         "in": "query"
                     }
@@ -3192,7 +3495,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional)",
+                "description": "Returns a page of rows from a table and total count. Query: page, page_size, q (search), search_column (optional), order_by (column), order (asc|desc)",
                 "produces": [
                     "application/json"
                 ],
@@ -3239,6 +3542,19 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Column to search in (omit for all)",
                         "name": "search_column",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Column name for ORDER BY",
+                        "name": "order_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "asc",
+                        "description": "Sort direction: asc or desc",
+                        "name": "order",
                         "in": "query"
                     }
                 ],
@@ -3829,6 +4145,481 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Workflow instance ID",
                         "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List registered metrics with optional kind/status/category/query filters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "List metric definitions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Metric kind: factor/signal/universe",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Metric status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Metric category",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Query by metric_id/display_name_cn",
+                        "name": "query",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "1d",
+                        "description": "Frequency",
+                        "name": "frequency",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/definitions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Register a factor, signal or universe metric definition",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Create metric definition",
+                "parameters": [
+                    {
+                        "description": "Metric definition",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/contracts.CreateMetricRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/factor-panel": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Read factor values by metric_ids/date range and optional universe filter",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Get factor panel",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma separated metric IDs",
+                        "name": "metric_ids",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Universe ID",
+                        "name": "universe_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "1d",
+                        "description": "Frequency",
+                        "name": "frequency",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/jobs": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Submit an asynchronous factor/signal/universe materialization job",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Submit metric compute job",
+                "parameters": [
+                    {
+                        "description": "Job request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/contracts.SubmitMetricJobRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/jobs/{job_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Query async metric compute job status by job_id",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Get metric job status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/signal-series": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Read signal results by metric_ids/date range and optional entity_ids filter",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Get signal series",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma separated metric IDs",
+                        "name": "metric_ids",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma separated entity IDs",
+                        "name": "entity_ids",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "1d",
+                        "description": "Frequency",
+                        "name": "frequency",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/universe-members": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Read universe membership by universe_id and trade_date/date range",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Get universe members",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Universe ID",
+                        "name": "universe_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trade date YYYYMMDD",
+                        "name": "trade_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date YYYYMMDD",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date YYYYMMDD",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "1d",
+                        "description": "Frequency",
+                        "name": "frequency",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/http.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/{metric_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get one metric definition by metric_id",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Metrics"
+                ],
+                "summary": "Get metric detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Metric ID",
+                        "name": "metric_id",
                         "in": "path",
                         "required": true
                     }
@@ -4609,6 +5400,14 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "contracts.CreateMetricRequest": {
+            "type": "object",
+            "properties": {
+                "metric": {
+                    "$ref": "#/definitions/metrics.MetricDef"
+                }
+            }
+        },
         "contracts.LoginRequest": {
             "type": "object",
             "required": [
@@ -4646,6 +5445,35 @@ const docTemplate = `{
                 }
             }
         },
+        "contracts.SubmitMetricJobRequest": {
+            "type": "object",
+            "properties": {
+                "end_time": {
+                    "type": "string"
+                },
+                "job_type": {
+                    "$ref": "#/definitions/metrics.ComputeJobType"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "range_type": {
+                    "$ref": "#/definitions/metrics.ComputeRangeType"
+                },
+                "start_time": {
+                    "type": "string"
+                },
+                "target_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "trigger_reason": {
+                    "type": "string"
+                }
+            }
+        },
         "contracts.UpdatePasswordRequest": {
             "type": "object",
             "required": [
@@ -4680,6 +5508,18 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "fixed_param_keys": {
+                    "description": "keys that cannot be overridden",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "fixed_params": {
+                    "description": "JSON object",
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "preferred_param": {
                     "description": "none/trade_date/ts_code",
@@ -4774,6 +5614,30 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "plan_mode": {
+                    "description": "PlanMode: \"batch\"（默认）或 \"realtime\"",
+                    "type": "string"
+                },
+                "pull_interval_seconds": {
+                    "description": "Pull 间隔（秒），0=默认 60",
+                    "type": "integer"
+                },
+                "schedule_end_cron": {
+                    "description": "运行时段：停止 cron",
+                    "type": "string"
+                },
+                "schedule_pause_end_cron": {
+                    "description": "午休暂停结束 cron，如 13:00",
+                    "type": "string"
+                },
+                "schedule_pause_start_cron": {
+                    "description": "午休暂停开始 cron，如 11:30",
+                    "type": "string"
+                },
+                "schedule_start_cron": {
+                    "description": "运行时段：启动 cron（仅 realtime）",
                     "type": "string"
                 },
                 "selected_apis": {
@@ -4919,6 +5783,16 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "fixed_param_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "fixed_params": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
                 "preferred_param": {
                     "type": "string"
                 },
@@ -4992,11 +5866,200 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "plan_mode": {
+                    "description": "PlanMode: \"batch\" 或 \"realtime\"",
+                    "type": "string"
+                },
+                "pull_interval_seconds": {
+                    "type": "integer"
+                },
+                "schedule_end_cron": {
+                    "type": "string"
+                },
+                "schedule_pause_end_cron": {
+                    "type": "string"
+                },
+                "schedule_pause_start_cron": {
+                    "type": "string"
+                },
+                "schedule_start_cron": {
+                    "type": "string"
+                },
                 "selected_apis": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "metrics.ComputeJobType": {
+            "type": "string",
+            "enum": [
+                "factor_recalculate",
+                "signal_recalculate",
+                "universe_materialize"
+            ],
+            "x-enum-varnames": [
+                "ComputeJobTypeFactorRecalculate",
+                "ComputeJobTypeSignalRecalculate",
+                "ComputeJobTypeUniverseMaterial"
+            ]
+        },
+        "metrics.ComputeRangeType": {
+            "type": "string",
+            "enum": [
+                "incremental",
+                "date_range",
+                "full_rebuild"
+            ],
+            "x-enum-varnames": [
+                "ComputeRangeIncremental",
+                "ComputeRangeDateRange",
+                "ComputeRangeFullRebuild"
+            ]
+        },
+        "metrics.FactorDirection": {
+            "type": "string",
+            "enum": [
+                "higher_better",
+                "lower_better"
+            ],
+            "x-enum-varnames": [
+                "FactorDirectionHigherBetter",
+                "FactorDirectionLowerBetter"
+            ]
+        },
+        "metrics.FactorSpec": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "$ref": "#/definitions/metrics.FactorDirection"
+                }
+            }
+        },
+        "metrics.Frequency": {
+            "type": "string",
+            "enum": [
+                "1d"
+            ],
+            "x-enum-varnames": [
+                "FrequencyDaily"
+            ]
+        },
+        "metrics.MetricDef": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "display_name_cn": {
+                    "type": "string"
+                },
+                "expression": {
+                    "type": "string"
+                },
+                "factor_spec": {
+                    "$ref": "#/definitions/metrics.FactorSpec"
+                },
+                "frequency": {
+                    "$ref": "#/definitions/metrics.Frequency"
+                },
+                "kind": {
+                    "$ref": "#/definitions/metrics.MetricKind"
+                },
+                "metric_id": {
+                    "type": "string"
+                },
+                "signal_spec": {
+                    "$ref": "#/definitions/metrics.SignalSpec"
+                },
+                "source_resolution": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/metrics.MetricStatus"
+                },
+                "universe_spec": {
+                    "$ref": "#/definitions/metrics.UniverseSpec"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "metrics.MetricKind": {
+            "type": "string",
+            "enum": [
+                "factor",
+                "signal",
+                "universe"
+            ],
+            "x-enum-varnames": [
+                "MetricKindFactor",
+                "MetricKindSignal",
+                "MetricKindUniverse"
+            ]
+        },
+        "metrics.MetricStatus": {
+            "type": "string",
+            "enum": [
+                "draft",
+                "active",
+                "paused",
+                "deprecated",
+                "archived"
+            ],
+            "x-enum-varnames": [
+                "MetricStatusDraft",
+                "MetricStatusActive",
+                "MetricStatusPaused",
+                "MetricStatusDeprecated",
+                "MetricStatusArchived"
+            ]
+        },
+        "metrics.SignalOutputKind": {
+            "type": "string",
+            "enum": [
+                "bool",
+                "enum_string"
+            ],
+            "x-enum-varnames": [
+                "SignalOutputBool",
+                "SignalOutputEnum"
+            ]
+        },
+        "metrics.SignalSpec": {
+            "type": "object",
+            "properties": {
+                "output_kind": {
+                    "$ref": "#/definitions/metrics.SignalOutputKind"
+                }
+            }
+        },
+        "metrics.UniverseSpec": {
+            "type": "object",
+            "properties": {
+                "exclude_delisted": {
+                    "type": "boolean"
+                },
+                "exclude_st": {
+                    "type": "boolean"
+                },
+                "exclude_suspended": {
+                    "type": "boolean"
                 }
             }
         },
@@ -5020,31 +6083,17 @@ const docTemplate = `{
                 }
             }
         }
-    },
-    "securityDefinitions": {
-        "ApiKeyAuth": {
-            "description": "API Key for authentication",
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
-        },
-        "BearerAuth": {
-            "description": "JWT Bearer token (e.g. \"Bearer \u003caccess_token\u003e\")",
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header"
-        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
-	Host:             "localhost:8080",
-	BasePath:         "/api/v1",
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "QDHub API",
-	Description:      "QDHub - Quantitative Data Hub Management System API\nProvides metadata management, automatic table creation, data synchronization, and workflow orchestration.",
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

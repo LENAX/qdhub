@@ -77,6 +77,8 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"datastores", "delete"},
 		{"analysis", "read"},
 		{"analysis", "write"},
+		{"metrics", "read"},
+		{"metrics", "write"},
 		{"workflows", "read"},
 		{"workflows", "write"},
 		{"workflows", "delete"},
@@ -107,6 +109,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"sync-plans", "execute"},
 		{"datastores", "read"},
 		{"analysis", "read"},
+		{"metrics", "read"},
 		{"workflows", "read"},
 		{"workflows", "execute"},
 		{"instances", "read"},
@@ -128,6 +131,7 @@ func InitializeDefaultPolicies(enforcer *casbin.Enforcer) error {
 		{"sync-plans", "read"},
 		{"datastores", "read"},
 		{"analysis", "read"},
+		{"metrics", "read"},
 		{"workflows", "read"},
 		{"instances", "read"},
 		{"watchlist", "read"},
@@ -273,6 +277,32 @@ func EnsureRealtimeSourcesPolicies(enforcer *casbin.Enforcer) error {
 		if !ok {
 			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
 				return fmt.Errorf("add realtime-sources policy %s %s %s: %w", p.role, p.resource, p.action, err)
+			}
+		}
+	}
+	return enforcer.SavePolicy()
+}
+
+// EnsureMetricsPolicies adds metrics resource policies if missing.
+func EnsureMetricsPolicies(enforcer *casbin.Enforcer) error {
+	policies := []struct {
+		role     string
+		resource string
+		action   string
+	}{
+		{"admin", "metrics", "read"},
+		{"admin", "metrics", "write"},
+		{"operator", "metrics", "read"},
+		{"viewer", "metrics", "read"},
+	}
+	for _, p := range policies {
+		ok, err := enforcer.HasPolicy(p.role, p.resource, p.action)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := enforcer.AddPolicy(p.role, p.resource, p.action); err != nil {
+				return fmt.Errorf("add metrics policy %s %s %s: %w", p.role, p.resource, p.action, err)
 			}
 		}
 	}

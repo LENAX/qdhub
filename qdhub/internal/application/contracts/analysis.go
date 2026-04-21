@@ -31,6 +31,10 @@ type AnalysisApplicationService interface {
 	ListIndexSectors(ctx context.Context, req analysis.IndexSectorListRequest) ([]analysis.IndexSectorInfo, error)
 	ListIndexSectorMembers(ctx context.Context, req analysis.IndexSectorMemberRequest) ([]analysis.IndexSectorMember, error)
 	GetPopularityRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error)
+	GetMarketSentiment(ctx context.Context, req analysis.MarketSentimentRequest) (*analysis.DailySentimentResult, error)
+	GetSentimentHistory(ctx context.Context, req analysis.SentimentHistoryRequest) (*analysis.SentimentHistoryResult, error)
+	GetSentimentExtremes(ctx context.Context, req analysis.SentimentExtremesRequest) (*analysis.SentimentExtremesResult, error)
+	GetSectorLeaders(ctx context.Context, req analysis.SectorLeaderRequest) (*analysis.SectorLeaderResult, error)
 	ListNews(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)
 	// ListNewsFromRealtime 从 realtime 数据源（realtime DuckDB news 表）拉取新闻，供 /analysis/news/stream 使用；无 realtime 时回退到 ListNews。
 	ListNewsFromRealtime(ctx context.Context, req analysis.NewsListRequest) ([]analysis.NewsItem, error)

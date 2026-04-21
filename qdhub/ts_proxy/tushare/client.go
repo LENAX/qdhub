@@ -53,9 +53,13 @@ func (c *Client) Run(ctx context.Context) error {
 	if len(c.Codes) == 0 {
 		c.Codes = DefaultCodes
 	}
+	// ReconnectMax > 0: max reconnect attempts after failures.
+	// ReconnectMax == 0: unlimited (matches -reconnect-max / TUSHARE_RECONNECT_MAX help text).
 	maxRetry := c.ReconnectMax
-	if maxRetry <= 0 {
+	unlimited := maxRetry == 0
+	if maxRetry < 0 {
 		maxRetry = DefaultReconnectMax
+		unlimited = false
 	}
 
 	backoff := time.Second
@@ -69,7 +73,7 @@ func (c *Client) Run(ctx context.Context) error {
 		c.mu.Lock()
 		count := c.reconnectCount
 		c.mu.Unlock()
-		if count >= maxRetry {
+		if !unlimited && count >= maxRetry {
 			logrus.Errorf("[tushare] reconnect max %d reached, stopping", maxRetry)
 			return fmt.Errorf("reconnect max %d reached", maxRetry)
 		}
@@ -127,12 +131,14 @@ func (c *Client) runOnce(ctx context.Context) error {
 	pingTicker := time.NewTicker(PingInterval)
 	defer pingTicker.Stop()
 
-	done := make(chan struct{})
+	readErr := make(chan error, 1)
 	go func() {
-		defer close(done)
+		var readLoopErr error
+		defer func() { readErr <- readLoopErr }()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
+				readLoopErr = err
 				return
 			}
 			if len(msg) < 2 {
@@ -158,7 +164,10 @@ func (c *Client) runOnce(ctx context.Context) error {
 		case <-ctx.Done():
 			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			return nil
-		case <-done:
+		case err := <-readErr:
+			if err != nil {
+				return fmt.Errorf("read: %w", err)
+			}
 			return fmt.Errorf("read loop exited")
 		case <-pingTicker.C:
 			if err := conn.WriteJSON(map[string]string{"action": "ping"}); err != nil {

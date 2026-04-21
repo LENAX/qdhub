@@ -498,7 +498,7 @@ func TestE2E_Analysis_PopularityRank_ListNews(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	rank, err := testCtx.analysisAppService.GetPopularityRank(ctx, analysis.PopularityRankRequest{RankType: "volume", Limit: 10})
+	rank, err := testCtx.analysisAppService.GetPopularityRank(ctx, analysis.PopularityRankRequest{Src: "ths", Limit: 10})
 	require.NoError(t, err)
 	t.Log("GetPopularityRank 结果:")
 	if len(rank) == 0 {

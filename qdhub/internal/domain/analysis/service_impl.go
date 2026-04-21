@@ -46,6 +46,8 @@ type analysisServiceImpl struct {
 	indexOHLCVReader            IndexOHLCVReader
 	indexSectorReader           IndexSectorReader
 	indexSectorMemberReader     IndexSectorMemberReader
+	sentimentRawReader          SentimentRawReader
+	sectorLeaderReader          SectorLeaderReader
 }
 
 // NewAnalysisService 构造分析领域服务，依赖各 Reader 与 CustomQueryExecutor
@@ -87,6 +89,8 @@ func NewAnalysisService(
 	indexOHLCVReader IndexOHLCVReader,
 	indexSectorReader IndexSectorReader,
 	indexSectorMemberReader IndexSectorMemberReader,
+	sentimentRawReader SentimentRawReader,
+	sectorLeaderReader SectorLeaderReader,
 ) AnalysisService {
 	return &analysisServiceImpl{
 		kLineReader:                 kLineReader,
@@ -126,6 +130,8 @@ func NewAnalysisService(
 		indexOHLCVReader:            indexOHLCVReader,
 		indexSectorReader:           indexSectorReader,
 		indexSectorMemberReader:     indexSectorMemberReader,
+		sentimentRawReader:          sentimentRawReader,
+		sectorLeaderReader:          sectorLeaderReader,
 	}
 }
 
@@ -324,10 +330,6 @@ func (s *analysisServiceImpl) ListIndexSectors(ctx context.Context, req IndexSec
 
 func (s *analysisServiceImpl) ListIndexSectorMembers(ctx context.Context, req IndexSectorMemberRequest) ([]IndexSectorMember, error) {
 	return s.indexSectorMemberReader.ListIndexSectorMembers(ctx, req)
-}
-
-func (s *analysisServiceImpl) GetPopularityRank(ctx context.Context, req PopularityRankRequest) ([]PopularityRank, error) {
-	return s.popularityRankReader.GetRank(ctx, req)
 }
 
 func (s *analysisServiceImpl) ListNews(ctx context.Context, req NewsListRequest) ([]NewsItem, error) {

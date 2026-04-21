@@ -1915,11 +1915,7 @@ ORDER BY trade_date ASC`
 	return res, nil
 }
 
-// GetRank PopularityRankReader
-func (r *Readers) GetRank(ctx context.Context, req analysis.PopularityRankRequest) ([]analysis.PopularityRank, error) {
-	// 无统一人气表时返回空
-	return nil, nil
-}
+// GetRank 已移至 popularity_readers_impl.go
 
 // ListNews NewsReader.List：支持 order=time_desc、limit、sources 过滤；表名优先 news，其次 major_news
 // 兼容 Tushare：news 表为 datetime/title/content/channels（无 id）；major_news 为 pub_time/title/content/src

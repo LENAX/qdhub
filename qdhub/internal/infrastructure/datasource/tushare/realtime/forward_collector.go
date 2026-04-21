@@ -22,12 +22,19 @@ const (
 	forwardFlushInterval = 10 * time.Second
 	forwardReadDeadline  = 90 * time.Second
 	forwardPongWrite     = 10 * time.Second
+	forwardDialTimeout   = 30 * time.Second
 	// forwardBatchInitCap 预估 10 秒内累积的 tick 量，减少 batch slice 扩容次数。
 	forwardBatchInitCap = 4096
 )
 
+var forwardDialer = &websocket.Dialer{
+	HandshakeTimeout: forwardDialTimeout,
+}
+
 // ForwardTickCollector 从 ts_proxy 转发端接收加密 tick 流（方案 B：RSA 交换 AES + AES 解密）。
 // ts_proxy 端以 JSON 数组批量推送 tick，本端兼容单条 JSON 对象（旧协议）和 JSON 数组（新协议）。
+// Run 在单连接断开后指数退避并重连。任务引擎在 executeTaskLogic 返回 nil 时会立刻再次调用 Run，
+// 因此长连接必须在 Run 内自持重连循环（见 task-engine realtime_instance_manager.runContinuousTask）。
 type ForwardTickCollector struct {
 	ForwardWSURL            string // 如 ws://host:8888/realtime
 	ForwardRSAPublicKeyPath string // 转发端 RSA 公钥路径，用于加密本端生成的 AES 密钥
@@ -61,6 +68,7 @@ func (c *ForwardTickCollector) Run(
 				return nil
 			}
 			logrus.Warnf("[ForwardTickCollector] runOnce: %v", err)
+			logrus.Infof("[ForwardTickCollector] reconnecting to forward in %s", backoff)
 		}
 		if time.Since(start) > 30*time.Second {
 			backoff = time.Second
@@ -77,11 +85,15 @@ func (c *ForwardTickCollector) Run(
 }
 
 func (c *ForwardTickCollector) runOnce(ctx context.Context, publish coreRealtime.PublishFunc) error {
-	conn, _, err := websocket.DefaultDialer.Dial(c.ForwardWSURL, nil)
+	conn, _, err := forwardDialer.DialContext(ctx, c.ForwardWSURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial forward: %w", err)
 	}
 	defer conn.Close()
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
 	conn.SetReadLimit(4 << 20)
 
 	pub, err := crypto.LoadRSAPublicKeyFromFile(c.ForwardRSAPublicKeyPath)
